@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Frontend: debug server-side",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "pnpm dev -- --inspect",
+      "cwd": "${workspaceFolder}/apps/frontend"
+    },
+    {
+      "name": "Frontend: debug client-side (Chrome)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:3000"
+    },
+    {
+      "name": "Backend: debug (NestJS)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "pnpm run start:debug",
+      "cwd": "${workspaceFolder}/apps/backend"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Debug: backend + frontend",
+      "configurations": ["Backend: debug (NestJS)", "Frontend: debug server-side"]
+    }
+  ]
+}

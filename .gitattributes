@@ -1,0 +1,13 @@
+* text=auto eol=lf
+
+*.ico binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+
+pnpm-lock.yaml linguist-generated=true -diff
+apps/frontend/pnpm-lock.yaml linguist-generated=true -diff
