@@ -56,11 +56,50 @@ export class PostgresService implements OnApplicationShutdown {
     const startedAt = Date.now();
     try {
       return await this.pool.query<T>(text, params);
+
+      // return await this.executeWithRetry(() =>
+      //   this.pool.query<T>(text, params),
+      // );
     } finally {
       const elapsed = Date.now() - startedAt;
       if (elapsed >= SLOW_QUERY_MS) {
         this.logger.warn(`Slow query (${elapsed}ms): ${text}`);
       }
+    }
+  }
+
+  /**
+   * Execute a database operation with retry logic.
+   */
+  private async executeWithRetry<T>(
+    operation: () => Promise<T>,
+    attempts = 5,
+    delayMs = 500,
+  ): Promise<T> {
+    try {
+      return await operation();
+    } catch (error: unknown) {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: unknown }).code)
+          : undefined;
+
+      // Short-circuit: Do not retry structural application bugs (Syntax, Constraints, Auth)
+      const isFatal =
+        code?.startsWith('42') ||
+        code?.startsWith('23') ||
+        code?.startsWith('28');
+
+      if (attempts <= 1 || isFatal) {
+        throw error;
+      }
+
+      this.logger.warn(
+        `Transient database error (${code || 'Network'}). Retrying in ${delayMs}ms...`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+
+      return this.executeWithRetry(operation, attempts - 1, delayMs * 2);
     }
   }
 

@@ -19,6 +19,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: always
+    networks:
+      - app-network
     mem_limit: 3g
     mem_reservation: 2g
 
@@ -40,6 +43,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: always
+    networks:
+      - app-network
     mem_limit: 512m
     mem_reservation: 256m
 
@@ -75,6 +81,9 @@ services:
       retries: 2
       # Generous: `nest start --watch` compiles before it binds.
       start_period: 40s
+    restart: always
+    networks:
+      - app-network
     mem_limit: 1g
     mem_reservation: 512m
 
@@ -104,8 +113,15 @@ services:
       timeout: 3s
       retries: 2
       start_period: 40s
+    restart: always
+    networks:
+      - app-network
     mem_limit: 1g
     mem_reservation: 512m
+
+networks:
+  app-network:
+    driver: bridge
 
 volumes:
   drills_pgdata:
