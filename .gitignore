@@ -1,4 +1,9 @@
+.env
+.env.local
+.env.*.local
 node_modules/
 .DS_Store
 .turbo/
 .claude/settings.local.json
+.pnpm-store/
+.pnpm-debug.log

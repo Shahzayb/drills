@@ -1,0 +1,87 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/compose-spec/compose-spec/master/schema/compose-spec.json
+services:
+  postgres_db:
+    image: postgres:18-alpine
+    container_name: drills_postgres
+    env_file: .env
+    environment:
+      POSTGRES_INITDB_ARGS: "-c shared_buffers=768MB"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - drills_pgdata:/var/lib/postgresql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    mem_limit: 3g
+    mem_reservation: 2g
+
+  redis_cache:
+    image: redis:8-alpine
+    container_name: drills_redis
+    env_file: .env
+    command: redis-server --requirepass ${REDIS_PASSWORD:-default_secure_pass}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - drills_redisdata:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli -a ${REDIS_PASSWORD:-default_secure_pass} ping | grep PONG",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+    mem_reservation: 256m
+
+  nest_server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: drills_backend
+    env_file: .env
+    ports:
+      - "${BACKEND_PORT:-3002}:3002"
+    volumes:
+      - ./apps/backend:/app/apps/backend
+      - ./packages:/app/packages
+      - /app/node_modules
+    command: sh -c "cd /app && pnpm --filter=backend dev"
+    depends_on:
+      postgres_db:
+        condition: service_healthy
+      redis_cache:
+        condition: service_healthy
+    mem_limit: 1g
+    mem_reservation: 512m
+
+  next_app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: drills_frontend
+    env_file: .env
+    ports:
+      - "${FRONTEND_PORT:-3001}:3001"
+    volumes:
+      - ./apps/frontend:/app/apps/frontend
+      - ./packages:/app/packages
+      - /app/node_modules
+    command: sh -c "cd /app && pnpm --filter=frontend dev"
+    depends_on:
+      - nest_server
+    mem_limit: 1g
+    mem_reservation: 512m
+
+volumes:
+  drills_pgdata:
+  drills_redisdata:

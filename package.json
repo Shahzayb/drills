@@ -4,24 +4,25 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "setup": "bash scripts/setup.sh",
     "dev": "turbo run dev",
     "dev:backend": "turbo run dev --filter=backend",
     "dev:frontend": "turbo run dev --filter=frontend",
     "build": "turbo run build",
     "lint": "turbo run lint",
-    "test": "turbo run test"
+    "test": "turbo run test",
+    "docker:up": "docker compose up -d --pull always && docker compose logs -f",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "docker:logs:backend": "docker compose logs -f nest_server",
+    "docker:logs:frontend": "docker compose logs -f next_app",
+    "docker:rebuild": "docker compose build --no-cache && docker compose up -d && docker compose logs -f",
+    "docker:clean": "docker compose down -v && docker system prune -f"
   },
+  "packageManager": "pnpm@11.15.0",
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "packageManager": "pnpm@11.15.0",
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "11.15.0",
-      "onFail": "download"
-    }
-  },
   "type": "module",
   "devDependencies": {
     "turbo": "^2.10.8"
