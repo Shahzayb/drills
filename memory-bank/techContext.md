@@ -20,12 +20,12 @@ Root scripts run both apps through Turborepo: `pnpm dev`, `pnpm build`, `pnpm li
 
 Configured in `.claude/settings.json`; scripts in `.claude/hooks/`. All advisory — none block.
 
-- **SessionStart** (`startup`/`clear`/`compact`) — injects `activeContext.md`. Silent on `resume`, where the transcript already carries it.
-- **Stop** — `record-reminder.sh`. Nudges when the tree has source changes but `memory-bank/` has none. Once per session, keyed on `session_id` via a sentinel in `$TMPDIR`.
-- **PreCompact** — reminds that `memory-bank/` is the only thing crossing the compaction boundary.
+- **SessionStart** — `session-snapshot.sh`. Injects `activeContext.md` on `startup`/`clear`/`compact` (silent on `resume`, where the transcript already carries it), and records the working tree's starting state for the Stop hook.
+- **Stop** — `record-reminder.sh`. Nudges when *this session* changed source but not `memory-bank/`, measured against the SessionStart snapshot. Rate-limited to one nudge per 5 stops.
+- **PreCompact** — emits plain text telling the summarizer what to carry through. **Its stdout becomes the summarizer's custom instructions verbatim** — it is not parsed for `hookSpecificOutput` or `systemMessage` like other events, so it must never print JSON.
 - **PostToolUse** (`Write|Edit`) — `memory-bank-cap.sh`. Reports the line count when a capped file goes over.
 
-To test a hook without a session, pipe its payload in: `echo '{"session_id":"x"}' | bash .claude/hooks/record-reminder.sh`.
+State (snapshots, cooldowns) lives in `$TMPDIR/claude-memory-bank-<uid>/`, mode 700. Shared helpers are in `.claude/hooks/mb-state.sh`. To test a hook without a session, pipe its payload in: `echo '{"session_id":"x"}' | bash .claude/hooks/record-reminder.sh`.
 
 ## Tooling config
 

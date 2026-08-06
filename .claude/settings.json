@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "case \"$(jq -r '.source // \"startup\"' 2>/dev/null)\" in startup|clear|compact) jq -n --rawfile ctx \"${CLAUDE_PROJECT_DIR:-.}/memory-bank/activeContext.md\" '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:$ctx}}' 2>/dev/null || true ;; esac",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/session-snapshot.sh\" 2>/dev/null || true",
             "statusMessage": "Loading memory bank"
           }
         ]
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -n '{hookSpecificOutput:{hookEventName:\"PreCompact\",additionalContext:\"Context is about to be compacted. memory-bank/ is the only thing that survives this boundary intact — if this session established anything a later session would have to rediscover, record it now per the memory-bank skill (verified facts written directly, judgments proposed to the user first).\"},systemMessage:\"Compacting — memory-bank/ is what crosses the boundary.\"}' 2>/dev/null || true",
+            "command": "printf '%s\\n' 'Carry these through the summary, they are what memory-bank/ needs and what git cannot recover: the active plan file and its status; any decision made this session with its reasoning and the alternatives rejected; constraints discovered the hard way; and the next concrete step. If memory-bank/ has not yet been updated for this session, say so explicitly in the summary.'",
             "statusMessage": "Memory bank checkpoint"
           }
         ]

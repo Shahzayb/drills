@@ -6,6 +6,10 @@ Read on demand. Before making a call that might already have precedent, `grep -i
 
 ---
 
+## 2026-08-06 — `PreCompact` hooks must print plain text, never JSON
+
+**Why:** unlike `Stop`, `SessionStart`, and `PostToolUse`, the `PreCompact` executor does not parse hook output for `hookSpecificOutput.additionalContext` or `systemMessage`. It takes raw stdout and passes it to the summarizer as `customInstructions` (`newCustomInstructions:i.length>0?i.join(...)` in the 2.1.222 bundle). A hook printing JSON there is a silent no-op that also pollutes the compaction prompt with its own serialization. Found by review after the first implementation shipped exactly that bug. The hook now prints prose describing what the summary must carry — a better lever than the injection originally planned, since it steers the summary itself.
+
 ## 2026-08-06 — `memory-bank/` is the only project memory store
 
 **Why:** the Claude Code harness keeps its own per-project memory outside the repo and files "project" facts there by default — the same facts `projectbrief.md` and `activeContext.md` hold. Two stores holding one fact drift, and the reader can't tell which is current. `memory-bank/` wins because it's the only one in the repo: reviewable, diffable, shareable. Rejected: keeping both and cross-referencing (nothing enforces the cross-reference, so it decays to the same split). A redirect note lives in the harness store so future sessions route here.

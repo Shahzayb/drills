@@ -1,6 +1,6 @@
 ---
 name: memory-bank
-description: Persistent project memory (memory-bank/) and the plan-first workflow (plans/) for this repo. Use at the start of any non-trivial task here, before writing a plan file, and before implementing anything — every feature here gets a plan file before any code, so consult this skill on any request to build, add, change, or fix a feature, not just when planning is mentioned. Also use when the user says "update memory bank", asks where things stand or what the current focus is, asks why something was built the way it was, or after finishing an implementation.
+description: Persistent project memory (memory-bank/) and the plan-first workflow (plans/) for this repo. Use at the start of any non-trivial task here, before writing a plan file, and before implementing anything — work spanning more than one file, adding a dependency, or setting a pattern gets a plan file before any code, so consult this skill on such a request to build, add, change, or fix, not just when planning is mentioned. Also use when the user says "update memory bank", asks where things stand or what the current focus is, asks why something was built the way it was, or after finishing an implementation.
 ---
 
 # Memory Bank
@@ -49,14 +49,14 @@ Two things keep this cheap. Skip any file listed under **Unfilled** in `activeCo
 
 Plan mode cannot write files. A plan is therefore *drafted* in plan mode and *written* immediately after approval — `plans/YYYY-MM-DD_short-name.md` is the first thing created after exiting plan mode, before any implementation. Skipping that write is the likeliest way this whole directory stays empty while work ships: the plan was approved, so it feels recorded, and nothing on disk says otherwise.
 
-Every plan carries a status line directly under its title — `planned`, `in progress`, `shipped`, or `abandoned — <reason>`. That line is the only part of a plan edited after writing, and it's what keeps `plans/` readable a year on (`grep -l 'Status:.*shipped' plans/*.md`). Set it to `in progress` when implementation starts, and to its final value in the same pass that updates the memory bank.
+Every plan carries a status line directly under its title — `planned`, `in progress`, `shipped`, or `abandoned — <reason>`. That line is the only part of a plan edited after writing, and it's what keeps `plans/` readable a year on (`grep -l '^\*\*Status:\*\* shipped' plans/*.md` — anchored, so the template line in `plans/README.md` doesn't match). Set it to `in progress` when implementation starts, and to its final value in the same pass that updates the memory bank.
 
 - Don't rewrite a plan's body afterwards to match what shipped — the gap between planned and actual is the useful signal. Record divergence in the memory bank.
 - Don't copy plan contents into the memory bank. Two copies drift and the reader can't tell which is current; link by filename.
 - Don't load `plans/` wholesale. Read the one named in `activeContext.md`; for an older one, `ls plans/` and read just that file.
 - If the work needs something the plan doesn't cover, say so and get direction rather than quietly re-planning mid-implementation.
 
-**Asked to implement with no plan file:** say so and offer to draft one — don't start coding. If the user decides to skip the plan, that's their call; proceed, and note it in `activeContext.md` so the next session knows why there's no plan to point at.
+**Asked to implement with no plan file:** first decide whether one is warranted — the bar is in `CLAUDE.md` step 2: more than one file, a new dependency, or a pattern being set. Below that bar (a single-file fix, a rename, a config tweak) just do the work; a planning stop on trivial changes only teaches everyone to skip plans. At or above it, say so and offer to draft one rather than coding. If the user decides to skip the plan anyway, that's their call; proceed, and note it in `activeContext.md` so the next session knows why there's no plan to point at.
 
 ## Writing: what earns a line
 
