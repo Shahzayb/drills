@@ -1,83 +1,17 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+How to work in this repository. Only the workflow lives here — everything technical (stack, layout, commands, constraints) lives in `memory-bank/`, so this file stays stable and needs no upkeep.
 
-## Repository structure
+## Workflow
 
-This is a pnpm workspace monorepo (`pnpm-workspace.yaml`: `apps/*`, `packages/*`) with two independent apps, orchestrated at the root by Turborepo (`turbo.json`). `packages/` currently exists but is empty.
+1. **Session start** — a `SessionStart` hook loads `memory-bank/activeContext.md`.
+2. **Plan first** — work that spans more than one file, adds a dependency, or sets a pattern starts with a plan file at `plans/YYYY-MM-DD_short-name.md`. Draft it in plan mode. Plan mode cannot write files, so **writing that file is the first action after approval**, before any code. Below the bar — a single-file fix, a rename, a config tweak — go straight to work. If a plan is warranted and there isn't one, say so and offer to draft one rather than starting.
+3. **Link** — once refined, the plan is referenced from `memory-bank/activeContext.md`.
+4. **Implement** — follow the plan.
+5. **Record** — update `memory-bank/` with the user, not from assumptions. `Stop` and `PreCompact` hooks nudge when this hasn't happened, but they are advisory: running the step is still yours.
 
-- `apps/backend` — NestJS API (TypeScript). Currently just the default Nest starter (`AppModule` → `AppController` → `AppService`), listens on `process.env.PORT ?? 3001`.
-- `apps/frontend` — Next.js 16 app (App Router, React 19, Tailwind v4). Currently just the default `create-next-app` scaffold. It has no lockfile/workspace file of its own — installs are governed entirely by the root `pnpm-workspace.yaml` and `pnpm-lock.yaml`.
+`memory-bank/` holds current state, architecture, and technical context; `plans/` holds per-feature intent. They are maintained separately.
 
-Both apps are near-empty scaffolds as of now, so there is no cross-app architecture yet (e.g. no established API client pattern in the frontend for calling the backend). When adding real features, check both apps' current state rather than assuming prior conventions exist.
+`memory-bank/` is the only project memory store for this repo. Don't file project facts in a harness-level memory directory, in this file, or anywhere else — a fact kept in two places drifts, and only `memory-bank/` is in the repo where it can be reviewed and shared.
 
-**Ports**: the apps default to different ports on purpose (backend `3001`, frontend `3000`) so `pnpm dev` can run both at once without a collision. Override with `PORT=<n>` for the backend, or `-p <n>` / `PORT=<n>` for `next dev` (Next's `PORT` cannot be set via `.env` — the server binds before env files load).
-
-## Commands
-
-### Root (from the repo root)
-
-These run both apps together via Turborepo:
-
-```bash
-pnpm install
-pnpm dev          # turbo run dev — both apps in parallel, labeled output
-pnpm dev:backend  # turbo run dev --filter=backend
-pnpm dev:frontend # turbo run dev --filter=frontend
-pnpm build        # turbo run build
-pnpm lint         # turbo run lint
-pnpm test         # turbo run test
-```
-
-For single-app work, prefer running from that app's directory (below) — it's more direct and avoids turbo's task-graph overhead for one-off commands.
-
-### Per-app
-
-All commands run from within the respective app directory (`apps/backend` or `apps/frontend`), using pnpm.
-
-### Backend (`apps/backend`)
-
-```bash
-pnpm install
-pnpm run start:dev      # watch mode
-pnpm run build          # nest build
-pnpm run lint           # eslint --fix over src,apps,libs,test
-pnpm run format         # prettier --write src/**/*.ts test/**/*.ts
-
-pnpm run test           # jest unit tests (rootDir: src, matches *.spec.ts)
-pnpm run test:watch
-pnpm run test:cov
-pnpm run test:e2e       # jest --config ./test/jest-e2e.json
-
-# run a single test file
-pnpm exec jest src/app.controller.spec.ts
-# run tests matching a name
-pnpm exec jest -t "test name pattern"
-```
-
-### Frontend (`apps/frontend`)
-
-```bash
-pnpm install
-pnpm run dev             # next dev
-pnpm run build           # next build
-pnpm run start           # next start (serve production build)
-pnpm run lint            # eslint
-```
-
-No test runner is configured for the frontend yet.
-
-## Frontend: Next.js version caveat
-
-`apps/frontend/CLAUDE.md` (and `AGENTS.md`, which it includes via `@AGENTS.md`) carries an important, auto-generated warning that applies whenever you touch frontend code:
-
-> This is Next.js 16, which has breaking API/convention/file-structure changes from what may be in training data. Before writing frontend code, check the docs bundled in `apps/frontend/node_modules/next/dist/docs/` (resolve relative to `apps/frontend`, since `next` may not be hoisted to the repo root) and heed deprecation notices.
-
-That `AGENTS.md` block is regenerated by `next dev` itself — don't remove it from diffs; committing it keeps the tree clean.
-
-## Editor and tooling config
-
-- `.vscode/` — shared, checked-in settings: format-on-save with ESLint fix-on-save, per-package `eslint.workingDirectories` (needed since each app has its own flat config), and `launch.json` debug configs for the backend, frontend, and both together (compound).
-- `.npmrc` — relaxes peer-dependency strictness (`auto-install-peers`, `strict-peer-dependencies=false`) across the two apps' differing dependency trees.
-- `.gitattributes` — normalizes line endings and marks lockfiles as generated (excluded from diffs).
-- Root `package.json` currently declares pnpm's version in both `packageManager` and `devEngines.packageManager`, which triggers a pnpm warning on every install; only one should be kept if that's cleaned up later.
+Before assuming anything about the stack, layout, commands, or known gotchas, read `memory-bank/systemPatterns.md` and `memory-bank/techContext.md`. The `memory-bank` skill covers which files to read for which task, what belongs in them, and how the update pass works.
