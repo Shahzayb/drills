@@ -1,6 +1,6 @@
 # Workflow hardening
 
-**Status:** shipped
+**Status:** shipped — hooks later removed as over-built; see the evolution section of `memory-bank/progress.md`
 
 Six gaps found reviewing the `memory-bank/` + `plans/` + hooks setup on 2026-08-06. One theme runs through most of them: **reads are enforced by machinery, writes are enforced by hope.** The `SessionStart` hook guarantees the memory bank is loaded; nothing guarantees it is ever updated. That asymmetry is worse than a symmetric failure, because a stale memory bank still gets read confidently — the exact rot `SKILL.md` warns about.
 

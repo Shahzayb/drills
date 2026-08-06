@@ -1,17 +1,23 @@
 # CLAUDE.md
 
-How to work in this repository. Only the workflow lives here — everything technical (stack, layout, commands, constraints) lives in `memory-bank/`, so this file stays stable and needs no upkeep.
+How to work in this repository. Only the workflow lives here — everything technical (stack, layout, commands, constraints) lives in `memory-bank/`.
 
-## Workflow
+I drive the workflow. Nothing below runs on its own; each line says what a situation calls for, so that when I ask for it you already know the shape. If a step looks warranted and I haven't asked, say so in a sentence and let me decide.
 
-1. **Session start** — a `SessionStart` hook loads `memory-bank/activeContext.md`.
-2. **Plan first** — work that spans more than one file, adds a dependency, or sets a pattern starts with a plan file at `plans/YYYY-MM-DD_short-name.md`. Draft it in plan mode. Plan mode cannot write files, so **writing that file is the first action after approval**, before any code. Below the bar — a single-file fix, a rename, a config tweak — go straight to work. If a plan is warranted and there isn't one, say so and offer to draft one rather than starting.
-3. **Link** — once refined, the plan is referenced from `memory-bank/activeContext.md`.
-4. **Implement** — follow the plan.
-5. **Record** — update `memory-bank/` with the user, not from assumptions. A `Stop` hook nudges when a session changed source but not `memory-bank/`; it is advisory, so running the step is still yours.
+## What calls for what
 
-`memory-bank/` holds current state, architecture, and technical context; `plans/` holds per-feature intent. They are maintained separately.
+**Starting on something unfamiliar, or asking where things stand** → `memory-bank/` is the only link to previous work; nothing loads automatically. Read it before answering from assumption.
 
-`memory-bank/` is the only project memory store for this repo. Don't file project facts in a harness-level memory directory, in this file, or anywhere else — a fact kept in two places drifts, and only `memory-bank/` is in the repo where it can be reviewed and shared.
+**Work spanning more than one file, adding a dependency, or setting a pattern** → that's the bar for a plan file at `plans/YYYY-MM-DD_short-name.md`. Plan mode can't write files, so the file gets written right after approval, before any code. A single-file fix, a rename, a config tweak is below the bar.
 
-Before assuming anything about the stack, layout, commands, or known gotchas, read `memory-bank/systemPatterns.md` and `memory-bank/techContext.md`. The `memory-bank` skill covers which files to read for which task, what belongs in them, and how the update pass works.
+**Implementing against an existing plan** → follow it. If the work needs something the plan doesn't cover, stop and say so rather than quietly re-planning mid-implementation.
+
+**Something landed, or a decision got made** → `memory-bank/` is now stale. Verified facts can be written directly; anything that's a judgment gets proposed to me first.
+
+## Boundaries
+
+`memory-bank/` holds current state, architecture, and technical context. `plans/` holds per-feature intent, one dated file each. They are maintained separately — link between them by filename rather than copying.
+
+`memory-bank/` is the only project memory store here. Don't file project facts in a harness-level memory directory, in this file, or anywhere else — a fact kept in two places drifts, and only `memory-bank/` is in the repo.
+
+The `memory-bank` skill covers what belongs in each file and how an update pass runs.

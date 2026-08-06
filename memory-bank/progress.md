@@ -2,16 +2,15 @@
 
 ## What works
 
-- `pnpm dev` runs both apps together via Turborepo (backend `3001`, frontend `3000`).
-- `apps/backend` — NestJS starter, with its default unit and e2e tests.
-- `apps/frontend` — `create-next-app` scaffold.
-- Workflow hooks: memory bank loads on session start; record-step and cap nudges fire. Each was tested against its trigger *and* its non-trigger states — the Stop hook's trigger is snapshot-based, so verify both "no new work" and "work already recorded" stay silent when changing it.
+`pnpm dev` runs both apps via Turborepo. Backend is the NestJS starter with its default tests; frontend is the `create-next-app` scaffold.
 
-## What's left
+## Status
 
-_Not yet established — no feature scope defined._
+Scaffolding only — nothing from the drill program has been built yet. Next up is drill 01 (Compose stack).
 
 ## Known issues
 
-- Root `package.json` declares the pnpm version in both `packageManager` and `devEngines.packageManager`, which warns on every install. Harmless; keep one if it's ever cleaned up.
-- The frontend has no test runner configured.
+- Root `package.json` declares the pnpm version twice (`packageManager` and `devEngines.packageManager`), warning on every install. Harmless.
+- Frontend has no test runner.
+
+## Evolution of decisions

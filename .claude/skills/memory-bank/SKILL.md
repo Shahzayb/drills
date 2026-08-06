@@ -1,102 +1,53 @@
 ---
 name: memory-bank
-description: Persistent project memory (memory-bank/) and the plan-first workflow (plans/) for this repo. Use at the start of any non-trivial task here, before writing a plan file, and before implementing anything — work spanning more than one file, adding a dependency, or setting a pattern gets a plan file before any code, so consult this skill on such a request to build, add, change, or fix, not just when planning is mentioned. Also use when the user says "update memory bank", asks where things stand or what the current focus is, asks why something was built the way it was, or after finishing an implementation.
+description: The Memory Bank (memory-bank/) — what each file holds, what earns a line in one, and how an update pass runs. Use at the start of any non-trivial task in this repo, when the user says "update memory bank", when they ask where things stand or what the current focus is, when they ask why something was built the way it was, and after finishing an implementation.
 ---
 
 # Memory Bank
 
-Context does not survive between sessions. `memory-bank/` is the only thing that carries forward, so a future session's judgment is only as good as what is written there.
+My memory resets completely between sessions. After each reset the Memory Bank is my only link to previous work, so I read **all** of it at the start of a task, before anything else. Nothing loads automatically — reading is a deliberate first step.
 
-`CLAUDE.md` holds the five-step workflow and nothing else — this file is the mechanics behind steps 2, 3, and 5. Because the technical reference lives here rather than there, discipline matters more, not less: every line is re-read on future tasks. Record what a session needs to start working and the reasoning it can't recover, not a transcription of what the code already shows.
+Its value is entirely in being accurate and being read. A file too long to read is as useless as one that's wrong.
 
-## Files
+## The files
 
-| File | Holds | Cap |
-|---|---|---|
-| `activeContext.md` | Active plan, current focus, next steps, unfilled files, open questions | 20 lines |
-| `progress.md` | What works, what's left, known issues | 30 lines |
-| `projectbrief.md` | Scope, goals, non-goals. Source of truth when files disagree | 20 lines |
-| `productContext.md` | Why this exists, who it's for, UX intent | 20 lines |
-| `systemPatterns.md` | Repo layout, architecture as it stands, component relationships | — |
-| `techContext.md` | Commands, constraints, gotchas, version pins, tooling config | — |
-| `decisions.md` | Append-only decision log: what was decided, why, what was rejected | — |
+All Markdown, all directly under `memory-bank/`.
 
-The caps sit on the files that churn: a stale line there misroutes the next session, so they have to stay small enough that pruning is obvious. A `PostToolUse` hook reports the overflow when a capped file goes over — treat that as the signal to cut what has stopped being load-bearing, not to raise the cap. The bottom three are reference material that grows with the project — they're governed by the "what earns a line" rules below rather than a length limit. When one section of `systemPatterns.md` or `techContext.md` outgrows a screen, split it into its own file under `memory-bank/` and link it from `activeContext.md`.
+1. **`projectbrief.md`** — core requirements, goals, non-goals, why the project exists. Source of truth for scope; when the files disagree, this one wins.
+2. **`techContext.md`** — architecture, how the pieces relate, technologies, how to run and test things, technical constraints, decisions that shape the system.
+3. **`activeContext.md`** — current focus, the next concrete step, the active plan, and standing preferences about how to work here.
+4. **`progress.md`** — what works, current status, known issues, and how the project's direction has evolved.
 
-`systemPatterns.md` and `decisions.md` divide along *is* versus *why*: the current shape of the system versus the reasoning that produced it. Keeping the log out of `systemPatterns.md` matters because that file is read on most implementation work, and an append-only history would make every one of those reads more expensive as the project ages.
+Add another file only when there is content that doesn't fit these four and is too big to inline. Four is deliberately the smallest set that works; it grows from pressure, not from planning.
 
-## Reading: load by need
-
-`activeContext.md` arrives through the `SessionStart` hook. If it isn't in context, read it first — everything else follows from it.
-
-| Task | Also read |
-|---|---|
-| Writing or refining a plan | `projectbrief.md`, `systemPatterns.md` |
-| Implementing | the active plan file, `systemPatterns.md` |
-| Resuming, "where were we" | `progress.md` |
-| Architecture or design choice | `systemPatterns.md`, `projectbrief.md`, grep `decisions.md` |
-| "why is it done this way" | grep `decisions.md` |
-| Stack or layout question | `systemPatterns.md` |
-| Commands, build, deps, tooling | `techContext.md` |
-| Product or UX question | `productContext.md` |
-| "update memory bank" | the six revisable files (not `decisions.md`) |
-
-Two things keep this cheap. Skip any file listed under **Unfilled** in `activeContext.md` — it's still all placeholders, and reading it buys nothing. And to check a single fact, `grep -r "<term>" memory-bank/` instead of reading files whole.
-
-## Plans
-
-`plans/` and `memory-bank/` are separate stores and stay that way. Plans accumulate, one per feature, each a dated record of intent. The memory bank is a small working set rewritten in place.
-
-Plan mode cannot write files. A plan is therefore *drafted* in plan mode and *written* immediately after approval — `plans/YYYY-MM-DD_short-name.md` is the first thing created after exiting plan mode, before any implementation. Skipping that write is the likeliest way this whole directory stays empty while work ships: the plan was approved, so it feels recorded, and nothing on disk says otherwise.
-
-Every plan carries a status line directly under its title — `planned`, `in progress`, `shipped`, or `abandoned — <reason>`. That line is the only part of a plan edited after writing, and it's what keeps `plans/` readable a year on (`grep -l '^\*\*Status:\*\* shipped' plans/*.md` — anchored, so the template line in `plans/README.md` doesn't match). Set it to `in progress` when implementation starts, and to its final value in the same pass that updates the memory bank.
-
-- Don't rewrite a plan's body afterwards to match what shipped — the gap between planned and actual is the useful signal. Record divergence in the memory bank.
-- Don't copy plan contents into the memory bank. Two copies drift and the reader can't tell which is current; link by filename.
-- Don't load `plans/` wholesale. Read the one named in `activeContext.md`; for an older one, `ls plans/` and read just that file.
-- If the work needs something the plan doesn't cover, say so and get direction rather than quietly re-planning mid-implementation.
-
-**Asked to implement with no plan file:** first decide whether one is warranted — the bar is in `CLAUDE.md` step 2: more than one file, a new dependency, or a pattern being set. Below that bar (a single-file fix, a rename, a config tweak) just do the work; a planning stop on trivial changes only teaches everyone to skip plans. At or above it, say so and offer to draft one rather than coding. If the user decides to skip the plan anyway, that's their call; proceed, and note it in `activeContext.md` so the next session knows why there's no plan to point at.
-
-## Writing: what earns a line
+## What earns a line
 
 Record what a future session cannot cheaply reconstruct:
 
-- Decisions **and their reasoning**, including alternatives rejected — `git log` shows what changed, never why
-- Constraints found the hard way: version pins, gotchas, things that broke and the fix
-- Current focus, the active plan, and the next concrete step
-- Scope and, especially, non-goals
+- **Decisions and their reasoning**, including alternatives rejected. What changed is recoverable; why it changed is not. Decisions shaping the system go in `techContext.md`, decisions shaping the project's direction under `progress.md`'s evolution section.
+- **Dead ends.** An attempt that failed with no decision attached is exactly what gets re-attempted next session. Say what happened and whether it's worth retrying.
+- **Constraints found the hard way** — version pins, gotchas, things that broke and the fix.
+- **Current focus, the active plan, and the next concrete step.**
+- **Scope, and especially non-goals.**
 
 Leave out:
 
-- File listings, function signatures, API surface — reading the code is cheaper than trusting a stale summary
-- Changelogs and session narration — `git log` is the changelog
-- Anything unverified. Write `_Not yet established._` and move on. A confidently wrong memory bank is worse than an empty one, because the next session acts on it without checking.
+- File listings and function signatures. Reading the code is cheaper than trusting a stale summary. Where a contract genuinely can't be reconstructed cheaply, record *where it lives* rather than a copy of it.
+- Secret values. Record which vars are required and where the real values come from, never the value.
+- Facts that already load themselves into context elsewhere. Point at them instead.
+- Changelogs and session narration. This is a working set, not a history.
+- Anything unverified. Write `_Not yet established._` and move on — a confidently wrong memory bank is worse than an empty one, because the next session acts on it without checking.
 
-Keep one fact in one file and cross-reference by filename. Replace stale lines rather than appending — when a capped file pushes past its limit, that's the signal to cut what has stopped being load-bearing.
+Keep one fact in one file and cross-reference by filename. Replace stale lines rather than appending. Plans are a separate store: link to one by filename, never copy its contents in.
 
-`decisions.md` is the deliberate exception, and the only file that grows without pruning. Log an entry whenever a choice would be expensive to rediscover — architecture, a dependency, a convention, a tradeoff accepted under pressure — using this shape, newest at the top:
+## Updating
 
-```
-## YYYY-MM-DD — <what was decided>
+Update after implementing something significant, on discovering a pattern worth keeping, and whenever the user asks.
 
-**Why:** <reasoning, including what was rejected and why it lost>
-**Plan:** <plans/YYYY-MM-DD_name.md, if one produced it>
-```
+**Write directly** what you verified yourself — a test that now passes, a line that is now factually false, a constraint you actually hit. Write it, then say you did.
 
-Never edit or delete an entry. When a decision stops holding, append the new one and add `**Superseded by:** <date — title>` to the old — the outdated reasoning is what keeps the question from being reopened later. Routine choices with an obvious default don't need an entry; the log is only useful if reading it is still cheap in a year.
+**Propose first** for everything else — whether the work counts as done, what the next focus is, why a tradeoff was accepted. Show the exact lines and let the user correct them. Keep the batch small; two lines the user actually reads beat six they wave through.
 
-## Recording: with the user, not for them
+Inference is how a memory bank rots. An invented "next step" nobody agreed to becomes next session's starting assumption, and by then it reads as established fact.
 
-This is the one protocol for changing anything under `memory-bank/`, whether you've just finished implementing or the user typed "update memory bank". Split it by what you can stand behind:
-
-- **Write directly** what you verified yourself — a test that now passes, a line that is now factually false, a constraint you actually hit. Write it, then say you did.
-- **Propose first** for everything else — whether the work counts as done, what the next focus is, why a tradeoff was accepted, what's worth doing next. Show the exact lines and let the user correct them before anything lands.
-
-Inference is how memory banks rot: an invented "next step" that nobody agreed to becomes next session's starting assumption, and by then it reads as established fact. Ask short, specific questions — "is the error path in scope, or a follow-up?" — rather than open-ended ones.
-
-Update `progress.md`, `activeContext.md`, and the plan's status line in the same pass, so the active plan link never outlives the work it points at.
-
-On an explicit **"update memory bank"**, do all of the above and additionally read the six revisable files and sweep for staleness. `activeContext.md` and `progress.md` decay fastest, so start there. Report one line per file, including "no change" for the ones you left alone — silence reads as an oversight.
-
-`decisions.md` is not part of that sweep: an append-only log can't hold stale lines, only superseded ones. Read it during the pass only to check whether this session's work superseded an entry, and append if it did.
+On an explicit **update memory bank**, review every file even where none is needed, and report one line per file including "no change" — silence reads as an oversight. `activeContext.md` and `progress.md` decay fastest, so start there.

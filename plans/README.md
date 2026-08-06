@@ -1,6 +1,6 @@
 # Plans
 
-One file per feature, written before implementation: `YYYY-MM-DD_short-name.md`, dated the day it was written. Warranted for work spanning more than one file, adding a dependency, or setting a pattern — the bar is defined in `CLAUDE.md` step 2. Plan mode cannot write files, so the file is created immediately after the plan is approved, before any code.
+One file per feature, written before implementation: `YYYY-MM-DD_short-name.md`, dated the day it was written. The bar for warranting a plan is in `CLAUDE.md` step 2. Plan mode cannot write files, so the file is created immediately after the plan is approved, before any code.
 
 Each plan opens with a status line under its title:
 

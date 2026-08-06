@@ -1,15 +1,19 @@
 # Project Brief
 
-Source of truth for scope. When the other memory-bank files disagree, this wins.
+Foundation document. Source of truth for scope — when the other files disagree, this one wins.
 
-## Goal
+## What this is
 
-_Not yet established._ The repo is named `drills` and holds a NestJS API plus a Next.js frontend, but the actual objective hasn't been stated — don't infer one from the name.
+A learning repo. I build one app across a long series of drills, each drill breaking something on purpose and measuring it, so the understanding is real rather than read.
 
-## Requirements
+## The app
 
-_Not yet established._
+A multi-tenant customer-feedback platform — orgs, users, conversations, messages, tags, ingest, background jobs. It grows drill by drill; no schema is built up front.
+
+## What I'm learning
+
+Postgres past CRUD (indexes, plans, locks, migrations at scale), concurrency and atomicity, caching and invalidation, failure and resilience, running a backend myself (pooling, shutdown, replicas, load testing), observability, and the Next App Router.
 
 ## Non-goals
 
-_Not yet established._
+No auth (identity is stubbed on purpose), no UI polish.
