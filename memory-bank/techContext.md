@@ -8,13 +8,15 @@ pnpm workspace monorepo (`apps/*`, `packages/*`) orchestrated by Turborepo. `pac
 - `apps/frontend` — Next.js 16 (App Router, React 19, Tailwind v4), port 3001. No test runner.
 - Postgres 18 and Redis 8, alpine images, alongside both apps under Docker Compose.
 
-`src/database/` is a `@Global()` module handing out a `pg` `Pool` and an `ioredis` client by token. No ORM and no schema — `projectbrief.md` builds those drill by drill. `GET /health` probes both (`SELECT 1`, `PING`) and answers 200, or 503 with per-dependency detail; Compose uses it as `nest_server`'s healthcheck and gates the frontend on it.
+Two `@Global()` chokepoint modules, one per data store, and the client stays private in both. `src/postgres` owns the `pg` `Pool`; **every read goes through its `query()`** so later drills have one place to hook timing, tracing and pool metrics. `src/redis` owns the ioredis client and grows a method per command as drills need them. No ORM and no schema — `projectbrief.md` builds those drill by drill.
 
-The frontend has no established pattern for calling the backend yet and is still `create-next-app`'s default output.
+`GET /health` probes both through those same clients (`SELECT 1`, `PING`) and answers 200, or 503 with per-dependency detail. `GET /info` reads Postgres `version()`/`now()` and is what the web page displays.
+
+The frontend reaches the API at `BACKEND_INTERNAL_URL` (`http://nest_server:3002`) from `app/page.tsx`, a server component. The service name resolves only on the Compose network, so that fetch cannot move to a client component without switching to the published host port. `app/health` is web liveness — 200 whenever Next serves, reporting API reachability without failing on it, so one outage doesn't turn three services red.
 
 ## Commands
 
-Docker is how the stack runs: `pnpm run setup` first time, then `docker:up` / `docker:down` / `docker:logs` / `docker:rebuild`. Running the backend outside a container is not a supported path — nothing loads `.env` into a host process, so it would silently use the code's fallback credentials.
+Docker is how the stack runs: `pnpm run setup` first time, then `docker:up` / `docker:down` / `docker:logs` / `docker:rebuild`, plus `docker:reset` to wipe volumes and rebuild from zero. Running the backend outside a container is not a supported path — nothing loads `.env` into a host process, so it would silently use the code's fallback credentials.
 
 Root, via Turborepo: `pnpm dev` / `build` / `lint` / `test`, plus `dev:backend`, `dev:frontend`. For single-app work, run from that app's directory — skips turbo's overhead. Backend adds `start:dev`, `test:cov`, `test:e2e`; one file with `pnpm exec jest <path>`, by name with `-t`.
 
@@ -23,6 +25,7 @@ Root, via Turborepo: `pnpm dev` / `build` / `lint` / `test`, plus `dev:backend`,
 - Ports are split deliberately (3001 frontend / 3002 backend) so both run without collision.
 - **Adding a backend dependency takes three steps, not two.** Host `pnpm install`, rebuild the image, *and* renew the anonymous volume — `docker compose up -d --build --force-recreate --renew-anon-volumes` (this is what `docker:rebuild` runs). The bind mount makes the container resolve through the host's `apps/backend/node_modules`, whose relative symlinks land in `/app/node_modules`, an anonymous volume that Compose carries over on recreate. Skip the renewal and you get `Cannot find module` from an image that visibly contains the package.
 - **Both clients need an `error` listener or the process exits.** `pg`'s pool emits `error` for idle clients when Postgres restarts, and ioredis does the same when Redis goes away; Node exits on an unhandled `error` event. Cost a crash during Drill 01 before it was caught.
+- **Connection numbers are chosen, not defaulted**, and the reasoning is in `drills/01-four-containers.md`: pool `max: 10` (Postgres allows 97 after reserved), `connectionTimeoutMillis: 2000`, `idleTimeoutMillis: 30000`, ioredis `commandTimeout: 2000`, `maxRetriesPerRequest: 1`.
 - **`lazyConnect: true` and `enableOfflineQueue: false` can't be combined on ioredis.** With the offline queue off, commands are rejected whenever status isn't `ready`, and a lazy client starts in `wait` — the first `ping()` would reject without ever connecting. `lazyConnect` is what keeps the Jest suites from opening sockets at module init.
 - Every `docker:*` script is scoped to this Compose project — `docker:clean` is `down -v --rmi local --remove-orphans`, deliberately not `docker system prune`, which would reach other projects on the machine.
 - `.dockerignore` patterns without a leading `**/` match only at the context root, so anything that can appear under `apps/*` is listed twice.

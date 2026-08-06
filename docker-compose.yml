@@ -67,9 +67,12 @@ services:
           "CMD-SHELL",
           "wget -qO- http://localhost:3002/health >/dev/null || exit 1",
         ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      # 5s x 2 retries puts "unhealthy" ~10-15s after a dependency dies. The
+      # drills that follow induce failure and measure the response, so a slower
+      # cadence would just be measuring the health check instead.
+      interval: 5s
+      timeout: 3s
+      retries: 2
       # Generous: `nest start --watch` compiles before it binds.
       start_period: 40s
     mem_limit: 1g
@@ -91,6 +94,16 @@ services:
     depends_on:
       nest_server:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://localhost:3001/health >/dev/null || exit 1",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 2
+      start_period: 40s
     mem_limit: 1g
     mem_reservation: 512m
 

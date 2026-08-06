@@ -1,8 +1,10 @@
-import { Inject, Injectable } from '@nestjs/common';
-import Redis from 'ioredis';
-import { Pool } from 'pg';
-import { PG_POOL, REDIS_CLIENT } from '../database/database.constants';
+import { Injectable } from '@nestjs/common';
+import { PostgresService } from '../postgres/postgres.service';
+import { RedisService } from '../redis/redis.service';
 
+// Backstop only. Each client already has its own deadline (pool connection
+// timeout, ioredis commandTimeout); this catches the case where a client hangs
+// somewhere those don't cover, so /health can never outlive its own answer.
 const PROBE_TIMEOUT_MS = 2000;
 
 export type CheckResult =
@@ -18,8 +20,7 @@ export interface HealthReport {
 
 /**
  * Runs `probe` under a deadline and reports how long it took. Never throws —
- * a failed dependency is a result, not an exception. The timeout is what makes
- * a down dependency fail fast, since ioredis keeps retrying in the background.
+ * a failed dependency is a result, not an exception.
  */
 async function measure(probe: () => Promise<unknown>): Promise<CheckResult> {
   const startedAt = Date.now();
@@ -49,13 +50,13 @@ async function measure(probe: () => Promise<unknown>): Promise<CheckResult> {
 @Injectable()
 export class HealthService {
   constructor(
-    @Inject(PG_POOL) private readonly pool: Pool,
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly postgres: PostgresService,
+    private readonly redis: RedisService,
   ) {}
 
   async check(): Promise<HealthReport> {
     const [postgres, redis] = await Promise.all([
-      measure(() => this.pool.query('SELECT 1')),
+      measure(() => this.postgres.query('SELECT 1')),
       measure(() => this.redis.ping()),
     ]);
 

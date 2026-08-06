@@ -1,68 +1,65 @@
-import Image from "next/image";
+import { fetchInfo } from "@/lib/api";
 
-export default function Home() {
+export default async function Home() {
+  const result = await fetchInfo();
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
+    <div className="flex flex-1 flex-col items-center justify-center bg-zinc-50 font-sans dark:bg-black">
+      <main className="flex w-full max-w-3xl flex-col gap-8 px-16 py-24">
+        <div className="flex flex-col gap-2">
+          <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-zinc-50">
+            Drill 01
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p className="text-lg text-zinc-600 dark:text-zinc-400">
+            This page is rendered by Next, which called the API by its Compose
+            service name, which read the value below out of Postgres.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+
+        {result.ok ? (
+          <dl className="flex flex-col gap-4 rounded-lg border border-black/[.08] bg-white p-6 dark:border-white/[.145] dark:bg-zinc-950">
+            <div className="flex flex-col gap-1">
+              <dt className="text-sm text-zinc-500 dark:text-zinc-400">
+                Postgres reports
+              </dt>
+              <dd className="font-mono text-sm break-words text-black dark:text-zinc-50">
+                {result.info.postgres.version}
+              </dd>
+            </div>
+            <div className="flex flex-col gap-1">
+              <dt className="text-sm text-zinc-500 dark:text-zinc-400">
+                Database server time
+              </dt>
+              <dd className="font-mono text-sm text-black dark:text-zinc-50">
+                {result.info.postgres.serverTime}
+              </dd>
+            </div>
+            <div className="flex flex-col gap-1">
+              <dt className="text-sm text-zinc-500 dark:text-zinc-400">
+                Pool
+              </dt>
+              <dd className="font-mono text-sm text-black dark:text-zinc-50">
+                {result.info.postgres.poolStats.total} open ·{" "}
+                {result.info.postgres.poolStats.idle} idle ·{" "}
+                {result.info.postgres.poolStats.waiting} waiting · max{" "}
+                {result.info.postgres.poolStats.max}
+              </dd>
+            </div>
+          </dl>
+        ) : (
+          <div className="flex flex-col gap-2 rounded-lg border border-red-200 bg-red-50 p-6 dark:border-red-900/50 dark:bg-red-950/30">
+            <p className="font-medium text-red-900 dark:text-red-200">
+              Could not reach the API
+            </p>
+            <p className="font-mono text-sm text-red-800 dark:text-red-300">
+              {result.error}
+            </p>
+          </div>
+        )}
+
+        <p className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
+          fetched from {result.source}
+        </p>
       </main>
     </div>
   );
