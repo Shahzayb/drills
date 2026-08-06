@@ -11,7 +11,7 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "test": "turbo run test",
-    "docker:up": "docker compose up -d --pull always && docker compose logs -f",
+    "docker:up": "docker compose up -d --pull always",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
     "docker:logs:backend": "docker compose logs -f nest_server",
