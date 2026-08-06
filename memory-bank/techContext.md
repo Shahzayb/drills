@@ -4,8 +4,8 @@
 
 pnpm workspace monorepo (`apps/*`, `packages/*`) orchestrated by Turborepo. `packages/` is empty.
 
-- `apps/backend` — NestJS (TypeScript), port `process.env.PORT ?? 3001`. Jest for unit + e2e.
-- `apps/frontend` — Next.js 16 (App Router, React 19, Tailwind v4), port 3000. No test runner.
+- `apps/backend` — NestJS (TypeScript), port `process.env.PORT ?? 3002`. Jest for unit + e2e.
+- `apps/frontend` — Next.js 16 (App Router, React 19, Tailwind v4), port 3001. No test runner.
 
 The two apps are independent; the frontend has no established pattern for calling the backend yet. Both are still their generators' default output.
 
