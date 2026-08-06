@@ -12,11 +12,11 @@ Drill 01 — get Postgres, Redis, the API and the web app up under one command.
 
 ## Active plan
 
-None. `plans/2026-08-06_workflow-hardening.md` shipped and was then partly reverted.
+`plans/2026-08-06_drill-01-health-endpoint.md` — shipped. `plans/2026-08-06_workflow-hardening.md` shipped and was then partly reverted.
 
 ## What works
 
-`pnpm dev` runs both apps via Turborepo. Backend is the NestJS starter with its default tests, plus a port change and an added `dev` alias; frontend is the untouched `create-next-app` scaffold.
+One command brings up Postgres, Redis, the API and the web app. `GET localhost:3002/health` returns 200 with both dependencies up; stopping either returns 503 naming the one that's down, and the backend recovers on its own when it comes back (verified both directions). `pnpm dev` still runs both apps via Turborepo. Frontend is the untouched `create-next-app` scaffold.
 
 ## Known issues
 

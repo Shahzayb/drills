@@ -16,8 +16,8 @@
     "docker:logs": "docker compose logs -f",
     "docker:logs:backend": "docker compose logs -f nest_server",
     "docker:logs:frontend": "docker compose logs -f next_app",
-    "docker:rebuild": "docker compose build --no-cache && docker compose up -d && docker compose logs -f",
-    "docker:clean": "docker compose down -v && docker system prune -f"
+    "docker:rebuild": "docker compose up -d --build --force-recreate --renew-anon-volumes && docker compose logs -f",
+    "docker:clean": "docker compose down -v --rmi local --remove-orphans"
   },
   "packageManager": "pnpm@11.15.0",
   "keywords": [],
