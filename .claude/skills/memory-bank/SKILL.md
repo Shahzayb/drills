@@ -15,19 +15,18 @@ All Markdown, all directly under `memory-bank/`.
 
 1. **`projectbrief.md`** — core requirements, goals, non-goals, why the project exists. Source of truth for scope; when the files disagree, this one wins.
 2. **`techContext.md`** — architecture, how the pieces relate, technologies, how to run and test things, technical constraints, decisions that shape the system.
-3. **`activeContext.md`** — current focus, the next concrete step, the active plan, and standing preferences about how to work here.
-4. **`progress.md`** — what works, current status, known issues, and how the project's direction has evolved.
+3. **`progress.md`** — where things stand: current focus, the next concrete step, the active plan, what works, known issues, standing preferences, and how the project's direction has evolved.
 
-Add another file only when there is content that doesn't fit these four and is too big to inline. Four is deliberately the smallest set that works; it grows from pressure, not from planning.
+Add another file only when there is content that doesn't fit these three and is too big to inline. Three is deliberately the smallest set that works; it grows from pressure, not from planning.
 
 ## What earns a line
 
 Record what a future session cannot cheaply reconstruct:
 
 - **Decisions and their reasoning**, including alternatives rejected. What changed is recoverable; why it changed is not. Decisions shaping the system go in `techContext.md`, decisions shaping the project's direction under `progress.md`'s evolution section.
+- **Current focus, the active plan, and the next concrete step** — all in `progress.md`, at the top where they're read first.
 - **Dead ends.** An attempt that failed with no decision attached is exactly what gets re-attempted next session. Say what happened and whether it's worth retrying.
 - **Constraints found the hard way** — version pins, gotchas, things that broke and the fix.
-- **Current focus, the active plan, and the next concrete step.**
 - **Scope, and especially non-goals.**
 
 Leave out:
@@ -50,4 +49,4 @@ Update after implementing something significant, on discovering a pattern worth 
 
 Inference is how a memory bank rots. An invented "next step" nobody agreed to becomes next session's starting assumption, and by then it reads as established fact.
 
-On an explicit **update memory bank**, review every file even where none is needed, and report one line per file including "no change" — silence reads as an oversight. `activeContext.md` and `progress.md` decay fastest, so start there.
+On an explicit **update memory bank**, review every file even where none is needed, and report one line per file including "no change" — silence reads as an oversight. `progress.md` decays fastest, so start there.
