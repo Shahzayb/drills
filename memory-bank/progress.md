@@ -4,24 +4,25 @@ Where things stand and what's next.
 
 ## Current focus
 
-Drill 02 - gather task info and make a plan
+Drill 02 — schema and migrations. Shipped and verified against a freshly wiped volume.
 
 ## Next step
 
-TBD: Drill 2
+TBD
 
 ## Active plan
 
-`plans/2026-08-06_drill-01-health-endpoint.md` — shipped.
+`plans/2026-08-07_drill-02-schema-and-migrations.md` (shipped)
 
 ## What works
 
-`pnpm docker:up`
+`pnpm docker:up`, then `pnpm db:migrate` and `pnpm db:seed`.
 
 ## Known issues
 
 - Frontend has no test runner.
 - Backend doesn't log any endpoint locally. Must be disabled in production.
+- Backend: health, info, postgres, and redis doesnt have any tests
 
 ## Preferences
 

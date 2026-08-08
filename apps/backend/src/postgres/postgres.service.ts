@@ -68,41 +68,6 @@ export class PostgresService implements OnApplicationShutdown {
     }
   }
 
-  /**
-   * Execute a database operation with retry logic.
-   */
-  private async executeWithRetry<T>(
-    operation: () => Promise<T>,
-    attempts = 5,
-    delayMs = 500,
-  ): Promise<T> {
-    try {
-      return await operation();
-    } catch (error: unknown) {
-      const code =
-        typeof error === 'object' && error !== null && 'code' in error
-          ? String((error as { code?: unknown }).code)
-          : undefined;
-
-      // Short-circuit: Do not retry structural application bugs (Syntax, Constraints, Auth)
-      const isFatal =
-        code?.startsWith('42') ||
-        code?.startsWith('23') ||
-        code?.startsWith('28');
-
-      if (attempts <= 1 || isFatal) {
-        throw error;
-      }
-
-      this.logger.warn(
-        `Transient database error (${code || 'Network'}). Retrying in ${delayMs}ms...`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-
-      return this.executeWithRetry(operation, attempts - 1, delayMs * 2);
-    }
-  }
-
   /** Pool saturation is the thing later drills will want to watch. */
   stats(): { total: number; idle: number; waiting: number; max: number } {
     return {

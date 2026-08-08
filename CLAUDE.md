@@ -14,6 +14,8 @@ I drive the workflow. Nothing below runs on its own; each line says what a situa
 
 **Something landed, or a decision got made** → `memory-bank/` is now stale. Verified facts can be written directly; anything that's a judgment gets proposed to me first.
 
+**Teachable Things** → `drills` is a guide where you'd teach me about the tech and the what/why/how/when/where of the stuff. Don't bloat and make it digestible. Also be honest about what's bad implementation and how can it be good just so I won't learn bad practices.
+
 ## Boundaries
 
 `memory-bank/` holds current state, architecture, and technical context. `plans/` holds per-feature intent, one dated file each. They are maintained separately — link between them by filename rather than copying.
@@ -21,3 +23,7 @@ I drive the workflow. Nothing below runs on its own; each line says what a situa
 `memory-bank/` is the only project memory store here. Don't file project facts in a harness-level memory directory, in this file, or anywhere else — a fact kept in two places drifts, and only `memory-bank/` is in the repo.
 
 The `memory-bank` skill covers what belongs in each file and how an update pass runs.
+
+## Rules
+
+- Code comments are only for short descriptions, not an essay. But you can reference to the `plans/` to justify the current implementation just so future iterations won't 'fix' or 'improve' it.

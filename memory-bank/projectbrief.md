@@ -14,6 +14,9 @@ A multi-tenant customer-feedback platform — orgs, users, conversations, messag
 
 Postgres past CRUD (indexes, plans, locks, migrations at scale), concurrency and atomicity, caching and invalidation, failure and resilience, running a backend myself (pooling, shutdown, replicas, load testing), observability, and the Next App Router.
 
+Also, I'm new to these tech/tools, so after implementation make sure to give me to-the-point guides on
+how to do the things you just did and why.
+
 ## Non-goals
 
 No auth (identity is stubbed on purpose), no UI polish.
