@@ -26,4 +26,4 @@ The `memory-bank` skill covers what belongs in each file and how an update pass 
 
 ## Rules
 
-- Code comments are only for short descriptions, not an essay. But you can reference to the `plans/` to justify the current implementation just so future iterations won't 'fix' or 'improve' it.
+- Code comments are only for short, to-the-point descriptions, not an essay. But you can reference to the `plans/` to justify the current implementation just so future iterations won't 'fix' or 'improve' it.

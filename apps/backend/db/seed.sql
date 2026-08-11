@@ -97,6 +97,36 @@ FROM (VALUES
 JOIN seed_conversations s ON s.label = v.label
 JOIN conversations      c ON c.id = s.id;
 
+-- Sixty more conversations for Northwind, so a default page of 50 is actually
+-- full and there is a second page behind it. No messages: drill 03 does no joins.
+--
+-- updated_at uses integer division on purpose, so consecutive rows *tie*. A tie
+-- in the sort key is what makes LIMIT/OFFSET paging non-deterministic — the same
+-- row can appear on two pages, or on none — which is why the endpoint orders by
+-- (updated_at DESC, id DESC) and not by updated_at alone. The ties are here so
+-- that is reproducible rather than theoretical.
+INSERT INTO conversations (org_id, status, assignee_id, created_at, updated_at)
+SELECT
+  o.id,
+  CASE WHEN n % 4 = 0 THEN 'closed' ELSE 'open' END,
+  mem.id,
+  now() - make_interval(mins  => n * 37),
+  now() - make_interval(hours => n / 2)
+FROM generate_series(1, 60) AS n
+CROSS JOIN organizations o
+-- Northwind has three memberships, so OFFSET 3 finds nothing and every fourth
+-- conversation comes out unassigned. An always-populated column hides the bugs
+-- that only NULLs cause.
+LEFT JOIN LATERAL (
+  SELECT m.id
+    FROM memberships m
+   WHERE m.org_id = o.id
+   ORDER BY m.id
+  OFFSET n % 4
+   LIMIT 1
+) mem ON true
+WHERE o.name = 'Northwind Support';
+
 COMMIT;
 
 SELECT 'organizations' AS table_name, count(*) FROM organizations

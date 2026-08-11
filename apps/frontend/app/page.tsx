@@ -57,6 +57,15 @@ export default async function Home() {
           </div>
         )}
 
+        <p className="text-sm">
+          <a
+            href="/conversations"
+            className="text-zinc-600 underline hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50"
+          >
+            Drill 03 — the conversation list →
+          </a>
+        </p>
+
         <p className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
           fetched from {result.source}
         </p>
