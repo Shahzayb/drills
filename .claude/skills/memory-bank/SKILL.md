@@ -16,8 +16,11 @@ All Markdown, all directly under `memory-bank/`.
 1. **`projectbrief.md`** — core requirements, goals, non-goals, why the project exists. Source of truth for scope; when the files disagree, this one wins.
 2. **`techContext.md`** — architecture, how the pieces relate, technologies, how to run and test things, technical constraints, decisions that shape the system.
 3. **`progress.md`** — where things stand: current focus, the next concrete step, the active plan, what works, known issues, standing preferences, and how the project's direction has evolved.
+4. **`history.md`** — every plan and implementation, one row each, oldest first: date, path to the plan file, a description, and status (`planned` / `implemented`). Read at the start of a session alongside the other three. It is append-only and the one deliberate exception to "no changelogs" below — it exists precisely to be the changelog the other files must not become.
 
-Add another file only when there is content that doesn't fit these three and is too big to inline. Three is deliberately the smallest set that works; it grows from pressure, not from planning.
+   The description is one *row*, not one sentence — write it as long as it needs to be to carry the decision or result, not just the topic. "Wired backend to Postgres and Redis" is the topic; "no ORM, no Terminus (its indicators need TypeORM/Sequelize/Mongoose); `lazyConnect`+`enableOfflineQueue` can't combine on ioredis" is what a later session actually needs and would otherwise have to re-read the whole plan to recover. Favor the numbers, the rejected alternative, and the deliberate gap over the plain summary — those are exactly what's cheap to drop and expensive to reconstruct.
+
+Add another file only when there is content that doesn't fit these four and is too big to inline. Four is deliberately the smallest set that works; it grows from pressure, not from planning.
 
 ## What earns a line
 
@@ -34,7 +37,7 @@ Leave out:
 - File listings and function signatures. Reading the code is cheaper than trusting a stale summary. Where a contract genuinely can't be reconstructed cheaply, record *where it lives* rather than a copy of it.
 - Secret values. Record which vars are required and where the real values come from, never the value.
 - Facts that already load themselves into context elsewhere. Point at them instead.
-- Changelogs and session narration. This is a working set, not a history.
+- Changelogs and session narration. This is a working set, not a history — that's what `history.md` is for, and only for.
 - Anything unverified. Write `_Not yet established._` and move on — a confidently wrong memory bank is worse than an empty one, because the next session acts on it without checking.
 
 Keep one fact in one file and cross-reference by filename. Replace stale lines rather than appending. Plans are a separate store: link to one by filename, never copy its contents in.
@@ -50,3 +53,5 @@ Update after implementing something significant, on discovering a pattern worth 
 Inference is how a memory bank rots. An invented "next step" nobody agreed to becomes next session's starting assumption, and by then it reads as established fact.
 
 On an explicit **update memory bank**, review every file even where none is needed, and report one line per file including "no change" — silence reads as an oversight. `progress.md` decays fastest, so start there.
+
+`history.md` runs on its own trigger, independent of the rest of an update pass: append a `planned` line the moment a plan file is written (see `CLAUDE.md`'s plan-file step), and append or update that line to `implemented` the moment its implementation lands. Both are verified facts — the file existing, the work being done — so both are written directly, no proposal needed. Newest entry last, one line each; never rewrite history, only append.

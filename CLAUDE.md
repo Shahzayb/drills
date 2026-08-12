@@ -6,13 +6,13 @@ I drive the workflow. Nothing below runs on its own; each line says what a situa
 
 ## What calls for what
 
-**Starting on something unfamiliar, or asking where things stand** → `memory-bank/` is the only link to previous work; nothing loads automatically. Read it before answering from assumption.
+**Starting on something unfamiliar, or asking where things stand** → `memory-bank/` is the only link to previous work; nothing loads automatically. Read it — including `history.md` — before answering from assumption.
 
-**Work spanning more than one file, adding a dependency, or setting a pattern** → that's the bar for a plan file at `plans/YYYY-MM-DD_short-name.md`. Plan mode can't write files, so the file gets written right after approval, before any code. A single-file fix, a rename, a config tweak is below the bar.
+**Work spanning more than one file, adding a dependency, or setting a pattern** → that's the bar for a plan file at `plans/YYYY-MM-DD_short-name.md`. Plan mode can't write files, so the file gets written right after approval, before any code. A single-file fix, a rename, a config tweak is below the bar. As soon as the plan file exists, append a `planned` line for it to `memory-bank/history.md`.
 
 **Implementing against an existing plan** → follow it. If the work needs something the plan doesn't cover, stop and say so rather than quietly re-planning mid-implementation.
 
-**Something landed, or a decision got made** → `memory-bank/` is now stale. Verified facts can be written directly; anything that's a judgment gets proposed to me first.
+**Something landed, or a decision got made** → `memory-bank/` is now stale. Verified facts can be written directly; anything that's a judgment gets proposed to me first. When an implementation finishes, append (or update) its line in `memory-bank/history.md` to `implemented`.
 
 **Teachable Things** → `drills` is a guide where you'd teach me about the tech and the what/why/how/when/where of the stuff. Don't bloat and make it digestible. Also be honest about what's bad implementation and how can it be good just so I won't learn bad practices.
 
