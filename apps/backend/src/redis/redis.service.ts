@@ -1,5 +1,7 @@
-import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
+import { Injectable, OnApplicationShutdown } from '@nestjs/common';
 import Redis from 'ioredis';
+import { errorMessage, logger, since } from '../observability/logger';
+import { getRequestId } from '../observability/request-context';
 
 // Matches the Postgres side deliberately: a dependency gets 2s to answer before
 // we call it down, whichever dependency it is.
@@ -16,8 +18,9 @@ const MAX_RETRIES_PER_REQUEST = 1;
  */
 @Injectable()
 export class RedisService implements OnApplicationShutdown {
-  private readonly logger = new Logger(RedisService.name);
   private readonly client: Redis;
+  // Imported, not injected — see observability/logger.ts.
+  private readonly logger = logger;
 
   constructor() {
     this.client = new Redis({
@@ -39,12 +42,29 @@ export class RedisService implements OnApplicationShutdown {
     // Without this listener an unreachable Redis emits an unhandled error event
     // and takes the process down — the opposite of what a health check is for.
     this.client.on('error', (error: Error) => {
-      this.logger.warn(error.message);
+      this.logger.warn({ err: error.message }, 'redis_client_error');
     });
   }
 
+  /**
+   * The id travels as a log field only. Redis's equivalent of the SQL comment
+   * would be CLIENT SETNAME, which names the *connection*, and this client is
+   * one shared socket — naming it per request would mean a connection per
+   * request.
+   */
   async ping(): Promise<string> {
-    return this.client.ping();
+    const rid = getRequestId();
+    const startedAt = performance.now();
+    try {
+      return await this.client.ping();
+    } finally {
+      if (this.logger.isLevelEnabled('debug')) {
+        this.logger.debug(
+          { rid, cmd: 'PING', durMs: since(startedAt) },
+          'redis_command',
+        );
+      }
+    }
   }
 
   async onApplicationShutdown(): Promise<void> {
@@ -57,7 +77,7 @@ export class RedisService implements OnApplicationShutdown {
         this.client.disconnect();
       }
     } catch (error) {
-      this.logger.warn(`Closing the client failed: ${String(error)}`);
+      this.logger.warn({ err: errorMessage(error) }, 'redis_close_failed');
     }
   }
 }

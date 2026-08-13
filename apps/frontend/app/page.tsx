@@ -1,7 +1,25 @@
 import { fetchInfo } from '@/lib/api';
+import { logger, since } from '@/lib/logger';
+import { renderStartedAt } from '@/lib/render-timing';
+import { after } from 'next/server';
 
 export default async function Home() {
+  const startedAt = renderStartedAt();
   const result = await fetchInfo();
+
+  // Timed inside the callback: `after` runs once the response is finished, and
+  // the flush is part of the render.
+  after(() => {
+    logger.info(
+      {
+        rid: result.requestId,
+        route: '/',
+        totalMs: since(startedAt),
+        upstreamMs: result.durMs,
+      },
+      'page_render',
+    );
+  });
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center bg-zinc-50 font-sans dark:bg-black">
@@ -64,8 +82,10 @@ export default async function Home() {
           </a>
         </p>
 
-        <p className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
-          fetched from {result.source}
+        <p className="font-mono text-xs break-all text-zinc-500 dark:text-zinc-400">
+          fetched from {result.source} in {result.durMs}ms
+          <br />
+          rid {result.requestId}
         </p>
       </main>
     </div>

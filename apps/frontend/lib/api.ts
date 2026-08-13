@@ -1,7 +1,55 @@
+import { logger, since } from './logger';
+import { getRequestId } from './request-context';
+import { REQUEST_ID_HEADER } from './request-id';
+
 // The API is reached by Compose service name, not localhost. This only works
 // from the Next *server* — a client component would have to use the published
 // host port instead, because the browser is not on the Compose network.
 const API_URL = process.env.BACKEND_INTERNAL_URL ?? 'http://localhost:3002';
+
+/** A failed hop still happened and still took time. */
+class UpstreamError extends Error {
+  constructor(
+    readonly cause: unknown,
+    readonly durMs: number,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause));
+  }
+}
+
+/**
+ * The Next -> Nest hop, timed, with the id attached.
+ *
+ * The hop with no ambient context to lean on: within one process an
+ * AsyncLocalStorage carries the id for free, but across a process boundary the
+ * wire is the only channel. Everything downstream hangs off this header.
+ */
+async function callApi(
+  url: string,
+  requestId: string,
+  init?: RequestInit,
+): Promise<{ response: Response; durMs: number }> {
+  const startedAt = performance.now();
+
+  const record = (status: number | null) => {
+    const durMs = since(startedAt);
+    logger.debug({ rid: requestId, url, status, durMs }, 'upstream_fetch');
+    return durMs;
+  };
+
+  // Headers, not a spread: RequestInit.headers may legitimately be a Headers
+  // instance or an array of pairs, and spreading either silently yields {} —
+  // dropping every header without a word.
+  const headers = new Headers(init?.headers);
+  headers.set(REQUEST_ID_HEADER, requestId);
+
+  try {
+    const response = await fetch(url, { ...init, headers });
+    return { response, durMs: record(response.status) };
+  } catch (error) {
+    throw new UpstreamError(error, record(null));
+  }
+}
 
 export interface Info {
   postgres: {
@@ -11,9 +59,9 @@ export interface Info {
   };
 }
 
-export type InfoResult =
-  | { ok: true; info: Info; source: string }
-  | { ok: false; error: string; source: string };
+export type InfoResult = (
+  { ok: true; info: Info } | { ok: false; error: string }
+) & { source: string; requestId: string; durMs: number };
 
 /**
  * Next 16 does not cache fetch by default, so this runs per request without
@@ -22,18 +70,35 @@ export type InfoResult =
  */
 export async function fetchInfo(): Promise<InfoResult> {
   const source = `${API_URL}/info`;
+  const requestId = await getRequestId();
 
   try {
-    const response = await fetch(source);
+    const { response, durMs } = await callApi(source, requestId);
     if (!response.ok) {
-      return { ok: false, error: `API responded ${response.status}`, source };
+      return {
+        ok: false,
+        error: `API responded ${response.status}`,
+        source,
+        requestId,
+        durMs,
+      };
     }
-    return { ok: true, info: (await response.json()) as Info, source };
+    return {
+      ok: true,
+      info: (await response.json()) as Info,
+      source,
+      requestId,
+      durMs,
+    };
   } catch (error) {
     return {
       ok: false,
       error: error instanceof Error ? error.message : String(error),
       source,
+      requestId,
+      // The real duration, not 0. A connect timeout is 2s of upstream time, and
+      // reporting it as zero would charge it to Next's render in the gap table.
+      durMs: error instanceof UpstreamError ? error.durMs : 0,
     };
   }
 }
@@ -54,9 +119,10 @@ export interface ConversationPage {
   totalPages: number;
 }
 
-export type ConversationsResult =
-  | { ok: true; page: ConversationPage; source: string }
-  | { ok: false; error: string; status?: number; source: string };
+export type ConversationsResult = (
+  | { ok: true; page: ConversationPage }
+  | { ok: false; error: string; status?: number }
+) & { source: string; requestId: string; durMs: number };
 
 /**
  * Runs on the Next *server* only — `API_URL` is a Compose service name the
@@ -81,9 +147,10 @@ export async function fetchConversations(params: {
     sort: params.sort,
   });
   const source = `${API_URL}/conversations?${query}`;
+  const requestId = await getRequestId();
 
   try {
-    const response = await fetch(source, {
+    const { response, durMs } = await callApi(source, requestId, {
       headers: { 'x-org-id': params.orgId },
     });
 
@@ -96,6 +163,8 @@ export async function fetchConversations(params: {
         error: detail || `API responded ${response.status}`,
         status: response.status,
         source,
+        requestId,
+        durMs,
       };
     }
 
@@ -103,12 +172,18 @@ export async function fetchConversations(params: {
       ok: true,
       page: (await response.json()) as ConversationPage,
       source,
+      requestId,
+      durMs,
     };
   } catch (error) {
     return {
       ok: false,
       error: error instanceof Error ? error.message : String(error),
       source,
+      requestId,
+      // The real duration, not 0. A connect timeout is 2s of upstream time, and
+      // reporting it as zero would charge it to Next's render in the gap table.
+      durMs: error instanceof UpstreamError ? error.durMs : 0,
     };
   }
 }

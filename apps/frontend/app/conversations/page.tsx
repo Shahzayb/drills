@@ -1,4 +1,7 @@
 import { fetchConversations } from '@/lib/api';
+import { logger, since } from '@/lib/logger';
+import { renderStartedAt } from '@/lib/render-timing';
+import { after } from 'next/server';
 
 // There is no auth in this repo, so the tenant is a URL parameter with a
 // default. `?org=2` is how tenant isolation gets poked at by hand later.
@@ -26,6 +29,7 @@ const first = (value: string | string[] | undefined, fallback: string) =>
 export default async function ConversationsPage(
   props: PageProps<'/conversations'>,
 ) {
+  const startedAt = renderStartedAt();
   const searchParams = await props.searchParams;
 
   const orgId = first(searchParams.org, DEFAULT_ORG_ID);
@@ -34,6 +38,29 @@ export default async function ConversationsPage(
   const sort = first(searchParams.sort, DEFAULT_SORT);
 
   const result = await fetchConversations({ orgId, page, pageSize, sort });
+
+  // Timed *inside* the callback on purpose: `after` runs once the response is
+  // finished, and the flush is part of the render. Stopping the clock before
+  // `return` would time the data fetch only and report the rest as zero.
+  //
+  // The id is captured in the closure rather than read inside, because request
+  // APIs like headers() may only be called inside an `after` callback in Route
+  // Handlers and Server Functions — not in a Server Component.
+  //
+  // No `status`: a Server Component cannot know the HTTP status of the response
+  // it is part of. The upstream status is on upstream_fetch.
+  after(() => {
+    logger.info(
+      {
+        rid: result.requestId,
+        route: '/conversations',
+        orgId,
+        totalMs: since(startedAt),
+        upstreamMs: result.durMs,
+      },
+      'page_render',
+    );
+  });
 
   const href = (targetPage: number) =>
     `/conversations?${new URLSearchParams({
@@ -181,8 +208,13 @@ export default async function ConversationsPage(
           </div>
         )}
 
+        {/* The id is on the response header too, but printing it here means
+            you can copy it out of the page you are looking at and go straight
+            to `pnpm logs:trace <id>`. */}
         <p className="font-mono text-xs break-all text-zinc-500 dark:text-zinc-400">
-          fetched from {result.source}
+          fetched from {result.source} in {result.durMs}ms
+          <br />
+          rid {result.requestId}
         </p>
       </main>
     </div>

@@ -1,5 +1,7 @@
-import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
+import { Injectable, OnApplicationShutdown } from '@nestjs/common';
 import { Pool, QueryResult, QueryResultRow } from 'pg';
+import { errorMessage, logger, since } from '../observability/logger';
+import { getRequestId } from '../observability/request-context';
 
 // Every number here is chosen, not inherited. Reasoning lives in
 // plans/2026-08-06_drill-01-health-endpoint.md under "Numbers we chose".
@@ -16,6 +18,15 @@ const CONNECTION_TIMEOUT_MS = 2000;
 const IDLE_TIMEOUT_MS = 30_000;
 // Not a limit, just the line above which a query gets noticed.
 const SLOW_QUERY_MS = 200;
+// Long enough to tell two queries apart, short enough that a log line stays one
+// line. The full text is recoverable from the source; this is for recognising.
+const SQL_LOG_MAX = 200;
+
+/** One line, no runs of whitespace, bounded. */
+const summarise = (text: string): string => {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > SQL_LOG_MAX ? `${flat.slice(0, SQL_LOG_MAX)}…` : flat;
+};
 
 /**
  * Owns the connection pool. Every read goes through `query()` — that is the
@@ -25,8 +36,10 @@ const SLOW_QUERY_MS = 200;
  */
 @Injectable()
 export class PostgresService implements OnApplicationShutdown {
-  private readonly logger = new Logger(PostgresService.name);
   private readonly pool: Pool;
+  // Imported, not injected — see observability/logger.ts. Keeping this out of
+  // the constructor is what lets schema.e2e-spec.ts boot PostgresModule alone.
+  private readonly logger = logger;
 
   constructor() {
     this.pool = new Pool({
@@ -45,7 +58,7 @@ export class PostgresService implements OnApplicationShutdown {
     // 'error' event, so without this the process dies whenever the database
     // bounces instead of reporting itself unhealthy.
     this.pool.on('error', (error: Error) => {
-      this.logger.warn(`Idle client error: ${error.message}`);
+      this.logger.warn({ err: error.message }, 'pool_idle_client_error');
     });
   }
 
@@ -53,18 +66,62 @@ export class PostgresService implements OnApplicationShutdown {
     text: string,
     params?: unknown[],
   ): Promise<QueryResult<T>> {
-    const startedAt = Date.now();
-    try {
-      return await this.pool.query<T>(text, params);
+    const rid = getRequestId();
 
-      // return await this.executeWithRetry(() =>
-      //   this.pool.query<T>(text, params),
-      // );
-    } finally {
-      const elapsed = Date.now() - startedAt;
-      if (elapsed >= SLOW_QUERY_MS) {
-        this.logger.warn(`Slow query (${elapsed}ms): ${text}`);
-      }
+    // The id rides inside the statement — the only channel that reaches
+    // Postgres's own log and pg_stat_activity without pinning a connection.
+    // Interpolating into SQL is safe *only* because deriveRequestId allowlists
+    // the character set. See the plan file.
+    const sql = rid ? `/* rid=${rid} */ ${text}` : text;
+
+    const startedAt = performance.now();
+
+    try {
+      const result = await this.pool.query<T>(sql, params);
+      this.record(rid, startedAt, text, result.rowCount, null);
+      return result;
+    } catch (error) {
+      // A failed query gets its own event. Reporting it as a db_query with
+      // rows: null would read as an empty result set on exactly the request
+      // worth reconstructing.
+      this.record(rid, startedAt, text, null, error);
+      throw error;
+    }
+  }
+
+  private record(
+    rid: string | undefined,
+    startedAt: number,
+    text: string,
+    rows: number | null,
+    error: unknown,
+  ): void {
+    const durMs = since(startedAt);
+
+    if (error) {
+      this.logger.error(
+        {
+          rid,
+          durMs,
+          sql: summarise(text),
+          err: errorMessage(error),
+        },
+        'db_query_failed',
+      );
+      return;
+    }
+
+    // Guarded, not just called: a logger call below the active level still
+    // evaluates its arguments, so summarise() would run a regex over every
+    // statement only to have the line discarded. Worth ~5-6% of tail-org
+    // throughput — measured in drills/06-writeup-worksheet.md.
+    if (this.logger.isLevelEnabled('debug')) {
+      this.logger.debug({ rid, durMs, rows, sql: summarise(text) }, 'db_query');
+    }
+    if (durMs >= SLOW_QUERY_MS) {
+      // Stays at warn so it survives the default level, which is the whole
+      // reason a threshold exists.
+      this.logger.warn({ rid, durMs, sql: summarise(text) }, 'slow_query');
     }
   }
 
@@ -82,7 +139,7 @@ export class PostgresService implements OnApplicationShutdown {
     try {
       await this.pool.end();
     } catch (error) {
-      this.logger.warn(`Closing the pool failed: ${String(error)}`);
+      this.logger.warn({ err: errorMessage(error) }, 'pool_close_failed');
     }
   }
 }

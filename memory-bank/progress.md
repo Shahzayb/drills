@@ -4,6 +4,25 @@ Where things stand and what's next.
 
 ## Current focus
 
+Drill 06 — one request id through Next, Nest, Postgres and Redis. Shipped:
+
+- `x-request-id` generated or accepted at the Next edge, carried into Nest via header, into every
+  log line via `AsyncLocalStorage`, into the SQL as `/* rid=… */`, and echoed on the response.
+  Both apps log structured JSON through pino. `pnpm logs:trace <id>` reconstructs one request:
+  **12 lines, 3 services, one grep.** 27 e2e tests pass across 4 suites.
+- **Drill 05's finding #2 is now an observation, not an inference** — the two `Promise.all`
+  queries of one request are executed by two different Postgres backend PIDs.
+- **Overhead is a fixed ~0.9ms/request, not a percentage.** Tail org (2ms requests): −26.7%
+  throughput with logging *silent*, −30.7% `info`, −34.7% `debug`. Whale org (176ms requests):
+  **no measurable effect** — "before" landed between two "after" runs. The whale runs also
+  reproduce drill 05's baseline (48.02 vs 48.57 req/s).
+- The plumbing costs ~4x what the logging does. **A suppressed log line still evaluates its
+  arguments** — guarding with `isLevelEnabled` recovered 6.0% at silent, 5.0% at info, and (as
+  predicted) nothing at debug.
+- See `plans/2026-08-13_drill-06-request-id-propagation.md`,
+  `drills/06-request-tracing-and-structured-logs.md` and `drills/06-writeup-worksheet.md`.
+- **Not done:** the OpenTelemetry stretch. Scoped as phase 2 in the same plan file.
+
 Drill 05 — the load-test baseline. Shipped:
 
 - `GET /conversations?page=1&pageSize=20` measured with k6, 10 VUs, 20s warm-up excluded,
@@ -36,14 +55,18 @@ Drill 04 — the bulk seed. Shipped:
 
 ## Next step
 
-Card 09 (the composite index) is where the whale's 176ms actually lives — drill 05 measured that,
-against expectation. Card 08 (`count(*)`, keyset paging) is real but smaller at page 1.
+Card 07 is the next card in order. Card 09 (the composite index) is where the whale's 176ms
+actually lives — drill 05 measured that, against expectation — and card 08 (`count(*)`, keyset
+paging) is real but smaller at page 1.
 
-Cheapest unblocked win first: put `PostgresService.stats()` on a route. Drill 05's most
-interesting claim — the pool is oversubscribed 2:1 — is currently inference, not measurement.
+Drill 05's suggested "cheapest win" is now closed: the pool oversubscription was confirmed in
+drill 06 by two backend PIDs on one request. (`PostgresService.stats()` was already on a route —
+`/info` renders it; that line was stale.) What is still unmeasured is the pool under *load*, since
+nothing samples `stats()` during a k6 run.
 
 ## Active plan
 
+`plans/2026-08-13_drill-06-request-id-propagation.md` (phase 1 shipped, phase 2 not started),
 `plans/2026-08-13_drill-05-load-test-baseline.md` (shipped),
 `plans/2026-08-11_drill-04-bulk-seed.md` (shipped),
 `plans/2026-08-12_seed-simplification.md` (shipped)
@@ -58,8 +81,11 @@ compared against, and drill 04's plan records what those same queries do at 2.5M
 ## Known issues
 
 1. Frontend has no test runner.
-2. Backend doesn't log any endpoint locally. Must be disabled in production.
-3. Backend: health, info, postgres, and redis doesnt have any tests
+2. ~~Backend doesn't log any endpoint locally.~~ Fixed in drill 06 — both apps log structured
+   JSON, one line per request at `info`. Note the reverse concern now applies: `debug` in
+   production would be expensive, and the query string is logged in full.
+3. Backend: health, info, postgres, and redis doesnt have any tests. (Drill 06 added
+   `request-id.e2e-spec.ts`, which exercises `/health` but does not test `HealthService`.)
 4. `AppController`/`AppService` are still `nest new` scaffolding returning `'Hello World!'`,
    kept only because `test/app.e2e-spec.ts` asserts on them.
 

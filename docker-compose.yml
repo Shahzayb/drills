@@ -83,6 +83,12 @@ services:
       dockerfile: Dockerfile
     container_name: drills_backend
     env_file: .env
+    # Overrides env_file, and reads from the shell first — which is what makes
+    # `LOG_LEVEL=debug docker compose up -d nest_server` a one-command A/B.
+    # `silent` is a real pino level and is the "before" column of that
+    # measurement. See plans/2026-08-13_drill-06-request-id-propagation.md.
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
     ports:
       - '${BACKEND_PORT:-3002}:3002'
     volumes:
@@ -121,6 +127,8 @@ services:
       dockerfile: Dockerfile
     container_name: drills_frontend
     env_file: .env
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
     ports:
       - '${FRONTEND_PORT:-3001}:3001'
     volumes:
