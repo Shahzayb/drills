@@ -1,12 +1,12 @@
-import { fetchConversations } from "@/lib/api";
+import { fetchConversations } from '@/lib/api';
 
 // There is no auth in this repo, so the tenant is a URL parameter with a
 // default. `?org=2` is how tenant isolation gets poked at by hand later.
-const DEFAULT_ORG_ID = "1";
+const DEFAULT_ORG_ID = '1';
 // Matches the API's own default. Stated here anyway rather than relying on the
 // API's, so the page's URLs are always complete and shareable.
-const DEFAULT_PAGE_SIZE = "50";
-const DEFAULT_SORT = "updated_at";
+const DEFAULT_PAGE_SIZE = '50';
+const DEFAULT_SORT = 'updated_at';
 
 /** `?a=1&a=2` gives an array. Take the first and move on. */
 const first = (value: string | string[] | undefined, fallback: string) =>
@@ -24,12 +24,12 @@ const first = (value: string | string[] | undefined, fallback: string) =>
  * with no spinner, so the absence is the point. Drill 10 changes that.
  */
 export default async function ConversationsPage(
-  props: PageProps<"/conversations">,
+  props: PageProps<'/conversations'>,
 ) {
   const searchParams = await props.searchParams;
 
   const orgId = first(searchParams.org, DEFAULT_ORG_ID);
-  const page = first(searchParams.page, "1");
+  const page = first(searchParams.page, '1');
   const pageSize = first(searchParams.pageSize, DEFAULT_PAGE_SIZE);
   const sort = first(searchParams.sort, DEFAULT_SORT);
 
@@ -59,19 +59,19 @@ export default async function ConversationsPage(
         {/* Sorting is a set of links, not a dropdown, because a dropdown needs
             client JavaScript and this page deliberately ships none. */}
         <nav className="flex gap-3 text-sm">
-          {["updated_at", "created_at"].map((column) => (
+          {['updated_at', 'created_at'].map((column) => (
             <a
               key={column}
               href={`/conversations?${new URLSearchParams({
                 org: orgId,
-                page: "1",
+                page: '1',
                 pageSize,
                 sort: column,
               })}`}
               className={
                 column === sort
-                  ? "font-medium text-black underline dark:text-zinc-50"
-                  : "text-zinc-500 underline hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50"
+                  ? 'font-medium text-black underline dark:text-zinc-50'
+                  : 'text-zinc-500 underline hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50'
               }
             >
               {column}
@@ -105,7 +105,7 @@ export default async function ConversationsPage(
                         {conversation.status}
                       </td>
                       <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
-                        {conversation.assigneeId ?? "—"}
+                        {conversation.assigneeId ?? '—'}
                       </td>
                       {/* Raw ISO, not toLocaleString(). The server's timezone is
                           the container's, not the reader's, so a "friendly"
@@ -134,7 +134,7 @@ export default async function ConversationsPage(
 
             <div className="flex items-center justify-between text-sm">
               <p className="text-zinc-600 dark:text-zinc-400">
-                Page {result.page.page} of {result.page.totalPages || 1} ·{" "}
+                Page {result.page.page} of {result.page.totalPages || 1} ·{' '}
                 {result.page.total} conversations
               </p>
               {/* Plain anchors, not next/link. A full document request is what
@@ -173,7 +173,7 @@ export default async function ConversationsPage(
           <div className="flex flex-col gap-2 rounded-lg border border-red-200 bg-red-50 p-6 dark:border-red-900/50 dark:bg-red-950/30">
             <p className="font-medium text-red-900 dark:text-red-200">
               The API refused this request
-              {result.status ? ` (${result.status})` : ""}
+              {result.status ? ` (${result.status})` : ''}
             </p>
             <pre className="overflow-x-auto font-mono text-xs whitespace-pre-wrap text-red-800 dark:text-red-300">
               {result.error}

@@ -1,4 +1,4 @@
-import { fetchInfo } from "@/lib/api";
+import { fetchInfo } from '@/lib/api';
 
 export default async function Home() {
   const result = await fetchInfo();
@@ -35,13 +35,11 @@ export default async function Home() {
               </dd>
             </div>
             <div className="flex flex-col gap-1">
-              <dt className="text-sm text-zinc-500 dark:text-zinc-400">
-                Pool
-              </dt>
+              <dt className="text-sm text-zinc-500 dark:text-zinc-400">Pool</dt>
               <dd className="font-mono text-sm text-black dark:text-zinc-50">
-                {result.info.postgres.poolStats.total} open ·{" "}
-                {result.info.postgres.poolStats.idle} idle ·{" "}
-                {result.info.postgres.poolStats.waiting} waiting · max{" "}
+                {result.info.postgres.poolStats.total} open ·{' '}
+                {result.info.postgres.poolStats.idle} idle ·{' '}
+                {result.info.postgres.poolStats.waiting} waiting · max{' '}
                 {result.info.postgres.poolStats.max}
               </dd>
             </div>

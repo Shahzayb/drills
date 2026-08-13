@@ -24,17 +24,54 @@ export const PHASE = {
 // Support vocabulary faker has no module for. Hand-written because this is the
 // part that decides whether the table reads like a support inbox or like filler.
 const FEATURES = [
-  'CSV export', 'SSO login', 'webhook delivery', 'the audit log', 'billing portal',
-  'the mobile app', 'search', 'the API', 'two-factor authentication', 'email digests',
-  'the reporting dashboard', 'bulk import', 'team invitations', 'the Slack integration',
-  'saved views', 'custom fields', 'the activity feed', 'attachment upload',
-  'scheduled reports', 'the admin console', 'seat management', 'data retention settings',
-  'the Zapier integration', 'inbox filters', 'canned responses', 'the public status page',
-  'invoice download', 'usage alerts', 'the onboarding checklist', 'role permissions',
+  'CSV export',
+  'SSO login',
+  'webhook delivery',
+  'the audit log',
+  'billing portal',
+  'the mobile app',
+  'search',
+  'the API',
+  'two-factor authentication',
+  'email digests',
+  'the reporting dashboard',
+  'bulk import',
+  'team invitations',
+  'the Slack integration',
+  'saved views',
+  'custom fields',
+  'the activity feed',
+  'attachment upload',
+  'scheduled reports',
+  'the admin console',
+  'seat management',
+  'data retention settings',
+  'the Zapier integration',
+  'inbox filters',
+  'canned responses',
+  'the public status page',
+  'invoice download',
+  'usage alerts',
+  'the onboarding checklist',
+  'role permissions',
 ];
 
-const BROWSERS = ['Chrome', 'Safari', 'Firefox', 'Edge', 'Chrome on Android', 'Safari on iOS'];
-const PLATFORMS = ['macOS', 'Windows 11', 'Ubuntu 24.04', 'iOS 18', 'Android 15', 'Windows 10'];
+const BROWSERS = [
+  'Chrome',
+  'Safari',
+  'Firefox',
+  'Edge',
+  'Chrome on Android',
+  'Safari on iOS',
+];
+const PLATFORMS = [
+  'macOS',
+  'Windows 11',
+  'Ubuntu 24.04',
+  'iOS 18',
+  'Android 15',
+  'Windows 10',
+];
 const PLANS = ['Free', 'Basic', 'Pro'];
 
 // Relative and absolute forms mixed on purpose: it reads naturally, and it keeps
@@ -46,17 +83,42 @@ const PLANS = ['Free', 'Basic', 'Pro'];
 // adverbial and carries its own "on" where a date needs one. One pool produces
 // "on over the weekend".
 const WHENS = [
-  'the 3rd', 'the 14th', 'Tuesday', 'Thursday', 'the weekend', 'March 14',
-  'the 2nd', 'Monday', 'last week', 'yesterday', 'the 21st', 'Friday',
+  'the 3rd',
+  'the 14th',
+  'Tuesday',
+  'Thursday',
+  'the weekend',
+  'March 14',
+  'the 2nd',
+  'Monday',
+  'last week',
+  'yesterday',
+  'the 21st',
+  'Friday',
 ];
 
 const WHEN_ATS = [
-  'on the 3rd', 'on the 14th', 'last Tuesday', 'yesterday morning', 'this morning',
-  'last Thursday', 'over the weekend', 'on March 14', 'on the 2nd', 'late last week',
-  'on Monday afternoon', 'on the 21st', 'two days ago', 'earlier today', 'last month',
+  'on the 3rd',
+  'on the 14th',
+  'last Tuesday',
+  'yesterday morning',
+  'this morning',
+  'last Thursday',
+  'over the weekend',
+  'on March 14',
+  'on the 2nd',
+  'late last week',
+  'on Monday afternoon',
+  'on the 21st',
+  'two days ago',
+  'earlier today',
+  'last month',
 ];
 
-const sanitise = (s) => String(s).replace(/[\\\t\n\r]+/g, ' ').trim();
+const sanitise = (s) =>
+  String(s)
+    .replace(/[\\\t\n\r]+/g, ' ')
+    .trim();
 
 const times = (n, fn) => {
   const out = new Array(n);
@@ -83,10 +145,20 @@ function buildPools(faker) {
     city: times(600, () => faker.location.city()),
     // One currency, not faker.finance.currencySymbol(). A single product billing
     // the same account in rupees and rials on alternate lines is noise, not skew.
-    amount: times(1000, () => `$${faker.finance.amount({ min: 9, max: 4800 })}`),
+    amount: times(
+      1000,
+      () => `$${faker.finance.amount({ min: 9, max: 4800 })}`,
+    ),
     version: times(600, () => faker.system.semver()),
-    ref: times(4000, () => `${faker.string.alpha({ length: 3, casing: 'upper' })}-${faker.number.int({ min: 1000, max: 99999 })}`),
-    errorCode: times(500, () => `ERR_${faker.number.int({ min: 1000, max: 9999 })}`),
+    ref: times(
+      4000,
+      () =>
+        `${faker.string.alpha({ length: 3, casing: 'upper' })}-${faker.number.int({ min: 1000, max: 99999 })}`,
+    ),
+    errorCode: times(
+      500,
+      () => `ERR_${faker.number.int({ min: 1000, max: 9999 })}`,
+    ),
     count: times(600, () => String(faker.number.int({ min: 3, max: 9800 }))),
     seconds: times(200, () => String(faker.number.int({ min: 4, max: 180 }))),
   };
@@ -190,9 +262,11 @@ export function createCorpus(faker, rng) {
   // plans/2026-08-12_seed-simplification.md.
   for (const list of Object.values(TEMPLATES)) {
     for (const t of list) {
-      if (/[\\\t\n\r]/.test(t)) throw new Error(`Template contains a COPY metacharacter: ${t}`);
+      if (/[\\\t\n\r]/.test(t))
+        throw new Error(`Template contains a COPY metacharacter: ${t}`);
       for (const [, slot] of t.matchAll(SLOT_RE)) {
-        if (!pools[slot]) throw new Error(`Template uses unknown slot {${slot}}: ${t}`);
+        if (!pools[slot])
+          throw new Error(`Template uses unknown slot {${slot}}: ${t}`);
       }
     }
   }
@@ -201,7 +275,8 @@ export function createCorpus(faker, rng) {
 
   // Left-to-right over the slots, which is the order the old render() drew in too —
   // the RNG sequence is unchanged, so bodies are byte-identical to before.
-  const render = (template) => template.replace(SLOT_RE, (_, slot) => pick(pools[slot]));
+  const render = (template) =>
+    template.replace(SLOT_RE, (_, slot) => pick(pools[slot]));
 
   // A slot at the start of a sentence inherits its pool's casing, which gives
   // "inbox filters has been failing" or "deployed to everyone. the API should
@@ -209,7 +284,8 @@ export function createCorpus(faker, rng) {
   // seams where two templates were joined. Cheaper than storing every feature
   // name in two cases — but it is a fix-up, and the plan records the two casing
   // bugs it let through before it covered sentence boundaries too.
-  const capitalise = (s) => s.replace(/(^|[.!?] )([a-z])/g, (_, lead, c) => lead + c.toUpperCase());
+  const capitalise = (s) =>
+    s.replace(/(^|[.!?] )([a-z])/g, (_, lead, c) => lead + c.toUpperCase());
 
   // One template averages ~104 chars, so the sentence count is what sets the
   // mean body length. 40/45/15 across one/two/three gives 1.75 sentences and
@@ -247,7 +323,11 @@ export function phaseFor(index, total, closed) {
   if (index === 1) return PHASE.ACK;
   if (index === total - 1) return closed ? PHASE.RESOLUTION : PHASE.FOLLOWUP;
   const cycle = (index - 2) % 3;
-  return cycle === 0 ? PHASE.DETAIL : cycle === 1 ? PHASE.INVESTIGATING : PHASE.FOLLOWUP;
+  return cycle === 0
+    ? PHASE.DETAIL
+    : cycle === 1
+      ? PHASE.INVESTIGATING
+      : PHASE.FOLLOWUP;
 }
 
 /** mulberry32 — small, fast, and deterministic from a 32-bit seed. */

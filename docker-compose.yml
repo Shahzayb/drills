@@ -35,14 +35,14 @@ services:
       - -c
       - checkpoint_timeout=30min
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - '${POSTGRES_PORT:-5432}:5432'
     volumes:
       - drills_pgdata:/var/lib/postgresql
     healthcheck:
       test:
         [
-          "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}",
+          'CMD-SHELL',
+          'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}',
         ]
       interval: 5s
       timeout: 5s
@@ -59,14 +59,14 @@ services:
     env_file: .env
     command: redis-server --requirepass ${REDIS_PASSWORD:-default_secure_pass}
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - '${REDIS_PORT:-6379}:6379'
     volumes:
       - drills_redisdata:/data
     healthcheck:
       test:
         [
-          "CMD-SHELL",
-          "redis-cli -a ${REDIS_PASSWORD:-default_secure_pass} ping | grep PONG",
+          'CMD-SHELL',
+          'redis-cli -a ${REDIS_PASSWORD:-default_secure_pass} ping | grep PONG',
         ]
       interval: 5s
       timeout: 5s
@@ -84,7 +84,7 @@ services:
     container_name: drills_backend
     env_file: .env
     ports:
-      - "${BACKEND_PORT:-3002}:3002"
+      - '${BACKEND_PORT:-3002}:3002'
     volumes:
       - ./apps/backend:/app/apps/backend
       - ./packages:/app/packages
@@ -98,8 +98,8 @@ services:
     healthcheck:
       test:
         [
-          "CMD-SHELL",
-          "wget -qO- http://localhost:3002/health >/dev/null || exit 1",
+          'CMD-SHELL',
+          'wget -qO- http://localhost:3002/health >/dev/null || exit 1',
         ]
       # 5s x 2 retries puts "unhealthy" ~10-15s after a dependency dies. The
       # drills that follow induce failure and measure the response, so a slower
@@ -122,7 +122,7 @@ services:
     container_name: drills_frontend
     env_file: .env
     ports:
-      - "${FRONTEND_PORT:-3001}:3001"
+      - '${FRONTEND_PORT:-3001}:3001'
     volumes:
       - ./apps/frontend:/app/apps/frontend
       - ./packages:/app/packages
@@ -134,8 +134,8 @@ services:
     healthcheck:
       test:
         [
-          "CMD-SHELL",
-          "wget -qO- http://localhost:3001/health >/dev/null || exit 1",
+          'CMD-SHELL',
+          'wget -qO- http://localhost:3001/health >/dev/null || exit 1',
         ]
       interval: 5s
       timeout: 3s
@@ -146,6 +146,22 @@ services:
       - app-network
     mem_limit: 1g
     mem_reservation: 512m
+  # Load generator. On app-network so scripts can address `nest_server:3002` by
+  # service name, which is also why it never measures real network latency.
+  #
+  # Version is PINNED on purpose. A baseline is only comparable to a re-run of
+  # itself, and `:latest` changes the instrument silently between the `before`
+  # and the `after` — the same failure mode as POSTGRES_INITDB_ARGS in drill 04.
+  # See plans/2026-08-13_drill-05-load-test-baseline.md.
+  k6:
+    image: grafana/k6:2.1.0
+    container_name: drills_k6
+    volumes:
+      - ./k6:/scripts
+    networks:
+      - app-network
+    profiles: ['test']
+    entrypoint: ['k6']
 
 networks:
   app-network:

@@ -25,7 +25,10 @@
   "compounds": [
     {
       "name": "Debug: backend + frontend",
-      "configurations": ["Backend: debug (NestJS)", "Frontend: debug server-side"]
+      "configurations": [
+        "Backend: debug (NestJS)",
+        "Frontend: debug server-side"
+      ]
     }
   ]
 }

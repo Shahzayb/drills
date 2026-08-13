@@ -71,8 +71,12 @@ async function phase(name, fn, rows = null) {
   const started = process.hrtime.bigint();
   const result = await fn();
   const elapsed = ms(process.hrtime.bigint() - started);
-  const rate = rows ? ` ${Math.round(rows / (elapsed / 1000)).toLocaleString()} rows/s` : '';
-  console.log(`  ${name.padEnd(28)} ${(elapsed / 1000).toFixed(2).padStart(7)}s${rate}`);
+  const rate = rows
+    ? ` ${Math.round(rows / (elapsed / 1000)).toLocaleString()} rows/s`
+    : '';
+  console.log(
+    `  ${name.padEnd(28)} ${(elapsed / 1000).toFixed(2).padStart(7)}s${rate}`,
+  );
   return result;
 }
 
@@ -87,7 +91,8 @@ const stamp = (msEpoch) => new Date(Math.floor(msEpoch)).toISOString();
 // `ORDER BY updated_at DESC, id DESC` tiebreaker exists for. Not redundant with
 // planConversations — its Math.max floor can emit a non-aligned value for
 // conversations younger than the minimum span.
-const stampSecond = (msEpoch) => new Date(Math.floor(msEpoch / 1000) * 1000).toISOString();
+const stampSecond = (msEpoch) =>
+  new Date(Math.floor(msEpoch / 1000) * 1000).toISOString();
 
 /**
  * uuidv7 built from the row's own created_at rather than insert time, so id
@@ -119,7 +124,10 @@ function shuffle(arr, rnd) {
   }
 }
 
-const sanitise = (s) => String(s).replace(/[\\\t\n\r]+/g, ' ').trim();
+const sanitise = (s) =>
+  String(s)
+    .replace(/[\\\t\n\r]+/g, ' ')
+    .trim();
 
 // ------------------------------------------------------------------ planning
 
@@ -134,14 +142,32 @@ function planStructure() {
   const orgs = [];
   for (let i = 1; i <= ORGS; i++) {
     // Plan correlates with tier: the whale and the mid orgs are the paying ones.
-    const plan = i === 1 ? 'pro' : i <= 10 ? (rnd() < 0.6 ? 'pro' : 'basic') : rnd() < 0.75 ? 'free' : 'basic';
+    const plan =
+      i === 1
+        ? 'pro'
+        : i <= 10
+          ? rnd() < 0.6
+            ? 'pro'
+            : 'basic'
+          : rnd() < 0.75
+            ? 'free'
+            : 'basic';
     const created = orgBase - Math.floor(rnd() * 300 * DAY_MS);
-    orgs.push({ id: i, name: sanitise(faker.company.name()).slice(0, 255), plan, created });
+    orgs.push({
+      id: i,
+      name: sanitise(faker.company.name()).slice(0, 255),
+      plan,
+      created,
+    });
   }
 
   const users = [];
   for (let i = 1; i <= USERS; i++) {
-    users.push({ id: i, name: sanitise(faker.person.fullName()), created: orgBase - Math.floor(rnd() * 280 * DAY_MS) });
+    users.push({
+      id: i,
+      name: sanitise(faker.person.fullName()),
+      created: orgBase - Math.floor(rnd() * 280 * DAY_MS),
+    });
   }
 
   // Memberships laid out in contiguous id blocks per org, so picking an
@@ -176,7 +202,8 @@ function planConversations() {
   // Recency weighting. age = WINDOW * u^2.5 puts the median around 3.2 months
   // instead of the 9 a uniform spread would give.
   const created = new Float64Array(n);
-  for (let i = 0; i < n; i++) created[i] = NOW - WINDOW_MS * Math.pow(rnd(), 2.5);
+  for (let i = 0; i < n; i++)
+    created[i] = NOW - WINDOW_MS * Math.pow(rnd(), 2.5);
   created.sort();
 
   // Exact 40/40/20, then shuffled — not sampled, so the GROUP BY proof is exact
@@ -217,13 +244,20 @@ function planConversations() {
   let messages = 0;
   for (let i = 0; i < n; i++) {
     const ageFrac = (NOW - created[i]) / WINDOW_MS;
-    closed[i] = rnd() < 1 - OPEN_AT_ZERO * Math.exp(-ageFrac * CLOSE_RATE) ? 1 : 0;
+    closed[i] =
+      rnd() < 1 - OPEN_AT_ZERO * Math.exp(-ageFrac * CLOSE_RATE) ? 1 : 0;
     // updated_at is the last message's timestamp, so an inbox sorted by it is
     // sorted by real activity rather than by an unrelated number. Truncated to
     // the second on purpose: at ~80k of org 1's rows inside the last 24h, that
     // guarantees the sort-key ties drill 03's tiebreaker exists for.
-    const span = Math.min(NOW - created[i], 1.8e6 + Math.pow(rnd(), 2) * 14 * DAY_MS);
-    updated[i] = Math.max(Math.floor((created[i] + span) / 1000) * 1000, Math.floor(created[i]));
+    const span = Math.min(
+      NOW - created[i],
+      1.8e6 + Math.pow(rnd(), 2) * 14 * DAY_MS,
+    );
+    updated[i] = Math.max(
+      Math.floor((created[i] + span) / 1000) * 1000,
+      Math.floor(created[i]),
+    );
     messages += msgCount[i];
   }
 
@@ -251,7 +285,10 @@ function* conversationLines(plan, memStart, memCount, uuidBuf) {
     writeUuid(uuidBuf, i * 16, created[i], rnd);
     // One conversation in five is unassigned. An always-populated nullable
     // column hides exactly the bugs it exists to expose.
-    const assignee = rnd() < 0.2 ? '\\N' : String(memStart[org] + ((rnd() * memCount[org]) | 0));
+    const assignee =
+      rnd() < 0.2
+        ? '\\N'
+        : String(memStart[org] + ((rnd() * memCount[org]) | 0));
     batch.push(
       `${uuidHex(uuidBuf, i * 16)}\t${org}\t${closed[i] ? 'closed' : 'open'}\t${assignee}\t${stamp(created[i])}\t${stampSecond(updated[i])}`,
     );
@@ -313,9 +350,18 @@ async function copyInto(sql, iterator) {
 }
 
 const SECONDARY_INDEXES = [
-  ['conversations_org_id_idx', 'CREATE INDEX conversations_org_id_idx ON conversations (org_id)'],
-  ['conversations_assignee_id_idx', 'CREATE INDEX conversations_assignee_id_idx ON conversations (assignee_id)'],
-  ['messages_conversation_id_idx', 'CREATE INDEX messages_conversation_id_idx ON messages (conversation_id)'],
+  [
+    'conversations_org_id_idx',
+    'CREATE INDEX conversations_org_id_idx ON conversations (org_id)',
+  ],
+  [
+    'conversations_assignee_id_idx',
+    'CREATE INDEX conversations_assignee_id_idx ON conversations (assignee_id)',
+  ],
+  [
+    'messages_conversation_id_idx',
+    'CREATE INDEX messages_conversation_id_idx ON messages (conversation_id)',
+  ],
 ];
 
 async function main() {
@@ -323,7 +369,9 @@ async function main() {
   await client.connect();
 
   console.log(`\nseed  scale=${SCALE}`);
-  console.log(`      ${CONVERSATIONS.toLocaleString()} conversations planned\n`);
+  console.log(
+    `      ${CONVERSATIONS.toLocaleString()} conversations planned\n`,
+  );
 
   const structure = await phase('plan structure', () => planStructure());
   const plan = await phase('plan conversations', () => planConversations());
@@ -351,27 +399,47 @@ async function main() {
   });
 
   await phase('drop secondary indexes', async () => {
-    for (const [name] of SECONDARY_INDEXES) await client.query(`DROP INDEX ${name}`);
+    for (const [name] of SECONDARY_INDEXES)
+      await client.query(`DROP INDEX ${name}`);
   });
 
   // Worth 51.6s, the largest single lever: 10M immediate per-row trigger firings
   // against a 2.5M-row uuid index. Re-added below with the same guarantees.
   await phase('drop messages FK', () =>
-    client.query('ALTER TABLE messages DROP CONSTRAINT messages_conversation_id_fkey'),
+    client.query(
+      'ALTER TABLE messages DROP CONSTRAINT messages_conversation_id_fkey',
+    ),
   );
 
   // Small enough to build as one string each — no batching, no streaming.
   for (const [name, rows, columns, format] of [
-    ['organizations', structure.orgs, '(id, name, plan, created_at, updated_at)',
-      (o) => `${o.id}\t${o.name}\t${o.plan}\t${stamp(o.created)}\t${stamp(o.created)}`],
-    ['users', structure.users, '(id, name, created_at, updated_at)',
-      (u) => `${u.id}\t${u.name}\t${stamp(u.created)}\t${stamp(u.created)}`],
-    ['memberships', structure.memberships, '(id, user_id, org_id, role, created_at, updated_at)',
-      (m) => `${m.id}\t${m.userId}\t${m.orgId}\t${m.role}\t${stamp(m.created)}\t${stamp(m.created)}`],
+    [
+      'organizations',
+      structure.orgs,
+      '(id, name, plan, created_at, updated_at)',
+      (o) =>
+        `${o.id}\t${o.name}\t${o.plan}\t${stamp(o.created)}\t${stamp(o.created)}`,
+    ],
+    [
+      'users',
+      structure.users,
+      '(id, name, created_at, updated_at)',
+      (u) => `${u.id}\t${u.name}\t${stamp(u.created)}\t${stamp(u.created)}`,
+    ],
+    [
+      'memberships',
+      structure.memberships,
+      '(id, user_id, org_id, role, created_at, updated_at)',
+      (m) =>
+        `${m.id}\t${m.userId}\t${m.orgId}\t${m.role}\t${stamp(m.created)}\t${stamp(m.created)}`,
+    ],
   ]) {
     await phase(
       `copy ${name}`,
-      () => copyInto(`COPY ${name} ${columns} FROM STDIN`, [rows.map(format).join('\n') + '\n']),
+      () =>
+        copyInto(`COPY ${name} ${columns} FROM STDIN`, [
+          rows.map(format).join('\n') + '\n',
+        ]),
       rows.length,
     );
   }
@@ -381,7 +449,12 @@ async function main() {
     () =>
       copyInto(
         'COPY conversations (id, org_id, status, assignee_id, created_at, updated_at) FROM STDIN',
-        conversationLines(plan, structure.memStart, structure.memCount, uuidBuf),
+        conversationLines(
+          plan,
+          structure.memStart,
+          structure.memCount,
+          uuidBuf,
+        ),
       ),
     CONVERSATIONS,
   );
@@ -411,7 +484,9 @@ async function main() {
       'ALTER TABLE messages ADD CONSTRAINT messages_conversation_id_fkey ' +
         'FOREIGN KEY (conversation_id) REFERENCES conversations (id) NOT VALID',
     );
-    await client.query('ALTER TABLE messages VALIDATE CONSTRAINT messages_conversation_id_fkey');
+    await client.query(
+      'ALTER TABLE messages VALIDATE CONSTRAINT messages_conversation_id_fkey',
+    );
   });
 
   // TRUNCATE ... RESTART IDENTITY zeroed the sequences and every id was
@@ -419,7 +494,9 @@ async function main() {
   await phase('setval sequences', async () => {
     await client.query(`SELECT setval('organizations_id_seq', $1)`, [ORGS]);
     await client.query(`SELECT setval('users_id_seq', $1)`, [USERS]);
-    await client.query(`SELECT setval('memberships_id_seq', $1)`, [structure.memberships.length]);
+    await client.query(`SELECT setval('memberships_id_seq', $1)`, [
+      structure.memberships.length,
+    ]);
     await client.query(`SELECT setval('messages_id_seq', $1)`, [plan.messages]);
   });
 

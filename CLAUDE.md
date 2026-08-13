@@ -24,6 +24,12 @@ I drive the workflow. Nothing below runs on its own; each line says what a situa
 
 The `memory-bank` skill covers what belongs in each file and how an update pass runs.
 
+Learn about the project history from the `memory-bank/history.md` file.
+
 ## Rules
 
 - Code comments are only for short, to-the-point descriptions, not an essay. But you can reference to the `plans/` to justify the current implementation just so future iterations won't 'fix' or 'improve' it.
+- Never include Co-Authored-By line in the commit. Don't use any watermark.
+- Prefer the simpler construction. If a thing can be a plain script, a plain function or a plain file, it is that — cleverness has to earn its place with a number, the same way drill 04's hot paths had to.
+- Scripts are `.mjs` (plain Node ESM, like `apps/backend/db/seed.mjs`), not shell. Shell is for one-liners in `package.json`.
+- Run `pnpm format` before calling a task done.

@@ -133,7 +133,9 @@ function benchBodies(rows) {
 async function main() {
   await client.connect();
   const { rows: v } = await client.query('SHOW server_version');
-  console.log(`Postgres ${v[0].server_version}, ${ROWS.toLocaleString()} rows each\n`);
+  console.log(
+    `Postgres ${v[0].server_version}, ${ROWS.toLocaleString()} rows each\n`,
+  );
 
   await reset();
   const loopMs = await insertLoop(ROWS);
@@ -162,7 +164,9 @@ async function main() {
     `\nBudget rule (>=150k/sec): faker per row ${rate(b.perRowMs) >= 150_000 ? 'PASSES' : 'FAILS'}, ` +
       `templates ${rate(b.tplMs) >= 150_000 ? 'PASSES' : 'FAILS'}.`,
   );
-  console.log(`\nProjected for 10M bodies: faker ${(b.perRowMs * 100 / 1000).toFixed(0)}s, templates ${(b.tplMs * 100 / 1000).toFixed(0)}s.`);
+  console.log(
+    `\nProjected for 10M bodies: faker ${((b.perRowMs * 100) / 1000).toFixed(0)}s, templates ${((b.tplMs * 100) / 1000).toFixed(0)}s.`,
+  );
 
   console.log('\n== Sample bodies ==');
   for (const s of b.sample.slice(1)) console.log(`  - ${s}`);

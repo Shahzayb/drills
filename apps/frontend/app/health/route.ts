@@ -1,4 +1,4 @@
-import { fetchInfo } from "@/lib/api";
+import { fetchInfo } from '@/lib/api';
 
 /**
  * Liveness for the web app: 200 whenever Next is serving.
@@ -12,11 +12,11 @@ export async function GET() {
   const result = await fetchInfo();
 
   return Response.json({
-    status: "ok",
+    status: 'ok',
     checks: {
       api: result.ok
-        ? { status: "up" }
-        : { status: "down", error: result.error },
+        ? { status: 'up' }
+        : { status: 'down', error: result.error },
     },
   });
 }

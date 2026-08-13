@@ -10,6 +10,8 @@
     "dev:frontend": "turbo run dev --filter=frontend",
     "build": "turbo run build",
     "lint": "turbo run lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "turbo run test",
     "db:migrate": "docker compose exec nest_server pnpm --filter=backend run migrate up",
     "db:migrate:down": "docker compose exec nest_server pnpm --filter=backend run migrate down 1",
@@ -20,6 +22,7 @@
     "db:bench": "docker compose exec nest_server pnpm --filter=backend run bench:copy",
     "db:psql": "docker compose exec postgres_db sh -c 'psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\"'",
     "db:test": "docker compose exec nest_server pnpm --filter=backend run test:e2e",
+    "load:baseline": "node k6/run-baseline.mjs",
     "docker:up": "docker compose up -d --pull always",
     "docker:up:prod": "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
     "docker:down": "docker compose down",
@@ -36,6 +39,8 @@
   "license": "ISC",
   "type": "module",
   "devDependencies": {
+    "@types/k6": "^2.0.1",
+    "prettier": "^3.6.2",
     "turbo": "^2.10.8"
   }
 }

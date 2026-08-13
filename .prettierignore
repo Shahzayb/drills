@@ -1,0 +1,13 @@
+node_modules
+dist
+.next
+.turbo
+pnpm-lock.yaml
+
+# k6's exported dashboards — machine-written, one 160KB line of inlined JS.
+k6/reports
+
+# Prose is hand-wrapped here on purpose, and Prettier pads Markdown tables to a
+# uniform width — which turns a one-row append to memory-bank/history.md into a
+# whole-table diff. Formatting is for code; the writing stays hand-set.
+*.md

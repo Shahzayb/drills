@@ -4,6 +4,22 @@ Where things stand and what's next.
 
 ## Current focus
 
+Drill 05 — the load-test baseline. Shipped:
+
+- `GET /conversations?page=1&pageSize=20` measured with k6, 10 VUs, 20s warm-up excluded,
+  60s measured, 3 runs per org. All six runs are tabulated in the plan file, not averaged away.
+- Whale (org 1): **p50 175.5ms · p95 340.3ms · p99 375.4ms · 48.6 req/s**.
+  Tail (org 150): **p50 2.14ms · p95 2.93ms · p99 4.11ms · 4,415 req/s**. 82–116x apart.
+- **Within-sweep noise floor 1.9–7.2%**, but the sweep ran 3x in one evening and the medians
+  moved up to 14% — monotonically, the laptop drifting ~4% slower over 90 minutes. Working
+  rules: refuse anything under ~15% (20% on the tail), and interleave A/B in one sitting
+  rather than trusting a comparison across sittings.
+- The whale's cost is the **missing `(org_id, updated_at DESC, id DESC)` index**, not
+  `count(*)` — which is a 33ms index-only scan post-vacuum against the list query's 102ms.
+  Drill 03's prediction #1 confirmed, #2 refuted.
+- Verified the load generator wasn't the bottleneck before believing any of it.
+- See `plans/2026-08-13_drill-05-load-test-baseline.md` and `drills/05-writeup-worksheet.md`.
+
 Drill 04 — the bulk seed. Shipped:
 
 - 2.5M conversations and 10M messages seeded in **108s**; `db:reset` from empty in **1:52**.
@@ -20,10 +36,15 @@ Drill 04 — the bulk seed. Shipped:
 
 ## Next step
 
-TBD
+Card 09 (the composite index) is where the whale's 176ms actually lives — drill 05 measured that,
+against expectation. Card 08 (`count(*)`, keyset paging) is real but smaller at page 1.
+
+Cheapest unblocked win first: put `PostgresService.stats()` on a route. Drill 05's most
+interesting claim — the pool is oversubscribed 2:1 — is currently inference, not measurement.
 
 ## Active plan
 
+`plans/2026-08-13_drill-05-load-test-baseline.md` (shipped),
 `plans/2026-08-11_drill-04-bulk-seed.md` (shipped),
 `plans/2026-08-12_seed-simplification.md` (shipped)
 

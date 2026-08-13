@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "context7": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp"],
+      "env": {}
+    },
+    "k6": {
+      "type": "stdio",
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "grafana/mcp-k6"],
+      "env": {}
+    }
+  }
+}

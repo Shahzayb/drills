@@ -84,7 +84,7 @@ export async function fetchConversations(params: {
 
   try {
     const response = await fetch(source, {
-      headers: { "x-org-id": params.orgId },
+      headers: { 'x-org-id': params.orgId },
     });
 
     if (!response.ok) {

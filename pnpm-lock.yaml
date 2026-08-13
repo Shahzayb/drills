@@ -207,6 +207,12 @@ importers:
 
   .:
     devDependencies:
+      '@types/k6':
+        specifier: ^2.0.1
+        version: 2.0.1
+      prettier:
+        specifier: ^3.6.2
+        version: 3.9.6
       turbo:
         specifier: ^2.10.8
         version: 2.10.8
@@ -1464,6 +1470,9 @@ packages:
 
   '@types/json5@0.0.29':
     resolution: {integrity: sha512-dRLjCWHYg4oaA77cxO64oO+7JwCwnIzkZPdrrC71jQmQtlhM556pwKo5bUzqvZndkVbeFLIIi+9TC40JNF5hNQ==}
+
+  '@types/k6@2.0.1':
+    resolution: {integrity: sha512-3lAXtNx1qMwnn+fbE65yP1h9ADJyG6xQaIfGrhasZI2uck8S+gLuCbQl38YkbR5lGeE/NyCiF0FznmElpUgBsA==}
 
   '@types/methods@1.1.4':
     resolution: {integrity: sha512-ymXWVrDiCxTBE3+RIrrP533E70eA+9qu7zdWoHuOmGujkYtzf4HQF96b8nwHLqhuf4ykX61IGRIB38CC6/sImQ==}
@@ -5733,6 +5742,8 @@ snapshots:
   '@types/json-schema@7.0.15': {}
 
   '@types/json5@0.0.29': {}
+
+  '@types/k6@2.0.1': {}
 
   '@types/methods@1.1.4': {}
 
