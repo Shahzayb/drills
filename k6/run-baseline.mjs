@@ -2,7 +2,7 @@
 // `pnpm load:baseline`'s inline shell one-liner.
 //
 //   pnpm load:baseline                          conversations-baseline.js
-//   ORG_ID=150 RUN=3 pnpm load:baseline         tail org, third run
+//   ORG_ID=150 pnpm load:baseline                tail org
 //   node k6/run-baseline.mjs other.js           any script in k6/
 //   node k6/run-baseline.mjs other.js --vus 5   trailing args go to `k6 run`
 //
@@ -29,7 +29,6 @@ if (!existsSync(new URL(script, import.meta.url))) {
 // keeps this runner generic. VUS and DURATION are also read here, because the
 // report filename is built from them.
 const ORG_ID = process.env.ORG_ID || '1';
-const RUN = process.env.RUN || '1';
 const VUS = process.env.VUS || '10';
 const WARMUP = process.env.WARMUP || '20s';
 const DURATION = process.env.DURATION || '60s';
@@ -37,9 +36,10 @@ const P95_BUDGET_MS = process.env.P95_BUDGET_MS;
 
 // Local time, not UTC: a run at 11pm belongs to the evening you ran it, and the
 // plan's finding 4 is that runs are only comparable within one sitting. Leading,
-// so the directory sorts into sweeps. To the second, because that — not the RUN
-// number — is what makes a filename unique: a re-run with the same RUN once
-// overwrote a recorded one and cost the whole sweep. See the "Process note".
+// so the directory sorts into sweeps. To the second, because that is what makes a
+// filename unique — it used to be a hand-chosen RUN number instead, and a re-run
+// under the same one overwrote a recorded one and cost the whole sweep. See the
+// "Process note".
 const p = (n) => String(n).padStart(2, '0');
 const d = new Date();
 const stamp =
@@ -56,7 +56,7 @@ const REPORT = `${stamp}-${name}-org${ORG_ID}-vus${VUS}-${DURATION}.html`;
 // second.
 mkdirSync(new URL('reports/', import.meta.url), { recursive: true });
 
-const env = { ORG_ID, RUN, VUS, WARMUP, DURATION };
+const env = { ORG_ID, VUS, WARMUP, DURATION };
 if (P95_BUDGET_MS) env.P95_BUDGET_MS = P95_BUDGET_MS;
 
 // k6's own web dashboard, self-contained HTML. The one output worth keeping:

@@ -17,7 +17,6 @@ import http from 'k6/http';
 
 const BASE_URL = __ENV.BASE_URL || 'http://nest_server:3002';
 const ORG_ID = __ENV.ORG_ID || '1';
-const RUN = __ENV.RUN || '1';
 const VUS = Number(__ENV.VUS || 10);
 const WARMUP = __ENV.WARMUP || '20s';
 const DURATION = __ENV.DURATION || '60s';
@@ -113,7 +112,7 @@ export function handleSummary(data) {
 
   const report = [
     '',
-    `  org=${ORG_ID} run=${RUN} vus=${VUS} warmup=${WARMUP} measured=${DURATION}`,
+    `  org=${ORG_ID} vus=${VUS} warmup=${WARMUP} measured=${DURATION}`,
     `  measured requests : ${count}`,
     `  p50 / p95 / p99   : ${n(v.med)} / ${n(v['p(95)'])} / ${n(v['p(99)'])} ms`,
     `  min / avg / max   : ${n(v.min)} / ${n(v.avg)} / ${n(v.max)} ms`,
@@ -123,7 +122,7 @@ export function handleSummary(data) {
     `  (incl. warm-up)   : p50 ${n(overall.values.med)}  p95 ${n(overall.values['p(95)'])}  p99 ${n(overall.values['p(99)'])} ms`,
     '',
     // Machine-readable row, for wherever the table is being kept.
-    `RESULT,${ORG_ID},${RUN},${VUS},${n(v.med)},${n(v['p(95)'])},${n(v['p(99)'])},${n(rps)},${count}`,
+    `RESULT,${ORG_ID},${VUS},${n(v.med)},${n(v['p(95)'])},${n(v['p(99)'])},${n(rps)},${count}`,
     '',
   ].join('\n');
 

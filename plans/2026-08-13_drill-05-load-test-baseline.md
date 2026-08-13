@@ -74,15 +74,15 @@ not registered and the baseline runs are unaffected.
 
 ## Files
 
-- `k6/conversations-baseline.js` — the script. Parameterised by `ORG_ID`, `RUN`, `VUS`, `WARMUP`,
+- `k6/conversations-baseline.js` — the script. Parameterised by `ORG_ID`, `VUS`, `WARMUP`,
   `DURATION`, `P95_BUDGET_MS`. It prints and writes nothing.
 - `k6/reports/<yyyy-mm-dd-hhmmss>-<script>-org<id>-vus<n>-<duration>.html` — k6's own web
   dashboard, self-contained. The only artifact a run leaves. The local timestamp leads (finding 4
   makes the sitting part of what produced the numbers, and it sorts the directory into sweeps) and
-  it replaces `RUN` as what makes the name unique — `RUN` is a label the runner chooses and a
-  re-run under the same one overwrote a recorded run already. The rest carries every knob that
-  changes the measurement. Note k6 skips the export entirely on a run of a few seconds
-  ("report generation was skipped, not enough data"), so a smoke test leaves no file.
+  is what makes the name unique — a re-run under the hand-chosen `RUN` label this used to carry
+  overwrote a recorded run already. The rest carries every knob that changes the measurement. Note
+  k6 skips the export entirely on a run of a few seconds ("report generation was skipped, not
+  enough data"), so a smoke test leaves no file.
 - `docker-compose.yml` — image pinned. Untouched otherwise: the `k6` service stays a plain
   runner, and a run's parameters travel on the command line where the run can be read off it.
 - `k6/run-baseline.mjs` — one run: makes `k6/reports/` (k6 will not create it), then `docker
@@ -235,6 +235,14 @@ What a re-run produces is disposable; what it proved is not.
 The dashboard is the exception because it is the one output that is *not* reproducible from the
 table — percentiles are a single point in time, and only the time series distinguishes a run that
 was uniformly slow from one that stalled for five seconds in the middle.
+
+`RUN` itself went too, from both `conversations-baseline.js` and `run-baseline.mjs`. Once the
+report filename was made unique by timestamp rather than by `RUN` (above), the only thing `RUN`
+still did was label the console report and the `RESULT` CSV row — and the run number a human
+reading the terminal wants is either obvious from context (which of the six manual runs you're
+currently on) or recoverable from the report's own timestamp. A parameter that only decorates
+output nobody parses by machine any more is a parameter to remove, not to keep defaulted to `'1'`
+forever. `ORG_ID=150 RUN=3 pnpm load:baseline` is now just `ORG_ID=150 pnpm load:baseline`.
 
 ## Risks
 

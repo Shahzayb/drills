@@ -31,7 +31,7 @@ Seeding is `apps/backend/db/seed.mjs`, plain Node ESM, not SQL — `seed.sql` wa
 - Fixed RNG seed: two runs produce byte-identical data. `--scale` is the only flag — the per-lever switches (`--naive`, `--no-txn`, `--keep-indexes`, `--no-tuning`, `--keep-fks`) were removed in the 2026-08-12 simplification once the attribution was settled. The numbers live in drill 04's A–F table; re-measuring would mean rewriting the flags.
 
 Load testing is k6 in a container on the Compose network, under the `test` profile:
-`ORG_ID=150 pnpm load:baseline` runs one measurement, parameterised by `ORG_ID`/`RUN`/`VUS`/
+`ORG_ID=150 pnpm load:baseline` runs one measurement, parameterised by `ORG_ID`/`VUS`/
 `WARMUP`/`DURATION`/`P95_BUDGET_MS`. `k6/run-baseline.mjs` reads them from the host env, defaults
 them to match `conversations-baseline.js`, and forwards them into the container as `-e NAME=value`
 — it also needs `VUS` and `DURATION` itself, because the report filename is built from them. It
@@ -45,8 +45,9 @@ by hand, which means the vacuum and the run order are now yours to remember, and
 table lives in that plan file rather than in any generated artifact. The one file a run leaves is
 `k6/reports/<yyyy-mm-dd-hhmmss>-<script>-org<id>-vus<n>-<duration>.html`, k6's own dashboard —
 timestamped because runs are only comparable within one sitting, and because a timestamp cannot
-collide the way a hand-chosen `RUN` can. k6 skips the export on runs of a few seconds, so a smoke
-test leaves nothing behind.
+collide the way a hand-chosen run label could — which is also why there is no `RUN` parameter any
+more; it only ever decorated console output. k6 skips the export on runs of a few seconds, so a
+smoke test leaves nothing behind.
 
 Formatting is root Prettier: `pnpm format` / `format:check`. It resolves config **per file,
 nearest-wins**, so `apps/backend` keeps its own `.prettierrc` and both apps' ESLint configs are
