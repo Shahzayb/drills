@@ -1,13 +1,13 @@
 # drills
 
-A learning repo. One app — a multi-tenant customer-feedback platform — built across a series of
-drills, each one breaking something on purpose and measuring it. Nothing is built ahead of the
-drill that needs it, and naive code is often a recorded decision rather than debt.
+A learning repo. One app — a multi-tenant customer-feedback platform — built across 32 drills, each
+one breaking something on purpose and measuring it. Nothing is built ahead of the drill that needs
+it, and naive code is often a recorded decision rather than debt.
 
 pnpm monorepo: `apps/backend` (NestJS, raw `pg`, no ORM) and `apps/frontend` (Next.js App Router),
 orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose.
 
-## Progression
+## Progression — 6 of 32
 
 | # | Drill | Result worth remembering |
 |---|---|---|
