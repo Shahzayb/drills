@@ -13,7 +13,7 @@
 //
 // One flag: --scale=N, a row multiplier for conversations and messages only.
 // Flags that switched each performance lever off individually are gone now the
-// attribution is settled — the A-F table in drill 04's Writeup is the record.
+// attribution is settled — the A-F table in the plan file is the record.
 
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';

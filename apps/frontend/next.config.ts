@@ -11,8 +11,9 @@ const nextConfig: NextConfig = {
   ],
   logging: {
     // Next's own dev request lines are not JSON and cannot be made JSON, so
-    // the web stream is mixed format in development — stated in the drill's
-    // writeup rather than hidden. What can be done is muting the one line that
+    // the web stream is mixed format in development — stated in
+    // plans/2026-08-13_drill-06-request-id-propagation.md rather than hidden.
+    // What can be done is muting the one line that
     // is pure noise: Docker probes /health every 5 seconds on this service.
     incomingRequests: { ignore: [/^\/health$/] },
   },

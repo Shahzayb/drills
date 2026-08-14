@@ -140,7 +140,9 @@ export type ConversationsResult = (
  * unvalidated, on purpose. The API is the thing that owns those rules, and a
  * second copy of them here is a second copy to keep in sync. `?page=-1`
  * therefore renders the API's 400 rather than being quietly corrected — which
- * is the honest behaviour, and the answer drill 03's writeup asks for.
+ * is the honest behaviour, and what
+ * plans/2026-08-09_drill-03-conversation-list.md settles under "Where is the
+ * page size validated".
  */
 export async function fetchConversations(params: {
   orgId: string;

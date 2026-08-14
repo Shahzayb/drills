@@ -23,13 +23,14 @@ actually cites, and index them here.
 | `2026-08-14-080806-org150` | round 2, tracing on, **100%** sampled |
 | `2026-08-14-080947-org150` | round 2, tracing on, **5%** sampled |
 
-The phase 2 table those six produce is `drills/06-observability.md` §25.
+The phase 2 table those six produce is in `plans/2026-08-13_drill-06-request-id-propagation.md`.
 
 ## What was removed, and where it went
 
 Drill 06 phase 1's A/B left 21 reports, and they were committed in bulk by a `git add -A` rather
 than chosen. None carried a record of which arm it was, so none could be read as evidence; the
-numbers they support are all tabulated in `drills/06-observability.md` §14. They were removed
+numbers they support are all tabulated in
+`plans/2026-08-13_drill-06-request-id-propagation.md`. They were removed
 from the tree in the 2026-08-14 cleanup and are still in history at commit `8f616c5` if a run ever
 needs re-examining:
 

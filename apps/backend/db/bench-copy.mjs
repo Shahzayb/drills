@@ -3,7 +3,7 @@
 // plans/2026-08-11_drill-04-bulk-seed.md.
 //
 // Kept in the repo rather than thrown away because it is the evidence behind the
-// writeup's "COPY is N times faster" claim, and because it is the smallest thing
+// plan's "COPY is N times faster" claim, and because it is the smallest thing
 // that still demonstrates the mechanism.
 //
 // Run: docker compose exec nest_server pnpm --filter=backend run bench:copy

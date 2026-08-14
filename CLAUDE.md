@@ -34,4 +34,4 @@ Learn about the project history from the `memory-bank/history.md` file.
 - Scripts are `.mjs` (plain Node ESM, like `apps/backend/db/seed.mjs`), not shell. Shell is for one-liners in `package.json`.
 - Run `pnpm format` before calling a task done.
 - Always generate 1 learning guide (`drills/`) per plan. If there are many guides per drill, merge them.
-- Never reference to files from the `drills/` in the code/config.
+- Never reference to files from the `drills/` in the code/config or anywhere.

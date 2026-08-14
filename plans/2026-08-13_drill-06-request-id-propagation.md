@@ -73,7 +73,7 @@ future before/after incomparable. **Trap:** `ALTER SYSTEM` writes `postgresql.au
 
 **The two loggers are deliberately duplicated, not shared.** `packages/` is empty, and giving it
 its first inhabitant means build, tsconfig and Docker wiring neither app has today. The *field
-set* is the shared contract; it is documented in `drills/06-observability.md` §6
+set* is the shared contract; it is documented under "The field set" below
 rather than enforced by a type. Roughly 25 lines of config each.
 
 ## The field set
@@ -193,7 +193,7 @@ than the *accept* path.
 ## Results
 
 Shipped. The reconstruction, the gap arithmetic and the full tables are in
-`drills/06-observability.md` §13–14; this is the record of what was decided by measuring.
+below; this is the record of what was decided by measuring.
 
 **The DONE WHEN holds.** One grep returns 12 lines across three services for one request:
 Postgres parse/bind/execute per statement, `db_query` / `handler` / `http_request` from the API,

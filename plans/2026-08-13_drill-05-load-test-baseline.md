@@ -129,7 +129,7 @@ believe" bar for tail latency than for typical latency.
 
 ## Results
 
-The card's writeup answers are in `drills/05-writeup-worksheet.md`. This is the record: all six
+This is the record, and the card's writeup answers are drawn from it: all six
 runs, because the card asks for every one rather than an average. 10 VUs throughout, 20s warm-up
 excluded, 60s measured.
 

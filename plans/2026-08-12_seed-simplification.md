@@ -127,7 +127,7 @@ flags measured.
 > **Caveat, found during implementation and worth stating plainly:** the original plan said the
 > flag code "stays in git history if a later card wants to re-run it". **It does not** —
 > `apps/backend/db/` has never been committed, so the whole seeder is untracked and this
-> deletion is permanent. The *measurements* survive in drill 04's Writeup; the ability to
+> deletion is permanent. The *measurements* survive in drill 04's plan; the ability to
 > re-run them does not, and re-adding the flags would mean rewriting them. Judged acceptable
 > because the numbers are what later cards cite, but it is a harder deletion than the plan
 > assumed.

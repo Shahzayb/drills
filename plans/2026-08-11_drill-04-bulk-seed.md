@@ -68,7 +68,7 @@ did.)*
 | `docker-compose.yml` | done — `command:` override on `postgres_db` |
 | `package.json` (root) | `db:seed` repointed, + `db:seed:ci`, + `db:reset` |
 | `plans/2026-08-11_drill-04-bulk-seed.md` | overwritten with this revision, + the `## Writeup` |
-| `drills/04-copy-and-bulk-load.md` | the teaching guide (gitignored, local only) |
+| the drill's teaching guide | gitignored, local only |
 
 No migration. No application code. `PostgresService` is untouched — see Decisions.
 
@@ -828,11 +828,11 @@ configuration mechanism at all.
 
 ## Also on completion
 
-### The guide — `drills/04-copy-and-bulk-load.md`
+### The guide
 
 Written for someone who has not met any of this before. **No assumed vocabulary**: every term
 gets defined the first time it appears, in one sentence, before it gets used. Not matched to
-the shape of `drills/02` or `drills/03` — those were written for a reader who already had the
+the shape of the drill 02 or drill 03 guides — those were written for a reader who already had the
 context. This one teaches.
 
 Hard limit: **~250 lines**, and it opens with a five-bullet "if you read nothing else" box so
