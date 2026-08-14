@@ -1,13 +1,7 @@
 import type { Params } from 'nestjs-pino';
 import { logger } from './logger';
+import { PROBE_ROUTES } from './probes';
 import { requestIdFor } from './request-context';
-
-// The two endpoints Docker probes every 5s. `autoLogging.ignore` rather than
-// nestjs-pino's `exclude`, which would also drop the request context and leave
-// mid-request lines without an `rid`. /info is here because the *frontend's*
-// /health calls it — excluding only /health silences one probe and leaves the
-// noisier one.
-const PROBE_ROUTES = /^\/(health|info)\b/;
 
 /**
  * nestjs-pino's two jobs: the automatic per-request line, and routing Nest's

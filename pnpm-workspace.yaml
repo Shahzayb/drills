@@ -2,4 +2,10 @@ packages:
   - 'apps/*'
   - 'packages/*'
 allowBuilds:
+  # false, not unset: pnpm 11 fails `install --frozen-lockfile` on an
+  # undecided build script, which is what broke the Docker image build the
+  # first time. protobufjs arrives under @opentelemetry/sdk-node, whose gRPC
+  # and Prometheus exporters are hard dependencies we never load — the traces
+  # here go out as JSON over OTLP/HTTP. Its postinstall has nothing to do.
+  protobufjs: false
   unrs-resolver: true

@@ -1,4 +1,5 @@
 import pino from 'pino';
+import { TRACING_ENABLED, traceFields } from './trace';
 
 /**
  * The web tier's half of the shared field set: time, level, svc, msg, rid.
@@ -17,4 +18,7 @@ export const logger = pino({
   base: { svc: 'web' },
   timestamp: pino.stdTimeFunctions.isoTime,
   formatters: { level: (label) => ({ level: label }) },
+  // Only when tracing is on, so with it off this config is byte-identical to
+  // what phase 1's k6 A/B measured.
+  ...(TRACING_ENABLED ? { mixin: traceFields } : {}),
 });

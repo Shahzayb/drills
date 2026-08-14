@@ -89,6 +89,18 @@ services:
     # measurement. See plans/2026-08-13_drill-06-request-id-propagation.md.
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      # Empty by default, which is what switches OpenTelemetry off — see
+      # apps/backend/src/tracing.ts. `pnpm trace:on` sets it and starts the
+      # collector in the same command, because a set endpoint with nothing
+      # listening is a retry loop, not a trace.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      # Read by the SDK itself, no code involved. Unset means
+      # parentbased_always_on — every request traced, which is what you want
+      # for one request by hand and what falls over under load. The A/B in
+      # drills/06-writeup-worksheet.md is a measurement of exactly that
+      # difference: parentbased_traceidratio + 0.05 for 5%.
+      - OTEL_TRACES_SAMPLER=${OTEL_TRACES_SAMPLER:-}
+      - OTEL_TRACES_SAMPLER_ARG=${OTEL_TRACES_SAMPLER_ARG:-}
     ports:
       - '${BACKEND_PORT:-3002}:3002'
     volumes:
@@ -129,6 +141,9 @@ services:
     env_file: .env
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_TRACES_SAMPLER=${OTEL_TRACES_SAMPLER:-}
+      - OTEL_TRACES_SAMPLER_ARG=${OTEL_TRACES_SAMPLER_ARG:-}
     ports:
       - '${FRONTEND_PORT:-3001}:3001'
     volumes:
@@ -170,6 +185,42 @@ services:
       - app-network
     profiles: ['test']
     entrypoint: ['k6']
+
+  # Tracing, phase 2 of drill 06. Both services are behind `profiles: ['trace']`
+  # so `docker compose up` never starts them: an always-on collector would
+  # change the instrument drill 05 baselined against, and cards 08/09/10 compare
+  # against that baseline. `pnpm trace:on` / `pnpm trace:off`.
+  #
+  # Tags PINNED, same reasoning as k6:2.1.0.
+  otel_collector:
+    image: otel/opentelemetry-collector-contrib:0.158.0
+    container_name: drills_otel_collector
+    volumes:
+      # The image's own default config path, so there is no command to override.
+      - ./otel/collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      # Published only so a host-side producer could reach it. The two apps use
+      # the Compose service name, like everything else here.
+      - '${OTEL_HTTP_PORT:-4318}:4318'
+    depends_on:
+      - jaeger
+    networks:
+      - app-network
+    profiles: ['trace']
+    mem_limit: 512m
+
+  jaeger:
+    image: jaegertracing/jaeger:2.20.0
+    container_name: drills_jaeger
+    ports:
+      # The UI. Traces are received from the collector over the Compose network
+      # on 4317, which is deliberately not published — the collector is the only
+      # thing that should be talking to it.
+      - '${JAEGER_UI_PORT:-16686}:16686'
+    networks:
+      - app-network
+    profiles: ['trace']
+    mem_limit: 1g
 
 networks:
   app-network:

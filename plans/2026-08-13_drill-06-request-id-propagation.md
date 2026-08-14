@@ -1,7 +1,7 @@
 # Drill 06 — Propagate one request id through Next, Nest, Postgres and Redis
 
-**Status:** shipped (phase 1). Phase 2 — the OpenTelemetry stretch — is scoped at the bottom and
-not started.
+**Status:** shipped, both phases. Phase 1 (correlation + structured JSON logs) and phase 2 (the
+OpenTelemetry stretch) are separate commits, in that order, deliberately — see the phase 2 section.
 
 ## Context
 
@@ -278,21 +278,92 @@ loads; Nest compiles to CommonJS, so `import './tracing';` as the literal first 
 `main.ts` runs first. Fallback if `nest start --watch` disagrees: `node --require
 ./dist/tracing.js dist/main`.
 
-`apps/frontend/instrumentation.ts` — `registerOTel` from `@vercel/otel@2.1.3`. Stable since Next
-15.0, Turbopack-supported since 14.0.4. Next emits its own render and fetch spans for free.
+`apps/frontend/instrumentation.ts` — Next's startup hook, dynamic-importing
+`instrumentation.node.ts` under a `NEXT_RUNTIME === 'nodejs'` guard.
 
-`otel/collector.yaml` plus `otel/opentelemetry-collector-contrib` and `jaegertracing/all-in-one`,
-both pinned. Jaeger accepts OTLP directly and could stand alone; the collector earns its place
-because it is where sampling, redaction and fan-out live, and its `debug` exporter shows raw spans
-without trusting a UI.
-
-**The join back:** when a span is active, `deriveRequestId` returns the 32-hex `trace_id` instead
-of a fresh UUID, and log lines gain `span_id`. One grep still works, the same id pastes into
-Jaeger's search box, and the log/trace boundary stops being a manual translation step.
+`otel/collector.yaml` plus `otel/opentelemetry-collector-contrib:0.158.0` and
+`jaegertracing/jaeger:2.20.0`, both pinned. Jaeger accepts OTLP directly and could stand alone; the
+collector earns its place because it is where sampling, redaction and fan-out live, and its `debug`
+exporter shows raw spans without trusting a UI.
 
 What a trace shows that these logs don't, concretely, in this app: the two `Promise.all` queries
-as **overlapping sibling spans**; **pool acquisition as the whitespace** between the Nest span
-starting and the pg span starting — drill 05's inference, finally observed; Next's render-vs-fetch
-split with no code written; and causality that survives clock skew. The converse belongs in the
-writeup too: a trace carries no message text and no arbitrary fields, and sampling means the one
-request you care about may not be in there. Which is why this phase does not get deleted.
+as **overlapping sibling spans**; **pool acquisition** separated from execution — drill 05's
+inference, finally a number; Next's render-vs-fetch split with no code written; and causality that
+survives clock skew. The converse belongs in the writeup too: a trace carries no message text and
+no arbitrary fields, and sampling means the one request you care about may not be in there. Which
+is why this phase does not get deleted.
+
+### Revised while shipping
+
+Four things the plan above got wrong or did not know. All four were found by looking at output.
+
+**`@vercel/otel` was dropped for the same `NodeSDK` the API uses.** It is the documented Next path
+and it is fine, but it declares seven OTel peer dependencies, and the frontend needs *no*
+instrumentations at all: Next already emits `BaseServer.handleRequest`, `render route (app) …` and
+`AppRender.fetch` through `@opentelemetry/api`, which it declares as a peer. Registering a provider
+is the whole job. One SDK on both sides also means one thing to learn, matching the decision above
+to duplicate rather than share the two loggers. `serverExternalPackages` is required so the SDK is
+not bundled into a second copy of `@opentelemetry/api`.
+
+**Nothing injects `traceparent` on the Next → Nest hop.** The plan's table said the HTTP
+instrumentation propagates it "with no code". True inbound on Nest; false outbound on Next, which
+creates an `AppRender.fetch` span but never writes the header (`patch-fetch.js` has no mention of
+it). So `lib/trace.ts` does `propagation.inject(context.active(), headers, …)` by hand. The lesson
+is better than the plan's version: same standard, automatic on one side and explicit on the other.
+
+**The "one id" join does not survive Next's proxy, and the plan's version of it was wrong.** It
+said `deriveRequestId` should return the trace id when a span is active. On the API that is
+correct. In `proxy.ts` it produced a valid, greppable id belonging to a *separate one-span trace* —
+Next runs proxy execution in its own trace (`middleware GET`, no parent), not inside the render's.
+The id looked right and pointed at the wrong thing, which is worse than not having it. So: the
+frontend mints a UUID, the API keeps the trace-id fallback (it fires for direct API traffic), and
+`trace_id`/`span_id` on every log line is the join.
+
+**The SQL comment and sqlcommenter are mutually exclusive.** `@opentelemetry/sql-common` refuses to
+add its comment to a statement that already has one — the sqlcommenter spec says so — so phase 1's
+`/* rid=… */` silently disabled the standard. Separately, `instrumentation-pg` derives its span name
+from the first token of the statement, so a *leading* comment renamed every query span to
+`pg.query:/*`. Both fixed by moving ours to the end and skipping it entirely when tracing is on:
+the traceparent comment identifies the span, not just the request, which is strictly more, and
+`trace_id` is on every log line so one grep still reaches Postgres.
+
+Also: pnpm 11 fails `install --frozen-lockfile` on an undecided build script, and `sdk-node`'s gRPC
+exporters pull `protobufjs`. `allowBuilds: { protobufjs: false }` in `pnpm-workspace.yaml` is that
+decision — without it the Docker image build fails, which is where it was found.
+
+### Phase 2 results
+
+**The DONE WHEN, again.** One grep on the trace id returns the whole path, and Postgres's log now
+identifies the *span* rather than just the request — the two concurrent statements of one request
+carry different span ids in their `traceparent`, which the `/* rid= */` version could not express.
+
+**The headline.** A `db_query` line said the count query took 7.90ms. The trace decomposes it:
+**5.48ms of `pg-pool.connect`** (4.53ms of that opening a new socket) and **2.09ms executing**. The
+list query beside it was 8.35ms logged against 8.12ms executing — 0.23ms of overhead. Drill 05's
+finding #2 has now been through three states: inference from timings, observation via two backend
+PIDs, and a number.
+
+**Cost.** Tail org, 3 arms x 2 rounds, strictly interleaved, Jaeger recreated between arms:
+
+| arm | p50 | p95 | p99 | throughput | vs off |
+|---|---|---|---|---|---|
+| off | 3.05 ms | 4.21 ms | 5.67 ms | 3,121.31 req/s | — |
+| on, 5% sampled | 4.53 ms | 6.48 ms | 8.36 ms | 2,123.94 req/s | −32.0% |
+| on, 100% sampled | 5.29 ms | 8.77 ms | 12.41 ms | 1,729.46 req/s | −44.6% |
+
+Within-arm spread 2.1% / 2.7% / 3.9%, monotonic in both rounds. **Dropping 95% of traces buys back
+28% of the cost** — the sampler decides at span *creation*, so an unsampled request still runs every
+patched function and allocates ~15 spans. Which is the A/B above in a different costume: the
+plumbing, not the output, is the expensive part, twice. The lever is fewer instrumentations, not a
+lower sample rate.
+
+The `off` arm lands at 3,121 against phase 1's 3,276 — −4.7% across two sittings, inside drill 05's
+14% cross-sitting drift, so: no measurable regression with tracing off. That is the number cards
+08/09/10 depend on.
+
+**Two traps and one wrong guess.** Jaeger all-in-one keeps traces in RAM and was SIGKILLed by its
+1g limit at 100% sampling on the first attempt; the harness now recreates it per arm. And the
+collector's `debug` exporter at `verbosity: normal` prints one line per span (~10k lines/s under
+load) — an obvious confound, changed to `basic`, and on re-measurement **it was not the
+explanation**: the `normal` run came out marginally faster. Recorded because "obvious cause,
+unmeasured" is the failure this whole method exists to avoid.

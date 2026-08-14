@@ -1,4 +1,5 @@
 import pino from 'pino';
+import { TRACING_ENABLED, traceFields } from './trace';
 
 /** Milliseconds since a performance.now() mark, at the precision logs use. */
 export const since = (startedAt: number) =>
@@ -31,4 +32,9 @@ export const logger = pino({
   timestamp: pino.stdTimeFunctions.isoTime,
   // Default is numeric (30/40/50). A string greps without a lookup table.
   formatters: { level: (label) => ({ level: label }) },
+  // Spread rather than set unconditionally: with tracing off this object is
+  // exactly what phase 1's k6 A/B measured, so that number stays honest. pino
+  // calls a mixin only for lines that will actually be written, so the cost is
+  // per emitted line rather than per log call.
+  ...(TRACING_ENABLED ? { mixin: traceFields } : {}),
 });

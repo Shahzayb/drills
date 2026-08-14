@@ -1,6 +1,7 @@
 import { logger, since } from './logger';
 import { getRequestId } from './request-context';
 import { REQUEST_ID_HEADER } from './request-id';
+import { injectTraceContext } from './trace';
 
 // The API is reached by Compose service name, not localhost. This only works
 // from the Next *server* — a client component would have to use the published
@@ -42,6 +43,12 @@ async function callApi(
   // dropping every header without a word.
   const headers = new Headers(init?.headers);
   headers.set(REQUEST_ID_HEADER, requestId);
+  // The standard's version of the line above, and the two are not redundant.
+  // x-request-id is ours and carries a flat, human-readable id. `traceparent`
+  // is W3C and carries trace id *plus this span's id*, which is what makes the
+  // API's spans children of this render instead of a second, unrelated trace.
+  // Nothing on the Nest side reads it explicitly — instrumentation-http does.
+  injectTraceContext(headers);
 
   try {
     const response = await fetch(url, { ...init, headers });

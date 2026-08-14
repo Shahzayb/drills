@@ -2,6 +2,7 @@ import { Injectable, OnApplicationShutdown } from '@nestjs/common';
 import { Pool, QueryResult, QueryResultRow } from 'pg';
 import { errorMessage, logger, since } from '../observability/logger';
 import { getRequestId } from '../observability/request-context';
+import { TRACING_ENABLED } from '../observability/trace';
 
 // Every number here is chosen, not inherited. Reasoning lives in
 // plans/2026-08-06_drill-01-health-endpoint.md under "Numbers we chose".
@@ -72,7 +73,19 @@ export class PostgresService implements OnApplicationShutdown {
     // Postgres's own log and pg_stat_activity without pinning a connection.
     // Interpolating into SQL is safe *only* because deriveRequestId allowlists
     // the character set. See the plan file.
-    const sql = rid ? `/* rid=${rid} */ ${text}` : text;
+    //
+    // Skipped when tracing is on, because the two mechanisms cancel: the
+    // sqlcommenter spec forbids adding a comment to a statement that has one,
+    // so this line silently disables instrumentation-pg's traceparent — which
+    // identifies the *span*, not just the request. The standard wins where they
+    // overlap; `trace_id` on every log line is how one grep still reaches
+    // Postgres.
+    //
+    // Trailing, not leading: instrumentation-pg names its span from the first
+    // whitespace-delimited token, so a leading comment renamed every query span
+    // to `pg.query:/*`. Assumes `text` does not end in `;` — none here do.
+    // Both found by reading spans; see the plan file's "Revised while shipping".
+    const sql = rid && !TRACING_ENABLED ? `${text} /* rid=${rid} */` : text;
 
     const startedAt = performance.now();
 

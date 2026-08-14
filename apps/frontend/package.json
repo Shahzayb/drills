@@ -9,6 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/exporter-trace-otlp-http": "0.221.0",
+    "@opentelemetry/sdk-node": "0.221.0",
     "next": "16.3.0",
     "pino": "10.3.1",
     "react": "19.2.8",

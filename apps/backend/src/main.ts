@@ -1,3 +1,7 @@
+// First, and it has to stay first: the OTel instrumentations patch modules as
+// they load, so anything required above this line is never traced. See
+// ./tracing.ts.
+import './tracing';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';

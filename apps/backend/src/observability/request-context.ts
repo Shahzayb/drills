@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
+import { currentTraceId } from './trace';
 
 export const REQUEST_ID_HEADER = 'x-request-id';
 
@@ -15,11 +16,18 @@ export interface RequestContext {
 
 const storage = new AsyncLocalStorage<RequestContext>();
 
-/** Accept the caller's id only if it is safe to embed; otherwise mint one. */
+/**
+ * Accept the caller's id only if it is safe to embed; otherwise mint one.
+ *
+ * With tracing on, "mint one" is the 32-hex trace id rather than a UUID, so one
+ * string greps the logs and pastes into Jaeger. Both fallbacks satisfy the
+ * allowlist by construction — see currentTraceId. A caller-supplied id still
+ * wins; that is opting out of the join, and `trace_id` on every line is the way
+ * back. Next's proxy cannot do this, and why is in the plan file.
+ */
 export function deriveRequestId(raw: unknown): string {
-  return typeof raw === 'string' && SAFE_REQUEST_ID.test(raw)
-    ? raw
-    : randomUUID();
+  if (typeof raw === 'string' && SAFE_REQUEST_ID.test(raw)) return raw;
+  return currentTraceId() ?? randomUUID();
 }
 
 // Memoised on the request object. nestjs-pino's genReqId and our middleware
