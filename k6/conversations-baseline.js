@@ -11,8 +11,9 @@ import http from 'k6/http';
  * plans/2026-08-13_drill-05-load-test-baseline.md before changing any of them —
  * a change here silently invalidates every recorded run.
  *
- * The only file a run leaves behind is k6/reports/<run>.html, k6's own web
- * dashboard. `pnpm load:baseline` is what turns it on; this script just prints.
+ * A run leaves behind k6/reports/<run>/ — k6's own web dashboard, and the same
+ * block this script prints, written next to it as summary.txt. The HTML is
+ * gitignored; the summary is the part that gets committed.
  */
 
 const BASE_URL = __ENV.BASE_URL || 'http://nest_server:3002';
@@ -30,6 +31,10 @@ const DURATION = __ENV.DURATION || '60s';
 // the sweep halfway through — a pass/fail gate and a measurement run are two
 // different jobs for the same script.
 const P95_BUDGET_MS = __ENV.P95_BUDGET_MS;
+
+// Set by run-baseline.mjs to the run's own directory. Unset when the script is
+// run by hand, and then the summary is printed and not written.
+const SUMMARY_OUT = __ENV.SUMMARY_OUT;
 
 const URL = `${BASE_URL}/conversations?page=1&pageSize=20`;
 
@@ -131,5 +136,9 @@ export function handleSummary(data) {
     '',
   ].join('\n');
 
-  return { stdout: report };
+  // Byte-identical to what the run printed, deliberately: a summary that is
+  // built twice is a summary that can disagree with the terminal.
+  return SUMMARY_OUT
+    ? { stdout: report, [SUMMARY_OUT]: report }
+    : { stdout: report };
 }

@@ -61,26 +61,35 @@ const stamp =
 // Every knob that changes the measurement is in the name, including which script
 // produced it. NAME sits right after the stamp so labelled runs of one sweep sort
 // together under it; without one the name is exactly what it was before.
+//
+// It names a *directory* now, one per run: the dashboard is 170KB of HTML and is
+// gitignored, so what a run leaves in the tree is the summary next to it. Same
+// name, so the two are obviously the same run.
 const scriptName = script.replace(/\.js$/, '');
-const REPORT =
+const RUN =
   `${stamp}${NAME ? `-${NAME}` : ''}` +
-  `-${scriptName}-org${ORG_ID}-vus${VUS}-${DURATION}.html`;
+  `-${scriptName}-org${ORG_ID}-vus${VUS}-${DURATION}`;
 
 // k6 writes the dashboard at the *end* of the run and fails the output if the
 // directory is missing, so a forgotten mkdir costs the full run, not its first
-// second.
-mkdirSync(new URL('reports/', import.meta.url), { recursive: true });
+// second. Same for the summary — handleSummary does not create directories.
+mkdirSync(new URL(`reports/${RUN}/`, import.meta.url), { recursive: true });
 
 const env = { ORG_ID, VUS, WARMUP, DURATION, NAME };
 if (P95_BUDGET_MS) env.P95_BUDGET_MS = P95_BUDGET_MS;
 
-// k6's own web dashboard, self-contained HTML. The one output worth keeping:
-// percentiles are a single point in time, and only the time series separates a
-// uniformly slow run from one that stalled for five seconds.
+// Where the script's handleSummary writes its block. A script without one just
+// ignores this, same as the knobs above.
+env.SUMMARY_OUT = `/scripts/reports/${RUN}/summary.txt`;
+
+// k6's own web dashboard, self-contained HTML. Worth generating: percentiles are
+// a single point in time, and only the time series separates a uniformly slow run
+// from one that stalled for five seconds. Worth generating, not worth committing
+// — 170KB each, and the numbers a plan cites are all in summary.txt.
 Object.assign(env, {
   K6_WEB_DASHBOARD: 'true',
   K6_WEB_DASHBOARD_PERIOD: '2s',
-  K6_WEB_DASHBOARD_EXPORT: `/scripts/reports/${REPORT}`,
+  K6_WEB_DASHBOARD_EXPORT: `/scripts/reports/${RUN}/dashboard.html`,
 });
 
 const args = [
@@ -96,7 +105,7 @@ const args = [
   ...k6Args,
 ];
 
-console.log(`k6/reports/${REPORT}\n`);
+console.log(`k6/reports/${RUN}/\n`);
 
 const { status, error } = spawnSync('docker', args, { stdio: 'inherit' });
 

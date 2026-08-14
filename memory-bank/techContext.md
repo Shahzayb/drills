@@ -47,17 +47,24 @@ is fully described by the command that started it. There is
 no sweep script — the method (vacuum, settle, 3 runs per
 org in a fixed order) is written down in `plans/2026-08-13_drill-05-load-test-baseline.md` and run
 by hand, which means the vacuum and the run order are now yours to remember, and the six-run
-table lives in that plan file rather than in any generated artifact. The one file a run leaves is
-`k6/reports/<yyyy-mm-dd-hhmmss>[-<name>]-<script>-org<id>-vus<n>-<duration>.html`, k6's own dashboard —
-timestamped because runs are only comparable within one sitting, and because a timestamp cannot
+table lives in that plan file rather than in any generated artifact. A run leaves one directory,
+`k6/reports/<yyyy-mm-dd-hhmmss>[-<name>]-<script>-org<id>-vus<n>-<duration>/`, holding k6's own
+dashboard as `dashboard.html` and the printed block as `summary.txt` — timestamped because runs are
+only comparable within one sitting, and because a timestamp cannot
 collide the way a hand-chosen run label could — which is also why there is no `RUN` parameter any
-more; it only ever decorated console output. `NAME=tracing-off pnpm load:baseline` puts an arm label
+more; it only ever decorated console output. **The HTML is gitignored** (`k6/reports/**/*.html`,
+2026-08-14): 170KB a run, worth reading while the run is fresh and not worth keeping, since every
+number a plan cites — percentiles, throughput, and the `RESULT` row — is in the ~300-byte summary
+next to it. `handleSummary` writes it to `SUMMARY_OUT`, which the runner sets; the file is byte-identical to
+stdout because a summary built twice can disagree with the terminal. `NAME=tracing-off pnpm load:baseline` puts an arm label
 right after the stamp (empty by default, squashed to filename-safe characters, also printed in the
-summary and as the first field of the `RESULT` row). **A name in the filename is still not the
-record — a report is only evidence if something writes down what the condition was** —
-`k6/reports/README.md` is that index, and the rule is to label a report in the same commit that adds it or not commit it. A
-2026-08-14 cleanup dropped 21 unlabelled ones (recoverable at `8f616c5`). k6 skips the export on runs of a few seconds, so a
-smoke test leaves nothing behind.
+summary and as the first field of the `RESULT` row). **A name in the directory is still not the
+record — a run is only evidence if something writes down what the condition was** —
+`k6/reports/README.md` is that index, and the rule is to label a run in the same commit that adds it or not commit it. A
+2026-08-14 cleanup dropped 21 unlabelled ones (recoverable at `8f616c5`), and the 12 that survive predate
+`summary.txt` and have none. k6 still skips the dashboard export on very short runs (measured:
+3s total leaves no HTML, 5s does) but the summary is always written — so a smoke test now leaves an
+untracked `summary.txt`, and deleting its directory is part of running one.
 
 Observability commands: `pnpm logs:trace <rid>` reconstructs one request across all services
 (`docker compose logs --no-color --no-log-prefix -t | sort | grep` — the prefix is dropped so
