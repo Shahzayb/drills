@@ -16,7 +16,7 @@ const SAFE_REQUEST_ID = /^[A-Za-z0-9_-]{8,64}$/;
  * span, no parent) rather than inside the render's. Minting from the trace id
  * here therefore produced a real, greppable, correct-looking id that opened a
  * one-span trace in Jaeger and hid the 24-span one. `trace_id` on every log
- * line is the join instead. See drills/06-writeup-worksheet.md.
+ * line is the join instead. See the plan file.
  *
  * No Next imports here: proxy.ts imports this, and pulling `next/headers` into
  * the proxy bundle is not something to discover at runtime.

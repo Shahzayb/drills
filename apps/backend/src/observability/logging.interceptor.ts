@@ -23,8 +23,8 @@ export class LoggingInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     // Bail before doing any work when the line would be discarded: no tap()
     // in the chain, no performance.now(), no payload object. This and the
-    // db_query guard are worth ~5-6% of tail-org throughput — measured in
-    // drills/06-writeup-worksheet.md.
+    // db_query guard are worth ~5-6% of tail-org throughput — measured in the
+    // plan file.
     if (context.getType() !== 'http' || !logger.isLevelEnabled('debug')) {
       return next.handle();
     }

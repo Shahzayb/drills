@@ -127,7 +127,7 @@ export class PostgresService implements OnApplicationShutdown {
     // Guarded, not just called: a logger call below the active level still
     // evaluates its arguments, so summarise() would run a regex over every
     // statement only to have the line discarded. Worth ~5-6% of tail-org
-    // throughput — measured in drills/06-writeup-worksheet.md.
+    // throughput — measured in the plan file.
     if (this.logger.isLevelEnabled('debug')) {
       this.logger.debug({ rid, durMs, rows, sql: summarise(text) }, 'db_query');
     }

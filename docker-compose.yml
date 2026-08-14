@@ -96,9 +96,9 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       # Read by the SDK itself, no code involved. Unset means
       # parentbased_always_on — every request traced, which is what you want
-      # for one request by hand and what falls over under load. The A/B in
-      # drills/06-writeup-worksheet.md is a measurement of exactly that
-      # difference: parentbased_traceidratio + 0.05 for 5%.
+      # for one request by hand and what falls over under load. The A/B in the
+      # plan file is a measurement of exactly that difference:
+      # parentbased_traceidratio + 0.05 for 5%.
       - OTEL_TRACES_SAMPLER=${OTEL_TRACES_SAMPLER:-}
       - OTEL_TRACES_SAMPLER_ARG=${OTEL_TRACES_SAMPLER_ARG:-}
     ports:

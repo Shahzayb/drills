@@ -167,7 +167,7 @@ export default async function ConversationsPage(
               {/* Plain anchors, not next/link. A full document request is what
                   makes "this works with JavaScript off" provable rather than
                   merely claimed. next/link is the normal choice in a real app —
-                  see drills/03-endpoint-and-rsc-page.md. */}
+                  see the plan file. */}
               <div className="flex gap-4">
                 {result.page.page > 1 ? (
                   <a
