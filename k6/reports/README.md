@@ -4,9 +4,11 @@ k6's own web dashboard, one self-contained HTML per run. Worth keeping because i
 **time series** — the end-of-test summary is a single point in time and cannot tell a uniformly
 slow run from one that stalled for five seconds.
 
-The filename records `org`, `vus` and `duration` but **not which arm of an A/B the run was**, which
-is the whole problem with keeping a lot of them. A report nobody can map back to a condition is not
-evidence. So: keep the runs a writeup actually cites, and index them here.
+The filename records `org`, `vus` and `duration`, and — since 2026-08-14 — an optional arm label
+from `NAME=<label> pnpm load:baseline`, which lands right after the timestamp. A label is a hint,
+not the record: it is empty by default, and it cannot say what `tracing-off` meant three weeks
+later. A report nobody can map back to a condition is not evidence. So: keep the runs a writeup
+actually cites, and index them here.
 
 ## What is here
 
@@ -38,5 +40,6 @@ git checkout 8f616c5 -- k6/reports/<file>
 
 ## If you add more
 
-Record the arm here in the same commit, or do not commit the file. Six labelled runs beat thirty
-unlabelled ones — the mapping is the part that cannot be reconstructed later.
+Pass `NAME=` so the arm is in the filename, and record it in the table above in the same commit, or
+do not commit the file. Six labelled runs beat thirty unlabelled ones — the mapping is the part that
+cannot be reconstructed later.

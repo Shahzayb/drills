@@ -3,6 +3,7 @@
 //
 //   pnpm load:baseline                          conversations-baseline.js
 //   ORG_ID=150 pnpm load:baseline                tail org
+//   NAME=tracing-off pnpm load:baseline          labels the report
 //   node k6/run-baseline.mjs other.js           any script in k6/
 //   node k6/run-baseline.mjs other.js --vus 5   trailing args go to `k6 run`
 //
@@ -34,6 +35,17 @@ const WARMUP = process.env.WARMUP || '20s';
 const DURATION = process.env.DURATION || '60s';
 const P95_BUDGET_MS = process.env.P95_BUDGET_MS;
 
+// Which arm of an A/B this run is — the one thing the filename could never
+// reconstruct, and the reason 21 reports had to be dropped in the 2026-08-14
+// cleanup (see k6/reports/README.md). Empty by default: an unnamed run is still
+// a valid run, and forcing a label on a smoke test would just produce noise.
+// Squashed to filename-safe characters so the report name and the printed
+// summary say the same thing.
+const NAME = (process.env.NAME || '')
+  .trim()
+  .replace(/[^a-zA-Z0-9._]+/g, '-')
+  .replace(/^-+|-+$/g, '');
+
 // Local time, not UTC: a run at 11pm belongs to the evening you ran it, and the
 // plan's finding 4 is that runs are only comparable within one sitting. Leading,
 // so the directory sorts into sweeps. To the second, because that is what makes a
@@ -47,16 +59,19 @@ const stamp =
   `-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 
 // Every knob that changes the measurement is in the name, including which script
-// produced it.
-const name = script.replace(/\.js$/, '');
-const REPORT = `${stamp}-${name}-org${ORG_ID}-vus${VUS}-${DURATION}.html`;
+// produced it. NAME sits right after the stamp so labelled runs of one sweep sort
+// together under it; without one the name is exactly what it was before.
+const scriptName = script.replace(/\.js$/, '');
+const REPORT =
+  `${stamp}${NAME ? `-${NAME}` : ''}` +
+  `-${scriptName}-org${ORG_ID}-vus${VUS}-${DURATION}.html`;
 
 // k6 writes the dashboard at the *end* of the run and fails the output if the
 // directory is missing, so a forgotten mkdir costs the full run, not its first
 // second.
 mkdirSync(new URL('reports/', import.meta.url), { recursive: true });
 
-const env = { ORG_ID, VUS, WARMUP, DURATION };
+const env = { ORG_ID, VUS, WARMUP, DURATION, NAME };
 if (P95_BUDGET_MS) env.P95_BUDGET_MS = P95_BUDGET_MS;
 
 // k6's own web dashboard, self-contained HTML. The one output worth keeping:

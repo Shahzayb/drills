@@ -48,12 +48,14 @@ no sweep script — the method (vacuum, settle, 3 runs per
 org in a fixed order) is written down in `plans/2026-08-13_drill-05-load-test-baseline.md` and run
 by hand, which means the vacuum and the run order are now yours to remember, and the six-run
 table lives in that plan file rather than in any generated artifact. The one file a run leaves is
-`k6/reports/<yyyy-mm-dd-hhmmss>-<script>-org<id>-vus<n>-<duration>.html`, k6's own dashboard —
+`k6/reports/<yyyy-mm-dd-hhmmss>[-<name>]-<script>-org<id>-vus<n>-<duration>.html`, k6's own dashboard —
 timestamped because runs are only comparable within one sitting, and because a timestamp cannot
 collide the way a hand-chosen run label could — which is also why there is no `RUN` parameter any
-more; it only ever decorated console output. **The filename does not record which arm of an A/B a
-run was, so a report is only evidence if something writes that down** — `k6/reports/README.md` is
-that index, and the rule is to label a report in the same commit that adds it or not commit it. A
+more; it only ever decorated console output. `NAME=tracing-off pnpm load:baseline` puts an arm label
+right after the stamp (empty by default, squashed to filename-safe characters, also printed in the
+summary and as the first field of the `RESULT` row). **A name in the filename is still not the
+record — a report is only evidence if something writes down what the condition was** —
+`k6/reports/README.md` is that index, and the rule is to label a report in the same commit that adds it or not commit it. A
 2026-08-14 cleanup dropped 21 unlabelled ones (recoverable at `8f616c5`). k6 skips the export on runs of a few seconds, so a
 smoke test leaves nothing behind.
 

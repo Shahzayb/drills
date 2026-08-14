@@ -16,6 +16,10 @@ import http from 'k6/http';
  */
 
 const BASE_URL = __ENV.BASE_URL || 'http://nest_server:3002';
+// The arm of an A/B this run is, set by run-baseline.mjs (which also puts it in
+// the report filename). Empty by default — it labels the output and changes
+// nothing about the measurement.
+const NAME = __ENV.NAME || '';
 const ORG_ID = __ENV.ORG_ID || '1';
 const VUS = Number(__ENV.VUS || 10);
 const WARMUP = __ENV.WARMUP || '20s';
@@ -112,7 +116,7 @@ export function handleSummary(data) {
 
   const report = [
     '',
-    `  org=${ORG_ID} vus=${VUS} warmup=${WARMUP} measured=${DURATION}`,
+    `  ${NAME ? `name=${NAME} ` : ''}org=${ORG_ID} vus=${VUS} warmup=${WARMUP} measured=${DURATION}`,
     `  measured requests : ${count}`,
     `  p50 / p95 / p99   : ${n(v.med)} / ${n(v['p(95)'])} / ${n(v['p(99)'])} ms`,
     `  min / avg / max   : ${n(v.min)} / ${n(v.avg)} / ${n(v.max)} ms`,
@@ -121,8 +125,9 @@ export function handleSummary(data) {
     // If these two lines are identical, the exclusion is not working.
     `  (incl. warm-up)   : p50 ${n(overall.values.med)}  p95 ${n(overall.values['p(95)'])}  p99 ${n(overall.values['p(99)'])} ms`,
     '',
-    // Machine-readable row, for wherever the table is being kept.
-    `RESULT,${ORG_ID},${VUS},${n(v.med)},${n(v['p(95)'])},${n(v['p(99)'])},${n(rps)},${count}`,
+    // Machine-readable row, for wherever the table is being kept. NAME leads —
+    // an empty leading field keeps every other column where it was.
+    `RESULT,${NAME},${ORG_ID},${VUS},${n(v.med)},${n(v['p(95)'])},${n(v['p(99)'])},${n(rps)},${count}`,
     '',
   ].join('\n');
 
