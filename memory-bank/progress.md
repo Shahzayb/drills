@@ -19,9 +19,24 @@ Drill 06 — one request id through Next, Nest, Postgres and Redis. Shipped:
 - The plumbing costs ~4x what the logging does. **A suppressed log line still evaluates its
   arguments** — guarding with `isLevelEnabled` recovered 6.0% at silent, 5.0% at info, and (as
   predicted) nothing at debug.
+- **Phase 2 (the card's stretch) shipped too:** OpenTelemetry spans, an OTLP collector and Jaeger,
+  all off unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set and behind `profiles: ['trace']`, so drill
+  05's instrument is unchanged. `pnpm trace:on` / `trace:off`.
+- **Drill 05's finding #2 now has a number.** A `db_query` line said the count query took 7.90ms;
+  the trace says **5.48ms of it was `pg-pool.connect`** (4.53ms opening a new socket) and 2.09ms
+  executing. Phase 1's writeup listed exactly that decomposition as something it could not do.
+- **Tracing costs more than sampling can fix.** Tail org, interleaved: off 3,121 req/s → 5%
+  sampled 2,124 (−32.0%) → 100% sampled 1,729 (−44.6%). Dropping 95% of traces buys back only
+  **28%** of the cost — the sampler decides at span creation, so an unsampled request still runs
+  every patched function. Phase 1's "plumbing beats output" result, a second time. The lever is
+  fewer instrumentations, not a lower sample rate.
+- **Three collisions between the hand-built version and the standard**, all found by reading
+  output: a leading SQL comment renames every pg span; that same comment silently *disables*
+  sqlcommenter (the spec forbids commenting a commented statement); and Next runs `proxy.ts` in
+  its own one-span trace, which killed the plan's "one id for logs and Jaeger" design.
 - See `plans/2026-08-13_drill-06-request-id-propagation.md`,
-  `drills/06-request-tracing-and-structured-logs.md` and `drills/06-writeup-worksheet.md`.
-- **Not done:** the OpenTelemetry stretch. Scoped as phase 2 in the same plan file.
+  `drills/06-request-tracing-and-structured-logs.md`, `drills/06b-opentelemetry-and-spans.md` and
+  `drills/06-writeup-worksheet.md`.
 
 Drill 05 — the load-test baseline. Shipped:
 
@@ -66,7 +81,7 @@ nothing samples `stats()` during a k6 run.
 
 ## Active plan
 
-`plans/2026-08-13_drill-06-request-id-propagation.md` (phase 1 shipped, phase 2 not started),
+`plans/2026-08-13_drill-06-request-id-propagation.md` (both phases shipped),
 `plans/2026-08-13_drill-05-load-test-baseline.md` (shipped),
 `plans/2026-08-11_drill-04-bulk-seed.md` (shipped),
 `plans/2026-08-12_seed-simplification.md` (shipped)
