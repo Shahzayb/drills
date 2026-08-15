@@ -7,9 +7,6 @@ import { TRACING_ENABLED } from '../observability/trace';
 // Every number here is chosen, not inherited. Reasoning lives in
 // plans/2026-08-06_drill-01-health-endpoint.md under "Numbers we chose".
 //
-// Postgres reports max_connections=100 with 3 reserved for superusers, leaving
-// 97. At 10 per API container that is room for ~9 replicas before the database
-// is the thing that says no — plus headroom for psql sessions during drills.
 const POOL_MAX = 10;
 // Long enough to survive a GC pause, short enough that /health answers inside
 // its own 2s probe budget instead of hanging.
