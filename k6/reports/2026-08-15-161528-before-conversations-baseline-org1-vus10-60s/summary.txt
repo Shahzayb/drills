@@ -1,0 +1,9 @@
+
+  name=before org=1 vus=10 warmup=20s measured=60s
+  measured requests : 2646
+  p50 / p95 / p99   : 193.11 / 369.39 / 397.78 ms
+  min / avg / max   : 107.07 / 227.02 / 609.33 ms
+  throughput        : 44.10 req/s
+  (incl. warm-up)   : p50 192.20  p95 368.47  p99 398.56 ms
+
+RESULT,before,1,10,193.11,369.39,397.78,44.10,2646

@@ -1,0 +1,9 @@
+
+  name=rls-on org=150 vus=10 warmup=20s measured=60s
+  measured requests : 144724
+  p50 / p95 / p99   : 4.01 / 5.40 / 6.88 ms
+  min / avg / max   : 2.30 / 4.12 / 20.51 ms
+  throughput        : 2412.07 req/s
+  (incl. warm-up)   : p50 4.02  p95 5.47  p99 6.97 ms
+
+RESULT,rls-on,150,10,4.01,5.40,6.88,2412.07,144724

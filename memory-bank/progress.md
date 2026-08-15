@@ -5,17 +5,33 @@ dead ends are one row each in `history.md`, and this file is only what a session
 
 ## Current focus
 
-Nothing in flight. Drill 06 landed on 2026-08-13 (both phases: correlation + structured JSON logs,
-then the OpenTelemetry stretch), and the tree is clean at that commit.
+Nothing in flight. Drill 07 landed on 2026-08-15 (RLS tenant isolation, including the stretch).
 
-The thing to carry forward is that the stack is now **instrumented but off by default** — pino at
-`info`, `LOG_LEVEL` per service, tracing dark unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set. That was
-deliberate so drill 05's baseline stays the instrument cards 08/09/10 are compared against. Turning
-either up is a per-measurement decision, not a default to drift into.
+Two things to carry forward.
+
+**The API no longer connects as the database owner.** `POSTGRES_APP_USER`/`POSTGRES_APP_PASSWORD`
+are required and `PostgresService` throws without them — no fallback, because falling back to the
+superuser would leave every policy in place enforcing nothing with every test still passing.
+`POSTGRES_USER` is now only for migrations and the seed, which is also what lets them bypass RLS.
+
+**A write to any table carrying `org_id` must declare its tenant.** `TenantDb.withOrg()` is the
+only way, including in test fixtures — the older suites were changed for this, and that is the
+mechanism working rather than scaffolding. `pnpm check:tenancy` fails when a new table forgets.
+
+The stack also remains **instrumented but off by default** — pino at `info`, `LOG_LEVEL` per
+service, tracing dark unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set — so drill 05's baseline stays
+the instrument cards 08/09/10 are compared against.
 
 ## Next step
 
-**Card 07**, next in order.
+**Card 08**, next in order. Drill 07 leaves it one gift and one warning:
+
+- **Gift:** `list()` now runs both its queries in one transaction on one connection, so removing
+  `count(*)` also removes the serialisation drill 07 measured. Card 08's win may be larger than
+  drill 05 predicted.
+- **Warning:** the `before` arm of any A/B must not be a git checkout. Drill 07 had to discard
+  that arm entirely — 33% spread, because it was the only arm whose process restarted. Arms must
+  differ only in the variable.
 
 When the optimisation cards arrive, drill 05 already decided their order against expectation:
 
@@ -37,12 +53,15 @@ None open — every plan file in `plans/` is shipped. `history.md` lists them wi
 ## What works
 
 `pnpm docker:up`, then `pnpm db:migrate` and `pnpm db:seed` — or `pnpm db:reset` for both.
-`pnpm db:test` runs the e2e suite inside the container (27 tests, 4 suites). Baseline numbers and
+`pnpm db:test` runs the e2e suite inside the container (45 tests, 5 suites). Baseline numbers and
 query plans for drill 03 are recorded in its plan file — that is the `before` column cards 08/09/10
 get compared against, and drill 04's plan records what those same queries do at 2.5M rows.
 
 `pnpm logs:trace <id>` reconstructs one request across all services. `pnpm trace:on` adds spans,
 a collector and Jaeger on `:16686`; `pnpm trace:off` puts it back.
+
+`pnpm check:tenancy` audits RLS coverage and the serving role's attributes, read-only — it is also
+the "check rather than assume" command, which is why there is no separate `rls:status`.
 
 ## Known issues
 
@@ -53,10 +72,17 @@ a collector and Jaeger on `:16686`; `pnpm trace:off` puts it back.
    caught in drill 06.
 3. `AppController`/`AppService` are still `nest new` scaffolding returning `'Hello World!'`, kept
    only because `test/app.e2e-spec.ts` asserts on them.
-4. **Logging is now a cost to watch, not an absence.** `LOG_LEVEL=debug` in anything resembling
+4. **`organizations` and `users` have no RLS policy**, and that is a recorded decision, not a gap
+   to close casually: `organizations` is the tenant registry rather than tenant-owned data, and
+   `users` genuinely has no `org_id` because a person can belong to several orgs. Both are real
+   leak surfaces the mechanism does not cover.
+5. **Anything running as `POSTGRES_USER` is outside tenant isolation** — migrations, the seed, and
+   any ad-hoc psql. That is deliberate (they must write across tenants) and is the price of not
+   setting `FORCE ROW LEVEL SECURITY`.
+6. **Logging is now a cost to watch, not an absence.** `LOG_LEVEL=debug` in anything resembling
    production would be expensive, and `url` is logged with its query string in full — safe for
    today's parameters and not for a token or an email.
-5. `main.ts` has a standing `@typescript-eslint/no-floating-promises` warning on `bootstrap();`.
+7. `main.ts` has a standing `@typescript-eslint/no-floating-promises` warning on `bootstrap();`.
    Pre-dates drill 06, left alone rather than widening a drill's scope.
 
 ## Preferences
@@ -77,6 +103,11 @@ a collector and Jaeger on `:16686`; `pnpm trace:off` puts it back.
   OpenTelemetry are all runtime toggles rather than always-on, because an always-on instrument
   silently changes the baseline that every later "before/after" depends on. Same reasoning as
   pinning `grafana/k6:2.1.0`.
+- **A control belongs below the code that must not forget it.** Drill 07 measured the rejected
+  repository layer as *free* and chose the 23.5%-slower row-level security anyway, because only
+  the database-side mechanism protects code that never went through the seam. Speed lost to one
+  test case. The corollary is also recorded: on a 185ms endpoint the cost was unmeasurable, so
+  this is a decision per endpoint shape, not one global answer.
 - **Naive-on-purpose is a recorded decision, not debt.** `GET /conversations` has no composite
   index, no cursor and no caching so cards 08/09/10 have something real to break. Read the plan
   file before "improving" anything here.

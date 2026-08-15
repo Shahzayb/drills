@@ -36,6 +36,25 @@ and index them here.
 
 The phase 2 table those six produce is in `plans/2026-08-13_drill-06-request-id-propagation.md`.
 
+### 2026-08-15 — drill 07, the cost of tenant isolation
+
+26 runs in one sitting, four arms, `NAME=` on every one. Table and findings in
+`plans/2026-08-15_drill-07-tenant-isolation.md`.
+
+| arm | runs | what it was |
+|---|---|---|
+| `before` | org1 ×2 (16:06–16:15), org150 ×5 (16:07–16:41) | pre-drill-07 commit `219f91b`, serving as the owner. **Discarded as a comparator** — 33% spread, see below |
+| `repo` | org1 ×2 (16:48–16:49), org150 ×3 (16:28–16:43) | the *rejected* repository layer — app-level scoping, no transaction, no pinned client. The zero point the table actually uses |
+| `txn-only` | org1 ×2 (16:09–16:18), org150 ×5 (16:10–16:44) | the seam with policies **disabled** — isolates the transaction wrapper from the policies |
+| `rls-on` | org1 ×2 (16:12–16:21), org150 ×5 (16:13–16:46) | the shipped mechanism |
+
+**Why `before` is kept but not used.** Its five org150 runs range 2,375 → 3,147 req/s, a 33%
+spread against 1.6–5% for the other three arms. It is the only arm requiring a whole-tree
+`git checkout`, so it is the only one whose process restarts into a cold JIT and an empty pool.
+The runs are kept because that finding is worth more than the arm was: drill 05 said *interleave
+arms in one sitting*, and drill 07 adds **arms must differ only in the variable, not in whether
+the process restarted**.
+
 **These twelve predate `summary.txt` and have none.** It was not back-filled, because the only
 honest way to produce one is to re-run, and a re-run on a different evening is a different number —
 that is drill 05's finding 4. Their HTML is still in history at commit `3d61a41`, and the numbers

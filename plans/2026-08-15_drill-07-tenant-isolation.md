@@ -1,6 +1,6 @@
 # Drill 07 — Prove a tenant leak, then make the class of bug unwritable
 
-**Status:** planned
+**Status:** shipped
 
 ## Context
 
@@ -318,8 +318,98 @@ closest thing to "fails CI" this repo currently has, and the guide says so rathe
 
 ## Results
 
-_Filled in as the drill runs._
+**Status: shipped.** 45 e2e tests pass (27 pre-existing + 18 new).
+
+### Phase 1 — the leak, verbatim
+
+With the four endpoints filterless and no mechanism underneath:
+
+```
+Tests: 15 failed, 3 passed, 18 total
+```
+
+The three that passed are the point: both owner-side controls, and `never includes another org's
+rows` — because `GET /conversations` was never broken. Every *new* surface leaked. The worst
+single line was `4. cross-tenant delete › and the row still exists for its owner`: the attacker's
+`DELETE` succeeded against another org's data and returned 404.
+
+### Phase 3 — the removal proof
+
+Policies disabled on the three tables, nothing else changed:
+
+```
+Tests: 14 failed, 31 passed, 45 total
+```
+
+All five card-required categories fail. Re-enabled: 45/45. The one tenancy case that stays green
+is #2, the list — because `list()` kept its explicit filter, which is the honest cost of
+belt-and-braces on the hot path.
+
+### Phase 4 — what it costs
+
+**The `before` arm was thrown out as a comparator.** Its five tail runs spread **33%**
+(2,375 → 3,147 req/s) against 1.6–5% for every other arm, because it is the only arm needing a
+whole-tree checkout and therefore the only one restarting into a cold JIT and empty pool. New
+rule to add to drill 05's: **arms must differ only in the variable, not in whether the process
+restarted.** `repo` is the zero point instead — same commit, same role, same restart pattern.
+
+Medians. Tail = org 150, 5 rounds; whale = org 1, 2 rounds.
+
+| arm | tail p50 | tail req/s | vs `repo` | whale p50 | whale req/s | vs `repo` |
+|---|---|---|---|---|---|---|
+| `repo` (rejected mechanism) | 3.06 ms | 3,118.9 | — | 183.4 ms | 45.70 | — |
+| `txn-only` | 4.00 ms | 2,408.3 | −22.8% | 185.3 ms | 45.51 | −0.4% |
+| `rls-on` | 4.04 ms | 2,386.1 | **−23.5%** | 192.0 ms | 43.84 | −4.1% *(unproven)* |
+
+Three findings:
+
+1. **The policies are free; the transaction is not.** `rls-on` − `txn-only` = −0.9% on the tail,
+   inside the noise. All measurable cost is `BEGIN`/`set_config`/`COMMIT` plus the pinned
+   connection. Prediction 3 confirmed — and this is drill 06's "the plumbing costs more than the
+   output" for the third time.
+2. **A fixed ~0.94 ms/request, not a percentage.** −23.5% on a 3 ms request, unmeasurable on a
+   185 ms one (the whale delta is inside that arm's own 9.7 ms run-to-run spread). Prediction 1
+   confirmed, prediction 2 confirmed.
+3. **The whale should have been ~33 ms worse and was ~8.5 ms worse.** Serialising the list and
+   count queries is offset by removing drill 05's 2:1 pool oversubscription — one connection per
+   request instead of two. The two effects genuinely cancel.
+
+**The rejected mechanism, measured** (added at the user's request mid-drill): the repository
+layer is **free, within noise** — 3,118.9 req/s against `before`'s best runs. It builds the same
+SQL on the same two pooled connections. It lost on case 7 alone, and that cost 23.5% of tail
+throughput.
+
+`EXPLAIN` findings, which beat the k6 table:
+
+- The policy folds into a **`One-Time Filter`** because `app_current_org()` is `STABLE` — one
+  scalar comparison per scan, not per row. The count query keeps its **Parallel Index Only Scan**
+  (`Heap Fetches: 0`), which was the real risk.
+- **`PARALLEL SAFE` is worth 2.4x.** SQL functions default to `PARALLEL UNSAFE`, and a policy
+  calling an unsafe function makes every query on that table serial: whale `count(*)` 42.7 →
+  108.0 ms, list 88.9 → 214.7 ms. Larger than the entire mechanism's cost, from one word.
+- The messages join is 2.4 ms — the policy on the unindexed `messages.org_id` is a recheck on the
+  two rows `messages_conversation_id_idx` already found, so drill 02's deliberate gap costs
+  nothing *on this access path*.
 
 ## Revised while shipping
 
-_What the plan got wrong, recorded rather than quietly fixed._
+1. **"The existing 27 tests still pass, nothing in `conversations.e2e-spec.ts` changes" was
+   wrong.** Both older suites write tenant-owned fixtures directly, which the app role may no
+   longer do. They were changed to create fixtures through `withOrg` — which is the mechanism
+   working on the test suite itself, not scaffolding.
+2. **node-pg-migrate echoes every statement to stdout**, with no flag involved, so
+   `pnpm db:migrate` prints the role password. The migration comment originally claimed the
+   opposite. Checked, corrected, and the real-deployment guidance (create the role out of band)
+   written down.
+3. **A transaction-local GUC reverts to `''`, not unset.** Case 9 caught it. Once a session has
+   seen a custom GUC's name, end-of-transaction reverts it to its reset value — the empty string
+   — so a pooled connection is `NULL` only until its first scoped transaction. `''::bigint` raises
+   `22P02`, which makes the `nullif` in `app_current_org()` the difference between fail-closed and
+   a 500 on every unscoped query after the first. The plan called the `nullif` a nicety; it is
+   load-bearing.
+4. **`rls:status` was dropped.** Its psql was unreadable through three layers of shell quoting,
+   and `check:tenancy` already reports the same facts read-only. One command, not two.
+5. **`docker-compose.yml` needed no change** — `env_file: .env` already carries the new variables.
+   Caught during planning review, recorded because the first pass had it in the file list.
+6. **The `before` arm turned out to be methodologically unsound** — see phase 4 above. This is
+   the most reusable thing in the drill.
