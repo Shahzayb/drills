@@ -1,0 +1,9 @@
+
+  name=txn-only org=1 vus=10 warmup=20s measured=60s
+  measured requests : 2667
+  p50 / p95 / p99   : 189.95 / 371.67 / 397.82 ms
+  min / avg / max   : 104.18 / 225.27 / 524.75 ms
+  throughput        : 44.45 req/s
+  (incl. warm-up)   : p50 189.66  p95 371.87  p99 401.21 ms
+
+RESULT,txn-only,1,10,189.95,371.67,397.82,44.45,2667

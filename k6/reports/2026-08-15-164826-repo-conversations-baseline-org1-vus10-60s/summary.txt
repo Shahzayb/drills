@@ -1,0 +1,9 @@
+
+  name=repo org=1 vus=10 warmup=20s measured=60s
+  measured requests : 2828
+  p50 / p95 / p99   : 178.60 / 349.02 / 373.47 ms
+  min / avg / max   : 90.20 / 212.24 / 532.21 ms
+  throughput        : 47.13 req/s
+  (incl. warm-up)   : p50 178.30  p95 348.74  p99 373.35 ms
+
+RESULT,repo,1,10,178.60,349.02,373.47,47.13,2828

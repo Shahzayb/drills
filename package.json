@@ -26,6 +26,7 @@
     "db:log:status": "docker compose exec -T postgres_db sh -c 'psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -c \"show log_min_duration_statement\"'",
     "db:activity": "docker compose exec -T postgres_db sh -c 'psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -c \"select pid, state, left(query, 140) as query from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid() order by state\"'",
     "db:test": "docker compose exec nest_server pnpm --filter=backend run test:e2e",
+    "check:tenancy": "docker compose exec -T nest_server pnpm --filter=backend run check:tenancy",
     "load:baseline": "node k6/run-baseline.mjs",
     "docker:up": "docker compose up -d --pull always",
     "docker:up:prod": "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
