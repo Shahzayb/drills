@@ -7,7 +7,7 @@ it, and naive code is often a recorded decision rather than debt.
 pnpm monorepo: `apps/backend` (NestJS, raw `pg`, no ORM) and `apps/frontend` (Next.js App Router),
 orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose.
 
-## Progression — 6 of 32
+## Progression — 7 of 32
 
 | # | Drill | Result worth remembering |
 |---|---|---|
@@ -17,6 +17,7 @@ orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose
 | 04 | Bulk load | 12.5M rows via `COPY` in 104s; dropping the FK before load was the biggest lever. |
 | 05 | Load-test baseline | Whale org p95 340ms @ 49 req/s vs tail org 2.9ms @ 4,415 — the `before` column. |
 | 06 | Observability | One request id across 4 processes, structured logs, OTel spans behind a flag. |
+| 07 | Tenant isolation | Row-level security under four deliberately filterless endpoints; 14 tests fail without it. |
 
 Current state and what's open live in `memory-bank/progress.md`; every decision and
 number is one row in `memory-bank/history.md`, with the full reasoning in `plans/`.
@@ -40,6 +41,7 @@ pnpm db:test            # backend e2e suite, inside the container
 pnpm load:baseline      # k6 baseline run
 pnpm trace:on           # spans + collector + Jaeger on :16686 (trace:off)
 pnpm logs:trace <id>    # one request across all services
+pnpm check:tenancy      # RLS coverage + the serving role cannot bypass it
 pnpm format
 pnpm lint
 ```
