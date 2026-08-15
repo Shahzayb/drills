@@ -4,6 +4,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { PostgresService } from '../src/postgres/postgres.service';
+import { TenantDb } from '../src/tenancy/tenant-db.service';
 
 /**
  * Integration test for `GET /conversations`: real HTTP through the real module
@@ -22,6 +23,10 @@ import { PostgresService } from '../src/postgres/postgres.service';
 describe('GET /conversations (e2e)', () => {
   let app: INestApplication<App>;
   let db: PostgresService;
+  // Since drill 07, a write to a table carrying org_id has to say which tenant
+  // it is for — the policies reject one that does not. Fixtures go through the
+  // same seam the application does.
+  let tenants: TenantDb;
 
   const tag = `conversations-e2e-${Date.now()}`;
 
@@ -49,6 +54,7 @@ describe('GET /conversations (e2e)', () => {
     await app.init();
 
     db = app.get(PostgresService);
+    tenants = app.get(TenantDb);
 
     // RETURNING order for a multi-row VALUES list is not something Postgres
     // promises, so the name comes back too and the ids are matched by it.
@@ -65,40 +71,49 @@ describe('GET /conversations (e2e)', () => {
     // Every parameter is cast explicitly. An untyped `$n` inside
     // generate_series() is ambiguous across its int/bigint/numeric overloads,
     // and `pg` sends numbers as text, so leaving it to inference is a coin flip.
-    await db.query(
-      `INSERT INTO conversations (org_id, status, created_at, updated_at)
-       SELECT $1::bigint, 'open',
-              now() - make_interval(mins => n * 10),
-              now() - make_interval(mins => n)
-         FROM generate_series(1, $2::int) AS n`,
-      [orgId, DISTINCT],
-    );
+    await tenants.withOrg(orgId, async (tx) => {
+      await tx.query(
+        `INSERT INTO conversations (org_id, status, created_at, updated_at)
+         SELECT $1::bigint, 'open',
+                now() - make_interval(mins => n * 10),
+                now() - make_interval(mins => n)
+           FROM generate_series(1, $2::int) AS n`,
+        [orgId, DISTINCT],
+      );
 
-    // All four land on the same instant: now() is stable within a statement.
-    await db.query(
-      `INSERT INTO conversations (org_id, status, created_at, updated_at)
-       SELECT $1::bigint, 'open',
-              now() - make_interval(days => 1),
-              now() - make_interval(days => 1)
-         FROM generate_series(1, $2::int)`,
-      [orgId, TIED],
-    );
+      // All four land on the same instant: now() is stable within a statement.
+      await tx.query(
+        `INSERT INTO conversations (org_id, status, created_at, updated_at)
+         SELECT $1::bigint, 'open',
+                now() - make_interval(days => 1),
+                now() - make_interval(days => 1)
+           FROM generate_series(1, $2::int)`,
+        [orgId, TIED],
+      );
+    });
 
-    await db.query(
-      `INSERT INTO conversations (org_id, status, created_at, updated_at)
-       SELECT $1::bigint, 'open', now(), now() FROM generate_series(1, 3)`,
-      [otherOrgId],
+    await tenants.withOrg(otherOrgId, (tx) =>
+      tx.query(
+        `INSERT INTO conversations (org_id, status, created_at, updated_at)
+         SELECT $1::bigint, 'open', now(), now() FROM generate_series(1, 3)`,
+        [otherOrgId],
+      ),
     );
   });
 
   afterAll(async () => {
     if (orgId) {
-      // Reverse FK order. `::bigint[]` because `pg` sends a JS array of strings
-      // as text[], and `bigint = ANY(text[])` has no operator.
-      await db.query(
-        `DELETE FROM conversations WHERE org_id = ANY($1::bigint[])`,
-        [[orgId, otherOrgId]],
-      );
+      // One scope per org, not one `WHERE org_id = ANY(...)`. A policy filters
+      // per row against a single current tenant, so the array form would delete
+      // at most one org's rows and silently leave the other's behind.
+      for (const id of [orgId, otherOrgId]) {
+        await tenants.withOrg(id, (tx) =>
+          tx.query(`DELETE FROM conversations WHERE org_id = $1::bigint`, [id]),
+        );
+      }
+      // organizations carries no org_id and has no policy — see migration 003.
+      // `::bigint[]` because `pg` sends a JS array of strings as text[], and
+      // `bigint = ANY(text[])` has no operator.
       await db.query(`DELETE FROM organizations WHERE id = ANY($1::bigint[])`, [
         [orgId, otherOrgId],
       ]);

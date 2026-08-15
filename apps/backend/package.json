@@ -21,7 +21,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "migrate": "node-pg-migrate --config-file migrate.config.mjs",
     "seed": "node db/seed.mjs",
-    "bench:copy": "node db/bench-copy.mjs"
+    "bench:copy": "node db/bench-copy.mjs",
+    "check:tenancy": "node db/check-tenancy.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

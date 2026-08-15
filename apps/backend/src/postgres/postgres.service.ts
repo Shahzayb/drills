@@ -1,5 +1,5 @@
 import { Injectable, OnApplicationShutdown } from '@nestjs/common';
-import { Pool, QueryResult, QueryResultRow } from 'pg';
+import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import { errorMessage, logger, since } from '../observability/logger';
 import { getRequestId } from '../observability/request-context';
 import { TRACING_ENABLED } from '../observability/trace';
@@ -30,6 +30,23 @@ const summarise = (text: string): string => {
 };
 
 /**
+ * What `withClient` lends out. Deliberately not a `PoolClient`: handing the real
+ * thing out would let a caller `release()` it twice, keep it past the callback,
+ * or run a statement that never reaches the logging below.
+ *
+ * `control` exists so the transaction plumbing (`BEGIN`, `set_config`, `COMMIT`)
+ * can be issued without producing three `db_query` lines per request. See
+ * tenancy/tenant-db.service.ts.
+ */
+export interface ClientHandle {
+  query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    params?: unknown[],
+  ): Promise<QueryResult<T>>;
+  control(text: string, params?: unknown[]): Promise<void>;
+}
+
+/**
  * Owns the connection pool. Every read goes through `query()` — that is the
  * point of this class, not an accident of style. Handing out the raw `Pool`
  * would mean later drills (timing, tracing, pool saturation) have nowhere
@@ -43,11 +60,28 @@ export class PostgresService implements OnApplicationShutdown {
   private readonly logger = logger;
 
   constructor() {
+    // The serving role, and it has no default. POSTGRES_USER is the owner: it
+    // runs the migrations and drill 04's COPY seed, and row-level security
+    // exempts the table owner and every superuser. Falling back to it would
+    // leave the policies in place, visible in the schema, enforcing nothing —
+    // and every test would still pass. That is the exact failure drill 07
+    // exists to remove, so this throws instead.
+    const user = process.env.POSTGRES_APP_USER;
+    const password = process.env.POSTGRES_APP_PASSWORD;
+
+    if (!user || !password) {
+      throw new Error(
+        'POSTGRES_APP_USER and POSTGRES_APP_PASSWORD are required — ' +
+          'the API must not serve as the database owner. See ' +
+          'plans/2026-08-15_drill-07-tenant-isolation.md',
+      );
+    }
+
     this.pool = new Pool({
       host: process.env.POSTGRES_HOST ?? 'localhost',
       port: Number(process.env.POSTGRES_PORT ?? 5432),
-      user: process.env.POSTGRES_USER ?? 'postgres',
-      password: process.env.POSTGRES_PASSWORD ?? 'postgres',
+      user,
+      password,
       database: process.env.POSTGRES_DB ?? 'postgres',
       max: POOL_MAX,
       connectionTimeoutMillis: CONNECTION_TIMEOUT_MS,
@@ -63,7 +97,47 @@ export class PostgresService implements OnApplicationShutdown {
     });
   }
 
+  /**
+   * One statement on whatever connection the pool hands out. Unchanged
+   * behaviour — it now shares its body with the pinned-client path below rather
+   * than having a second copy of the instrumentation.
+   */
   async query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    params?: unknown[],
+  ): Promise<QueryResult<T>> {
+    return this.runOn(this.pool, text, params);
+  }
+
+  /**
+   * Lends one pooled client for the duration of `fn`, then always releases it.
+   *
+   * This is what makes a transaction possible without the `Pool` leaving this
+   * class — `pool.query()` acquires and releases per call, so `BEGIN` on one
+   * connection and the statement after it on another is not a transaction, it
+   * is two. The caller gets a ClientHandle, not the client.
+   */
+  async withClient<T>(fn: (client: ClientHandle) => Promise<T>): Promise<T> {
+    const client: PoolClient = await this.pool.connect();
+
+    const handle: ClientHandle = {
+      query: (text, params) => this.runOn(client, text, params),
+      control: async (text, params) => {
+        await client.query(text, params as unknown[]);
+      },
+    };
+
+    try {
+      return await fn(handle);
+    } finally {
+      // Always, including when fn threw. A client that is not released is a
+      // permanent -1 on a pool of 10, and the tenth one hangs the process.
+      client.release();
+    }
+  }
+
+  private async runOn<T extends QueryResultRow = QueryResultRow>(
+    executor: Pool | PoolClient,
     text: string,
     params?: unknown[],
   ): Promise<QueryResult<T>> {
@@ -90,7 +164,7 @@ export class PostgresService implements OnApplicationShutdown {
     const startedAt = performance.now();
 
     try {
-      const result = await this.pool.query<T>(sql, params);
+      const result = await executor.query<T>(sql, params);
       this.record(rid, startedAt, text, result.rowCount, null);
       return result;
     } catch (error) {
