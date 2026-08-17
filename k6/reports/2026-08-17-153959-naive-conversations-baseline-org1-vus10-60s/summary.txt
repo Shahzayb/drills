@@ -1,0 +1,9 @@
+
+  name=naive org=1 vus=10 warmup=20s measured=60s
+  measured requests : 1090
+  p50 / p95 / p99   : 458.94 / 968.84 / 1391.97 ms
+  min / avg / max   : 228.31 / 553.16 / 1763.35 ms
+  throughput        : 18.17 req/s
+  (incl. warm-up)   : p50 445.38  p95 921.30  p99 1263.23 ms
+
+RESULT,naive,1,10,458.94,968.84,1391.97,18.17,1090

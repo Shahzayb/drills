@@ -1,0 +1,9 @@
+
+  name=counter-off org=150 vus=10 warmup=20s measured=60s
+  measured requests : 76166
+  p50 / p95 / p99   : 7.49 / 10.77 / 13.81 ms
+  min / avg / max   : 4.60 / 7.83 / 31.75 ms
+  throughput        : 1269.43 req/s
+  (incl. warm-up)   : p50 7.57  p95 11.05  p99 14.33 ms
+
+RESULT,counter-off,150,10,7.49,10.77,13.81,1269.43,76166

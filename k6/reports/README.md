@@ -83,3 +83,21 @@ that cannot be reconstructed later.
 A smoke test is not a run: `summary.txt` is written however short the run was (k6 skips only the
 dashboard, below roughly five seconds), so delete the directory afterwards rather than let a 2s
 throwaway into the index.
+
+### 2026-08-17 — drill 08, N+1 (naive vs batched)
+
+| run | what it was |
+|---|---|
+| `2026-08-17-153701/153959/154256-org1` | naive strategy (1+N per-row lookups), whale, 3 rounds |
+| `2026-08-17-153828/154122/154419-org150` | naive strategy, tail, 3 rounds |
+| `2026-08-17-154604/155151/155459-org1` | batched strategy (LEFT JOIN + 1 tags query), whale, 3 rounds |
+| `2026-08-17-154727/155314/155622-org150` | batched strategy, tail, 3 rounds |
+| `2026-08-17-155850-org150` | stretch: batched, `QUERY_COUNTER=off`, tail — prices the counter itself |
+| `2026-08-17-160043-org150` | stretch: batched, `pg_stat_statements` preloaded, tail — prices that instrument |
+
+`pg_stat_statements` was **off** (production default) for all 12 primary runs — the two stretch
+runs are the only ones with it on. The whale runs landed on a noisy evening: within-arm spread for
+org 1 was 14-17% in both arms, comparable to the 20-24% naive-vs-batched delta, so that comparison
+is **inside the noise floor** per the 15%/20% rule — the tail (spread 2-4%, delta ~63%/177%) and an
+isolated `EXPLAIN (ANALYZE, BUFFERS)` (no concurrency) are the trustworthy numbers for the whale.
+Full table and reasoning in `plans/2026-08-17_drill-08-n-plus-one.md`.

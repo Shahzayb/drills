@@ -110,10 +110,17 @@ export async function fetchInfo(): Promise<InfoResult> {
   }
 }
 
+export interface Tag {
+  id: string;
+  name: string;
+}
+
 export interface Conversation {
   id: string;
   status: string;
   assigneeId: string | null;
+  assigneeName: string | null;
+  tags: Tag[];
   createdAt: string;
   updatedAt: string;
 }

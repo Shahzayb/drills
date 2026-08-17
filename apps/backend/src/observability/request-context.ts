@@ -12,9 +12,45 @@ const SAFE_REQUEST_ID = /^[A-Za-z0-9_-]{8,64}$/;
 
 export interface RequestContext {
   requestId: string;
+  // Statements sent through PostgresService.query() — what card 08's "≤3"
+  // budget counts, and what x-query-count reports. Mutated in place rather
+  // than reassigned, because the store this interface describes is one object
+  // held for the life of the request.
+  queries: number;
+  // Every round trip on the connection: queries above, plus BEGIN /
+  // set_config / COMMIT, which TenantDb.withOrg issues through
+  // ClientHandle.control() and which is not a "query" in the budget's sense.
+  // Drill 07 priced that wrapper at ~0.94ms/request; this is what would have
+  // shown it without re-deriving the number. See
+  // plans/2026-08-17_drill-08-n-plus-one.md.
+  roundTrips: number;
 }
 
 const storage = new AsyncLocalStorage<RequestContext>();
+
+/** The store for the request being served, or undefined outside one. Exists
+ *  so LoggingInterceptor can read the final counts without importing the ALS
+ *  instance itself. */
+export function getRequestContext(): RequestContext | undefined {
+  return storage.getStore();
+}
+
+/** Called once per statement PostgresService.runOn() issues, success or
+ *  failure — a query that errored still made the round trip. */
+export function recordQuery(): void {
+  const store = storage.getStore();
+  if (store) {
+    store.queries += 1;
+    store.roundTrips += 1;
+  }
+}
+
+/** Called once per ClientHandle.control() call (BEGIN / set_config / COMMIT /
+ *  ROLLBACK) — a real round trip, deliberately not counted as a query. */
+export function recordRoundTrip(): void {
+  const store = storage.getStore();
+  if (store) store.roundTrips += 1;
+}
 
 /**
  * Accept the caller's id only if it is safe to embed; otherwise mint one.

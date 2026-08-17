@@ -1,0 +1,9 @@
+
+  name=stats-on org=150 vus=10 warmup=20s measured=60s
+  measured requests : 79749
+  p50 / p95 / p99   : 7.20 / 9.96 / 12.84 ms
+  min / avg / max   : 4.54 / 7.48 / 26.06 ms
+  throughput        : 1329.15 req/s
+  (incl. warm-up)   : p50 7.25  p95 10.44  p99 13.77 ms
+
+RESULT,stats-on,150,10,7.20,9.96,12.84,1329.15,79749
