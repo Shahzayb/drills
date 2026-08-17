@@ -1,40 +1,82 @@
 # CLAUDE.md
 
-How to work in this repository. Only the workflow lives here — everything technical (stack, layout, commands, constraints) lives in `memory-bank/`.
+## What this file is
 
-I drive the workflow. Nothing below runs on its own; each line says what a situation calls for, so that when I ask for it you already know the shape. If a step looks warranted and I haven't asked, say so in a sentence and let me decide.
+This is the workflow guide for working in this repo. It tells you **when** to do something, not **how** — all the technical stuff (stack, folder layout, commands, constraints) lives in `memory-bank/` instead.
 
-## What calls for what
+I (the human) drive the workflow. Nothing here runs automatically — each situation below just tells you what's expected once I ask for it. If you think a step is warranted and I haven't asked for it yet, just say so in a sentence and let me decide.
 
-**Starting on something unfamiliar, or asking where things stand** → `memory-bank/` is the only link to previous work; nothing loads automatically. Read it — including `history.md` — before answering from assumption.
+---
 
-**Work spanning more than one file, adding a dependency, or setting a pattern** → that's the bar for a plan file at `plans/YYYY-MM-DD_short-name.md`. Plan mode can't write files, so the file gets written right after approval, before any code. A single-file fix, a rename, a config tweak is below the bar. As soon as the plan file exists, append a `planned` line for it to `memory-bank/history.md`.
+## 1. Before you start any task
 
-**Implementing against an existing plan** → follow it. If the work needs something the plan doesn't cover, stop and say so rather than quietly re-planning mid-implementation.
+`memory-bank/` is the only record of previous work — nothing about the project loads into context automatically.
 
-**Something landed, or a decision got made** → `memory-bank/` is now stale. Verified facts can be written directly; anything that's a judgment gets proposed to me first. When an implementation finishes, append (or update) its line in `memory-bank/history.md` to `implemented`.
+- If the task touches something unfamiliar, or I ask "where do things stand," **read `memory-bank/` first**, including `memory-bank/history.md`.
+- Don't answer from assumption — check the memory bank before asking me.
 
-**Teachable Things** → `drills` is a guide where you'd teach me about the tech and the what/why/how/when/where of the stuff. Don't bloat and make it digestible. Also be honest about what's bad implementation and how can it be good just so I won't learn bad practices.
+## 2. Deciding whether you need a plan
 
-## Boundaries
+Not every task needs a plan file. Use this as the bar:
 
-`memory-bank/` holds current state, architecture, and technical context. `plans/` holds per-feature intent, one dated file each. They are maintained separately — link between them by filename rather than copying.
+| Needs a plan | Doesn't need a plan |
+|---|---|
+| Touches more than one file | Single-file fix |
+| Adds a dependency | Rename |
+| Sets a new pattern | Config tweak |
 
-`memory-bank/` is the only project memory store here. Don't file project facts in a harness-level memory directory, in this file, or anywhere else — a fact kept in two places drifts, and only `memory-bank/` is in the repo.
+**If it needs a plan:**
+1. Write it to `plans/YYYY-MM-DD_short-name.md`.
+2. Do this *right after I approve the plan, before writing any code* — plan mode itself can't write files, so this is a separate step.
+3. Once the file exists, add a `planned` line for it in `memory-bank/history.md`.
 
-The `memory-bank` skill covers what belongs in each file and how an update pass runs.
+## 3. Implementing a plan
 
-Learn about the project history from the `memory-bank/history.md` file.
+- Follow the plan as written.
+- If the work turns out to need something the plan didn't cover, **stop and tell me** — don't quietly re-plan mid-implementation.
 
-## Rules
+## 4. After something lands
 
-- Code comments are only for short, to-the-point descriptions, not an essay. But you can reference to the `plans/` to justify the current implementation just so future iterations won't 'fix' or 'improve' it.
-- Never include Co-Authored-By line in the commit or PR title/description. Don't use any watermark.
-- Prefer the simpler construction. If a thing can be a plain script, a plain function or a plain file, it is that.
-- Scripts are `.mjs` (plain Node ESM, like `apps/backend/db/seed.mjs`), not shell. Shell is for one-liners in `package.json`.
-- Run `pnpm format` before calling a task done.
-- Always generate 1 learning guide (`drills/`) per plan. If there are many guides per drill, merge them.
-- Never reference to files from the `drills/` in the code/config or anywhere.
-- In every `drills/` there must be a section called `Is this production ready?`, `Honest gaps`, and `What I'd do differently at 10x`.
-- Don't pollute the codebase with comments. That's what the guides (`drills/`) are for, explain it there. Comments have to earn their place. Most of the times, you don't need commends and even if you do, keep it 150 characters (including space) max.
-- Always include the visualization of the whole drill inside the `If you read nothing else` section of guides (`drills/`)
+Once work is done or a decision is made, `memory-bank/` is out of date and needs updating:
+
+- **Verified facts** (things you confirmed are true) → write directly.
+- **Judgment calls** (things you're inferring or recommending) → propose to me first, don't write unilaterally.
+- When an implementation finishes, add or update its line in `memory-bank/history.md` to `implemented`.
+
+## 5. Writing a learning guide (drills)
+
+`drills/` is where you teach me — the what, why, how, when, and where of the tech involved. Use it any time there's something teachable in the work.
+
+- Keep it digestible — don't bloat it.
+- Be honest: if part of the implementation is a shortcut or not best practice, say so and explain what "good" would look like. I don't want to accidentally learn bad habits.
+- **One guide per plan.** If a plan would otherwise spawn multiple guides, merge them into one.
+- Every guide must include these three sections:
+  - `Is this production ready?`
+  - `Honest gaps`
+  - `What I'd do differently at 10x`
+- I'm a visual learner, so every guide needs **at least one diagram/visualization** — put it in the `If you read nothing else` section, or wherever it fits best.
+
+---
+
+## Where things live (don't mix these up)
+
+- **`memory-bank/`** — current state, architecture, technical context. The single source of truth for project facts. Don't duplicate these facts anywhere else (not in this file, not in a harness-level memory directory) — a fact stored twice will drift, and this is the only copy that lives in the repo.
+- **`plans/`** — one dated file per feature/task, describing intent.
+- These two are linked **by filename**, not by copying content between them.
+- The `memory-bank` skill explains exactly what belongs in each memory-bank file and how to run an update pass.
+- Project history specifically is in `memory-bank/history.md`.
+
+---
+
+## Hard rules
+
+**Process**
+- Run `pnpm format` and `pnpm lint` before marking any task done.
+- No `Co-Authored-By` lines in commits or PR titles/descriptions. No watermarks, period.
+
+**Code style**
+- Default to the simplest construction: if something can be a plain script, plain function, or plain file, make it that.
+- Scripts are `.mjs` (plain Node ESM), e.g. `apps/backend/db/seed.mjs` — not shell scripts. Shell is only for one-liners inside `package.json`.
+- Comments must earn their place. Most code doesn't need one; when it does, keep it under 150 characters (spaces included). No essay-length comments.
+  - Exception: you can point to a `plans/` file in a comment to explain *why* something is built the way it is, so a future pass doesn't "fix" it by mistake.
+- Never reference a `drills/` file from code or config — drills are for humans reading docs, not for the codebase.
