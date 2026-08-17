@@ -56,6 +56,7 @@ Once work is done or a decision is made, `memory-bank/` is out of date and needs
   - `What I'd do differently at 10x`
 - I'm a visual learner, so every guide needs **at least one diagram/visualization** — put it in the `If you read nothing else` section, or wherever it fits best.
 - Always list commands you've used to come up with a number along with the results.
+- Don't just give me results, teach me how to get them too.
 
 ---
 
