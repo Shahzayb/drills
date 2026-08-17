@@ -92,8 +92,10 @@ export class LoggingInterceptor implements NestInterceptor {
             handler: context.getHandler().name,
             orgId: request.header(ORG_ID_HEADER),
             status,
-            queries,
-            roundTrips,
+            // Omitted rather than logged as 0 when QUERY_COUNTER=off: nothing
+            // incremented them, and a zero that means "not counted" reads
+            // exactly like a zero that means "made no queries".
+            ...(countingOn ? { queries, roundTrips } : {}),
             durMs: since(startedAt),
           },
           'handler',

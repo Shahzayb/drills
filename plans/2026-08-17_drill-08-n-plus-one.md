@@ -401,8 +401,18 @@ since the repo has no CI and the guide should say so rather than pretend.
 
 | | naive | batched |
 |---|---|---|
-| `pageSize=50`, org 1 (k6 URL) | 87 statements, 90 round trips | 3 statements, 6 round trips |
+| `pageSize=50`, org 1 | 87 statements, 90 round trips | 3 statements, 6 round trips |
+| `pageSize=20`, org 1 — **the k6 URL** | 33 statements | 3 statements |
+| `pageSize=20`, org 150 — **the k6 URL** | 37 statements | 3 statements |
 | `pageSize=12`, budget-test fixture | 22 statements | 3 statements (2 on an empty page) |
+
+**Which count belongs to which result, because the first version of this table got it wrong.**
+`k6/conversations-baseline.js` requests `?page=1&pageSize=20` and always has — changing it would
+invalidate every run since drill 05. So the throughput numbers below are what fixing a **37**-query
+request buys on the tail, not an 87-query one; 87 is the `pageSize=50` curl from the detection
+exercise, which k6 never issued. The two were welded together in this table's first draft (and in
+`README.md`), which is how a real measurement turns into a wrong sentence: both numbers were
+correct, the pairing was not. The `pageSize=20` rows were measured on review to close the gap.
 
 `queries` and `roundTrips` are two different counters on purpose (`request-context.ts`) —
 `roundTrips` also counts `BEGIN`/`set_config`/`COMMIT`, which drill 07 priced at ~0.94ms/request
@@ -434,11 +444,33 @@ refuted by k6 alone. The `EXPLAIN` below is the trustworthy number instead, beca
 concurrency — the whale's actual confound, found while investigating this exact discrepancy (see
 below).
 
-**Stretch (tail, 1 round each):** `QUERY_COUNTER=off` → 1269.43 req/s vs `on`'s 1244.57 (+2.0%,
-inside noise — the counter itself is cheap, as designed: the interceptor's early bail-out only
-triggers real work when counting or debug logging is on). `pg_stat_statements` preloaded → 1329.15
-req/s vs off's 1244.57 (+6.8%, inside noise — unmeasurable, same as drill06's tracing-verbosity
-check: suspected of costing something, measured and didn't).
+**Stretch — `pg_stat_statements` (tail, 1 round):** preloaded → 1329.15 req/s vs off's 1244.57
+(+6.8%, inside noise — unmeasurable, same as drill 06's tracing-verbosity check: suspected of
+costing something, measured and didn't).
+
+**Stretch — what the counter costs, measured twice because the first one was invalid.**
+
+The first attempt recorded `QUERY_COUNTER=off` → 1269.43 req/s vs `on`'s 1244.57 (+2.0%) and called
+it the price of the counter. **It was not.** `recordQuery()`/`recordRoundTrip()` were called
+unconditionally from `PostgresService`; only the interceptor's reporting was gated. So the `off`
+arm still paid an `AsyncLocalStorage` lookup and two increments per statement, and that +2.0%
+priced the interceptor's `tap` alone — a question nobody asked. Found on review, by reading
+`postgres.service.ts` against this file's own claim; confirmed in one command by running
+`QUERY_COUNTER=off LOG_LEVEL=debug` and seeing `"queries":1` still in the `handler` line. Fixed in
+`request-context.ts` (a `COUNTING_ENABLED` guard in both recorders) and re-measured:
+
+| arm | round 1 | round 2 | mean |
+|---|---|---|---|
+| `QUERY_COUNTER=on` | 1383.37 req/s | 1296.73 | **1340.05** |
+| `QUERY_COUNTER=off` | 1350.98 req/s | 1250.87 | **1300.93** |
+
+**Still unmeasurable, and now honestly so.** `off` came out 2.9% *slower* than `on` — the wrong
+sign, since disabling work cannot cost throughput — against a within-arm spread of 6.7% (`on`) and
+8.0% (`off`). Both are dwarfed by a monotonic drift across the sitting in *run order* regardless of
+arm: 1383 → 1351 → 1297 → 1251, a 9.6% slide over four consecutive runs. That drift is the finding
+worth keeping: interleaving arms protects against a *step* change between them, not against a ramp
+underneath both, and four runs is too few to fit one out. The counter is too cheap to see at the
+tail — the same conclusion as before, but this time the arm being measured is the arm named.
 
 ### `EXPLAIN (ANALYZE, BUFFERS)` — the whale, isolated from concurrency
 
@@ -561,3 +593,14 @@ with the same test. Recorded in both files' comments so it cannot be "corrected"
 5. **The existing 45 e2e tests needed no fixture changes**, contrary to the plan's expectation —
    `assigneeName`/`tags` are additive fields, and neither older suite asserts on the full response
    shape strictly enough to notice them arriving.
+6. **`QUERY_COUNTER=off` did not turn off counting**, so the arm the plan designed to price the
+   counter priced something else. The plan specified it correctly ("no counting, no tap"); the
+   implementation gated only the tap. Caught in review, fixed, re-measured — the numbers above.
+   The lesson is not "read the code more carefully": it is that **a switch whose whole purpose is
+   to be a measurement arm needs a test that fails when it stops switching**, and this one had
+   none. The counter's own e2e suite asserts what the counter reports, never that `off` is off.
+7. **Two correct numbers, welded into a wrong sentence.** The results table labelled the
+   `pageSize=50` count "(k6 URL)" when the k6 URL is `pageSize=20`, and `README.md` then paired
+   "87 queries" with the 2.77× throughput those runs produced. Also caught in review. Nothing was
+   mis-measured; the pairing was invented in the writeup, which is the easiest place in this
+   whole card to introduce an error nobody can reproduce later.

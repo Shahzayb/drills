@@ -1,0 +1,9 @@
+
+  name=counter-off-r2 org=150 vus=10 warmup=20s measured=60s
+  measured requests : 81059
+  p50 / p95 / p99   : 6.91 / 10.16 / 14.02 ms
+  min / avg / max   : 4.09 / 7.36 / 165.16 ms
+  throughput        : 1350.98 req/s
+  (incl. warm-up)   : p50 6.91  p95 10.12  p99 13.77 ms
+
+RESULT,counter-off-r2,150,10,6.91,10.16,14.02,1350.98,81059

@@ -137,6 +137,19 @@ five tables: `conversations`, `messages`, `memberships`, `tags`, `conversation_t
   `pg_stat_statements` on for a whole k6 A/B, reasoned as "constant, not a variable") and the
   environment itself enforced it anyway — see the known issue about env vars not surviving a
   separate `docker compose up`.
+- **A switch that exists to be a measurement arm needs a test that fails when it stops switching.**
+  Drill 08's `QUERY_COUNTER=off` shipped gating only the *reporting*, not the increments, so the arm
+  built to price the counter priced the interceptor instead and recorded a number (+2.0%) that
+  answered no question. Nothing caught it: the counter's own e2e suite asserts what the counter
+  reports, never that `off` is off. Found in review by reading the code against its own doc comment,
+  and confirmed in one command — `QUERY_COUNTER=off LOG_LEVEL=debug`, then look for a count in a
+  line that should not have one. Every toggle in this repo (`LOG_LEVEL`, `OTEL_*`, `PG_PRELOAD`,
+  `LIST_STRATEGY`, `QUERY_COUNTER`) is a candidate for the same bug.
+- **The writeup is where a correct measurement turns into a false claim.** Same drill: `README.md`
+  paired "87 queries" with the 2.77x throughput win, but 87 was the `pageSize=50` curl and k6
+  requests `pageSize=20` (37 statements, measured on review). Both numbers were real and neither
+  run was faulty — the sentence joined two runs that never met. Check that a number and the result
+  it is attached to came from the *same run*, because by writeup time the risky work feels done.
 - **A noisy k6 result and a clean isolated `EXPLAIN` can disagree, and the isolated one wins.**
   Drill 08's whale comparison showed batched as *worse* than naive under 10 concurrent VUs — inside
   the within-arm noise floor, caused by concurrent scans thrashing a deliberately undersized cache,

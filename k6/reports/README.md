@@ -92,8 +92,10 @@ throwaway into the index.
 | `2026-08-17-153828/154122/154419-org150` | naive strategy, tail, 3 rounds |
 | `2026-08-17-154604/155151/155459-org1` | batched strategy (LEFT JOIN + 1 tags query), whale, 3 rounds |
 | `2026-08-17-154727/155314/155622-org150` | batched strategy, tail, 3 rounds |
-| `2026-08-17-155850-org150` | stretch: batched, `QUERY_COUNTER=off`, tail — prices the counter itself |
+| `2026-08-17-155850-org150` | stretch: batched, `QUERY_COUNTER=off`, tail — **invalid, superseded**: `off` still incremented the counters, so this priced the interceptor's tap, not the counter |
 | `2026-08-17-160043-org150` | stretch: batched, `pg_stat_statements` preloaded, tail — prices that instrument |
+| `2026-08-17-165128-counter-on-r2`, `-165506-counter-on-r3` | re-measure after the `off` bug was fixed: counting on, tail, 2 rounds |
+| `2026-08-17-165320-counter-off-r2`, `-165650-counter-off-r3` | same sitting, counting genuinely off, tail, 2 rounds |
 
 `pg_stat_statements` was **off** (production default) for all 12 primary runs — the two stretch
 runs are the only ones with it on. The whale runs landed on a noisy evening: within-arm spread for
@@ -101,3 +103,9 @@ org 1 was 14-17% in both arms, comparable to the 20-24% naive-vs-batched delta, 
 is **inside the noise floor** per the 15%/20% rule — the tail (spread 2-4%, delta ~63%/177%) and an
 isolated `EXPLAIN (ANALYZE, BUFFERS)` (no concurrency) are the trustworthy numbers for the whale.
 Full table and reasoning in `plans/2026-08-17_drill-08-n-plus-one.md`.
+
+The four `counter-on/off-r2/r3` runs carry their own warning: throughput fell monotonically in
+**run order** across all four (1383 → 1351 → 1297 → 1251, −9.6%) regardless of which arm was
+running, swamping both the 2.9% between-arm delta and the 6.7–8.0% within-arm spread. Interleaving
+arms defends against a step change between them, not against a ramp underneath both. Four runs
+cannot separate the two; treat that comparison as unmeasurable rather than as a result.

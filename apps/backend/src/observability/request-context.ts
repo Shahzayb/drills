@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
+import { QUERY_COUNTER_MODE } from './query-counter';
 import { currentTraceId } from './trace';
 
 export const REQUEST_ID_HEADER = 'x-request-id';
@@ -35,9 +36,19 @@ export function getRequestContext(): RequestContext | undefined {
   return storage.getStore();
 }
 
+/**
+ * Whether the two recorders below do anything. `QUERY_COUNTER=off` has to skip
+ * the increments themselves, not just the reporting — otherwise the `off` arm
+ * prices the LoggingInterceptor's tap and nothing else, while every statement
+ * still pays an AsyncLocalStorage lookup, and the number it produces answers a
+ * question nobody asked. Read once at module load, same as the mode itself.
+ */
+const COUNTING_ENABLED = QUERY_COUNTER_MODE !== 'off';
+
 /** Called once per statement PostgresService.runOn() issues, success or
  *  failure — a query that errored still made the round trip. */
 export function recordQuery(): void {
+  if (!COUNTING_ENABLED) return;
   const store = storage.getStore();
   if (store) {
     store.queries += 1;
@@ -48,6 +59,7 @@ export function recordQuery(): void {
 /** Called once per ClientHandle.control() call (BEGIN / set_config / COMMIT /
  *  ROLLBACK) — a real round trip, deliberately not counted as a query. */
 export function recordRoundTrip(): void {
+  if (!COUNTING_ENABLED) return;
   const store = storage.getStore();
   if (store) store.roundTrips += 1;
 }

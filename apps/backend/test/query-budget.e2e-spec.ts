@@ -253,14 +253,18 @@ describe('query budget (e2e)', () => {
     expect(queryCount(response)).toBeLessThanOrEqual(5);
   });
 
-  it('a route with no @QueryBudget still gets the default (5), by omission', async () => {
-    // /info carries no @QueryBudget at all — the point is that DEFAULT_QUERY_BUDGET
-    // applies to a route nobody annotated, which is the whole reason it exists.
+  it('a route with no @QueryBudget is still counted', async () => {
+    // /info carries no @QueryBudget at all, so DEFAULT_QUERY_BUDGET is what
+    // applies to it — but note what this can and cannot prove. /info issues
+    // exactly one statement, so a `<= 5` here would pass whatever the default
+    // were, including no default at all; only a route that *exceeds* 5 could
+    // pin the number. What it does prove is that an unannotated route is
+    // counted at all, so the exact count is the assertion: `toBe(1)` fails if
+    // the counter stops incrementing, where `<= 5` would pass at 0.
     const response = await request(app.getHttpServer())
       .get('/info')
       .expect(200);
 
-    expect(Number.isFinite(queryCount(response))).toBe(true);
-    expect(queryCount(response)).toBeLessThanOrEqual(5);
+    expect(queryCount(response)).toBe(1);
   });
 });
