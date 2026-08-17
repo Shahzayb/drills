@@ -1,7 +1,7 @@
 # drills
 
-A learning repo. One app — a multi-tenant customer-feedback platform — built across 32 drills, each
-one breaking something on purpose and measuring it. Nothing is built ahead of the drill that needs
+A learning repo. A multi-tenant customer-feedback platform built across 32 drills, each
+one breaking something on purpose and measuring it at scale. Nothing is built ahead of the drill that needs
 it, and naive code is often a recorded decision rather than debt.
 
 pnpm monorepo: `apps/backend` (NestJS, raw `pg`, no ORM) and `apps/frontend` (Next.js App Router),

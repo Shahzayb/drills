@@ -29,11 +29,11 @@ Learn about the project history from the `memory-bank/history.md` file.
 ## Rules
 
 - Code comments are only for short, to-the-point descriptions, not an essay. But you can reference to the `plans/` to justify the current implementation just so future iterations won't 'fix' or 'improve' it.
-- Never include Co-Authored-By line in the commit. Don't use any watermark.
+- Never include Co-Authored-By line in the commit or PR title/description. Don't use any watermark.
 - Prefer the simpler construction. If a thing can be a plain script, a plain function or a plain file, it is that.
 - Scripts are `.mjs` (plain Node ESM, like `apps/backend/db/seed.mjs`), not shell. Shell is for one-liners in `package.json`.
 - Run `pnpm format` before calling a task done.
 - Always generate 1 learning guide (`drills/`) per plan. If there are many guides per drill, merge them.
 - Never reference to files from the `drills/` in the code/config or anywhere.
 - In every `drills/` there must be a section called `Is this production ready?`, `Honest gaps`, and `What I'd do differently at 10x`.
-- Prefer not adding comments in code/config. That's what the guides (`drills/`) are for, explain it there. Commends have to earn their place.
+<!-- - Don't pollute the codebase with comments. That's what the guides (`drills/`) are for, explain it there. Comments have to earn their place. Most of the times, you don't need commends and even if you do, keep it 150 characters (including space) max. -->
