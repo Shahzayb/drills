@@ -36,4 +36,5 @@ Learn about the project history from the `memory-bank/history.md` file.
 - Always generate 1 learning guide (`drills/`) per plan. If there are many guides per drill, merge them.
 - Never reference to files from the `drills/` in the code/config or anywhere.
 - In every `drills/` there must be a section called `Is this production ready?`, `Honest gaps`, and `What I'd do differently at 10x`.
-<!-- - Don't pollute the codebase with comments. That's what the guides (`drills/`) are for, explain it there. Comments have to earn their place. Most of the times, you don't need commends and even if you do, keep it 150 characters (including space) max. -->
+- Don't pollute the codebase with comments. That's what the guides (`drills/`) are for, explain it there. Comments have to earn their place. Most of the times, you don't need commends and even if you do, keep it 150 characters (including space) max.
+- Always include the visualization of the whole drill inside the `If you read nothing else` section of guides (`drills/`)
