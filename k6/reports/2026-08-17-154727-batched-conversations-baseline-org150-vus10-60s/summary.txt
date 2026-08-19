@@ -1,0 +1,9 @@
+
+  name=batched org=150 vus=10 warmup=20s measured=60s
+  measured requests : 76816
+  p50 / p95 / p99   : 7.40 / 10.62 / 14.14 ms
+  min / avg / max   : 4.65 / 7.77 / 60.84 ms
+  throughput        : 1280.27 req/s
+  (incl. warm-up)   : p50 7.38  p95 10.54  p99 13.94 ms
+
+RESULT,batched,150,10,7.40,10.62,14.14,1280.27,76816

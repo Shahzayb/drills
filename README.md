@@ -7,7 +7,7 @@ it, and naive code is often a recorded decision rather than debt.
 pnpm monorepo: `apps/backend` (NestJS, raw `pg`, no ORM) and `apps/frontend` (Next.js App Router),
 orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose.
 
-## Progression — 7 of 32
+## Progression — 8 of 32
 
 | # | Drill | Result worth remembering |
 |---|---|---|
@@ -18,6 +18,7 @@ orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose
 | 05 | Load-test baseline | Whale org p95 340ms @ 49 req/s vs tail org 2.9ms @ 4,415 — the `before` column. |
 | 06 | Observability | One request id across 4 processes, structured logs, OTel spans behind a flag. |
 | 07 | Tenant isolation | Row-level security under four deliberately filterless endpoints; 14 tests fail without it. |
+| 08 | N+1 detection | Tail org: 2.77x throughput fixing a 37-query request down to 3; `pg_stat_statements` finds it, an ORM couldn't hide it either. |
 
 Current state and what's open live in `memory-bank/progress.md`; every decision and
 number is one row in `memory-bank/history.md`, with the full reasoning in `plans/`.

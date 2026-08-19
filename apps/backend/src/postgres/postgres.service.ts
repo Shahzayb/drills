@@ -1,7 +1,11 @@
 import { Injectable, OnApplicationShutdown } from '@nestjs/common';
 import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import { errorMessage, logger, since } from '../observability/logger';
-import { getRequestId } from '../observability/request-context';
+import {
+  getRequestId,
+  recordQuery,
+  recordRoundTrip,
+} from '../observability/request-context';
 import { TRACING_ENABLED } from '../observability/trace';
 
 // Every number here is chosen, not inherited. Reasoning lives in
@@ -120,6 +124,9 @@ export class PostgresService implements OnApplicationShutdown {
     const handle: ClientHandle = {
       query: (text, params) => this.runOn(client, text, params),
       control: async (text, params) => {
+        // A real round trip (BEGIN / set_config / COMMIT / ROLLBACK), but not
+        // a "query" in card 08's sense — see request-context.ts.
+        recordRoundTrip();
         await client.query(text, params as unknown[]);
       },
     };
@@ -139,6 +146,10 @@ export class PostgresService implements OnApplicationShutdown {
     params?: unknown[],
   ): Promise<QueryResult<T>> {
     const rid = getRequestId();
+    // Counted at call time, not on completion — a query that errors still
+    // made the round trip, and this is meant to answer "how many did I make",
+    // not "how many succeeded".
+    recordQuery();
 
     // The id rides inside the statement — the only channel that reaches
     // Postgres's own log and pg_stat_activity without pinning a connection.

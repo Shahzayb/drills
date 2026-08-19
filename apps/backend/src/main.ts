@@ -5,6 +5,7 @@ import './tracing';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
+import { errorMessage, logger } from './observability/logger';
 
 async function bootstrap() {
   // bufferLogs holds Nest's own startup lines until useLogger runs, so route
@@ -21,4 +22,14 @@ async function bootstrap() {
   app.enableShutdownHooks();
   await app.listen(process.env.PORT ?? 3002);
 }
-bootstrap();
+
+// Not fire-and-forget: a startup failure (bad credentials, Postgres
+// unreachable past retries) has to exit non-zero, or Docker's healthcheck is
+// the only thing that ever notices the process came up dead. The module-level
+// `logger` is used rather than Nest's injected one — bootstrap can fail before
+// `app.useLogger` ever runs, and this is the one line in the process that must
+// not depend on Nest DI having finished.
+bootstrap().catch((error: unknown) => {
+  logger.error({ err: errorMessage(error) }, 'bootstrap_failed');
+  process.exit(1);
+});

@@ -7,6 +7,11 @@
 // uuidv7, the single WAL-skipping transaction — is argued in
 // plans/2026-08-11_drill-04-bulk-seed.md. Read that before "improving" any of it.
 //
+// Drill 08 added tags: ~1,040 tags (4-12 per org, fixed 16-name vocabulary)
+// and ~3,350,000 conversation_tags (weighted mean 1.34 tags/conversation).
+// Neither scales with --scale — same reasoning as orgs and users, see
+// plans/2026-08-17_drill-08-n-plus-one.md.
+//
 //   pnpm db:seed              full scale
 //   pnpm db:seed:ci           --scale=0.1
 //   pnpm db:reset             drop schema, migrate, seed
@@ -59,6 +64,39 @@ const MSG_BUCKETS = [
   { frac: 0.09, count: 8 },
   { frac: 0.026, count: 20 },
   { frac: 0.004, count: 60 },
+];
+
+// Fixed vocabulary, not faker: a tag chip needs to be legible in a screenshot,
+// and the same tag has to mean the same thing across runs. 16 entries, enough
+// that an org's 4-12 tags (below) don't repeat within it.
+const TAG_NAMES = [
+  'bug',
+  'billing',
+  'feature-request',
+  'urgent',
+  'churn-risk',
+  'onboarding',
+  'integration',
+  'performance',
+  'refund',
+  'docs',
+  'mobile',
+  'api',
+  'security',
+  'ux',
+  'enterprise',
+  'follow-up',
+];
+
+// How many tags land on one conversation. Weighted mean 1.34 — most
+// conversations get one, a fifth get none, one in eight gets three. Same
+// floor-then-residue exactness as MSG_BUCKETS: at scale 1 this is exactly
+// 3,350,000 conversation_tags rows, not an estimate.
+const TAG_BUCKETS = [
+  { frac: 0.18, count: 0 },
+  { frac: 0.42, count: 1 },
+  { frac: 0.28, count: 2 },
+  { frac: 0.12, count: 3 },
 ];
 
 const COPY_BATCH = 10_000;
@@ -192,7 +230,42 @@ function planStructure() {
     }
   }
 
-  return { orgs, users, memberships, memStart, memCount };
+  // Tags: contiguous id blocks per org, same trick memberships uses above, so
+  // picking a conversation's tags in the generator is a range index rather
+  // than a lookup. Own stream (SEED + 6) — org/user/membership draws above are
+  // already finished by the time this runs, but a table nothing else here
+  // depends on shouldn't share a stream with tables that do, even so.
+  const tagRnd = mulberry32(SEED + 6);
+  const tagStart = new Int32Array(ORGS + 1);
+  const tagCount = new Int32Array(ORGS + 1);
+  const tags = [];
+  let tagId = 1;
+  for (let org = 1; org <= ORGS; org++) {
+    const size = org === 1 ? 12 : org <= 10 ? 9 : 4 + ((tagRnd() * 3) | 0);
+    tagStart[org] = tagId;
+    tagCount[org] = size;
+    const names = TAG_NAMES.slice();
+    shuffle(names, tagRnd);
+    for (let k = 0; k < size; k++) {
+      tags.push({
+        id: tagId++,
+        orgId: org,
+        name: names[k],
+        created: orgBase - Math.floor(tagRnd() * 200 * DAY_MS),
+      });
+    }
+  }
+
+  return {
+    orgs,
+    users,
+    memberships,
+    memStart,
+    memCount,
+    tags,
+    tagStart,
+    tagCount,
+  };
 }
 
 function planConversations() {
@@ -261,7 +334,31 @@ function planConversations() {
     messages += msgCount[i];
   }
 
-  return { created, updated, orgOf, msgCount, closed, messages };
+  // Tag counts: exact bucket sizes, same floor-then-residue trick as
+  // msgCount above. Own stream (SEED + 8), and inserted after every other
+  // array in this function is already built — so even in principle it cannot
+  // perturb org assignment, message counts, or status/timing.
+  const tagCountRnd = mulberry32(SEED + 8);
+  const tagSizes = TAG_BUCKETS.map((b) => Math.floor(n * b.frac));
+  tagSizes[0] += n - tagSizes.reduce((s, x) => s + x, 0);
+  const numTags = new Uint8Array(n);
+  at = 0;
+  for (let b = 0; b < TAG_BUCKETS.length; b++) {
+    for (let k = 0; k < tagSizes[b]; k++) numTags[at++] = TAG_BUCKETS[b].count;
+  }
+  shuffle(numTags, tagCountRnd);
+  const conversationTags = numTags.reduce((sum, x) => sum + x, 0);
+
+  return {
+    created,
+    updated,
+    orgOf,
+    msgCount,
+    closed,
+    messages,
+    numTags,
+    conversationTags,
+  };
 }
 
 // ---------------------------------------------------------------- generators
@@ -335,6 +432,60 @@ function* messageLines(plan, uuidBuf, corpus) {
   if (batch.length) yield batch.join('\n') + '\n';
 }
 
+/**
+ * Distinct tags per conversation, drawn from the org's contiguous id block.
+ * Own stream (SEED + 9): the bucket sizing above already spent SEED + 8, and a
+ * generator gets a stream separate from the planning step that fed it, same as
+ * conversationLines' assignee pick (SEED + 3) is separate from orgOf's own
+ * stream (SEED + 2).
+ */
+function* conversationTagLines(plan, structure, uuidBuf) {
+  const rnd = mulberry32(SEED + 9);
+  const { orgOf, numTags, created } = plan;
+  const { tagStart, tagCount } = structure;
+  const batch = [];
+  // Reused across iterations, not reallocated: `need` is at most 3, so a
+  // fixed-size scratch array costs nothing per row.
+  const picked = new Int32Array(3);
+
+  for (let i = 0; i < CONVERSATIONS; i++) {
+    const need = numTags[i];
+    if (need === 0) continue;
+
+    const org = orgOf[i];
+    const size = tagCount[org];
+    const start = tagStart[org];
+    const convId = uuidHex(uuidBuf, i * 16);
+    const at = stamp(created[i]);
+
+    // Rejection sampling for `need` distinct offsets in [0, size). Every org
+    // has at least 4 tags and need is at most 3, so the expected retries are
+    // under one — cheaper than shuffling a per-row scratch pool.
+    for (let k = 0; k < need; k++) {
+      let offset;
+      let dup;
+      do {
+        offset = (rnd() * size) | 0;
+        dup = false;
+        for (let m = 0; m < k; m++) {
+          if (picked[m] === offset) {
+            dup = true;
+            break;
+          }
+        }
+      } while (dup);
+      picked[k] = offset;
+      batch.push(`${convId}\t${start + offset}\t${org}\t${at}`);
+    }
+
+    if (batch.length >= COPY_BATCH) {
+      yield batch.join('\n') + '\n';
+      batch.length = 0;
+    }
+  }
+  if (batch.length) yield batch.join('\n') + '\n';
+}
+
 // --------------------------------------------------------------------- load
 
 const client = new pg.Client({
@@ -393,8 +544,12 @@ async function main() {
   await client.query('BEGIN');
 
   await phase('truncate', async () => {
+    // Order within the list does not matter — Postgres accepts one TRUNCATE
+    // across every table in an FK cycle as long as all of them are named here,
+    // which tags and conversation_tags now must be too.
     await client.query(
-      'TRUNCATE messages, conversations, memberships, users, organizations RESTART IDENTITY',
+      'TRUNCATE messages, conversations, memberships, users, organizations, ' +
+        'tags, conversation_tags RESTART IDENTITY',
     );
   });
 
@@ -408,6 +563,18 @@ async function main() {
   await phase('drop messages FK', () =>
     client.query(
       'ALTER TABLE messages DROP CONSTRAINT messages_conversation_id_fkey',
+    ),
+  );
+
+  // Same mechanism, repeating at 3.35M rows: conversation_id is the FK that
+  // references the 2.5M-row conversations index, so it is the one worth
+  // dropping. tag_id and org_id reference tags (~1,000 rows) and organizations
+  // (200 rows) — cheap checks against tiny indexes, same reasoning as why
+  // messages_org_id_fkey was never dropped either.
+  await phase('drop conversation_tags FK', () =>
+    client.query(
+      'ALTER TABLE conversation_tags ' +
+        'DROP CONSTRAINT conversation_tags_conversation_id_fkey',
     ),
   );
 
@@ -432,6 +599,13 @@ async function main() {
       '(id, user_id, org_id, role, created_at, updated_at)',
       (m) =>
         `${m.id}\t${m.userId}\t${m.orgId}\t${m.role}\t${stamp(m.created)}\t${stamp(m.created)}`,
+    ],
+    [
+      'tags',
+      structure.tags,
+      '(id, org_id, name, created_at, updated_at)',
+      (t) =>
+        `${t.id}\t${t.orgId}\t${t.name}\t${stamp(t.created)}\t${stamp(t.created)}`,
     ],
   ]) {
     await phase(
@@ -469,6 +643,18 @@ async function main() {
     plan.messages,
   );
 
+  // tags must already be in the table by this point — its FK is not dropped,
+  // so every row here is checked against it as it lands.
+  await phase(
+    'copy conversation_tags',
+    () =>
+      copyInto(
+        'COPY conversation_tags (conversation_id, tag_id, org_id, created_at) FROM STDIN',
+        conversationTagLines(plan, structure, uuidBuf),
+      ),
+    plan.conversationTags,
+  );
+
   // Also WAL-skipped, being inside the same transaction. Only worth dropping them
   // because maintenance_work_mem is raised: at the 64MB default the messages index
   // rebuild costs 17s and the drop is a net loss.
@@ -489,8 +675,22 @@ async function main() {
     );
   });
 
+  await phase('re-add conversation_tags FK', async () => {
+    await client.query(
+      'ALTER TABLE conversation_tags ' +
+        'ADD CONSTRAINT conversation_tags_conversation_id_fkey ' +
+        'FOREIGN KEY (conversation_id) REFERENCES conversations (id) NOT VALID',
+    );
+    await client.query(
+      'ALTER TABLE conversation_tags ' +
+        'VALIDATE CONSTRAINT conversation_tags_conversation_id_fkey',
+    );
+  });
+
   // TRUNCATE ... RESTART IDENTITY zeroed the sequences and every id was
   // explicit, so without this the app's first INSERT dies on a duplicate key.
+  // conversation_tags has no sequence of its own — its PK is the composite
+  // (conversation_id, tag_id), not a bigserial.
   await phase('setval sequences', async () => {
     await client.query(`SELECT setval('organizations_id_seq', $1)`, [ORGS]);
     await client.query(`SELECT setval('users_id_seq', $1)`, [USERS]);
@@ -498,6 +698,9 @@ async function main() {
       structure.memberships.length,
     ]);
     await client.query(`SELECT setval('messages_id_seq', $1)`, [plan.messages]);
+    await client.query(`SELECT setval('tags_id_seq', $1)`, [
+      structure.tags.length,
+    ]);
   });
 
   await phase('commit', () => client.query('COMMIT'));
@@ -508,7 +711,9 @@ async function main() {
   console.log(`\n  ${'TOTAL'.padEnd(28)} ${total.toFixed(2).padStart(7)}s`);
   console.log(
     `  ${plan.messages.toLocaleString()} messages, ${CONVERSATIONS.toLocaleString()} conversations, ` +
-      `${structure.memberships.length.toLocaleString()} memberships\n`,
+      `${structure.memberships.length.toLocaleString()} memberships, ` +
+      `${structure.tags.length.toLocaleString()} tags, ` +
+      `${plan.conversationTags.toLocaleString()} conversation_tags\n`,
   );
 
   await client.end();

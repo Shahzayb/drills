@@ -115,6 +115,7 @@ export default async function ConversationsPage(
                     <th className="px-4 py-3 font-medium">id</th>
                     <th className="px-4 py-3 font-medium">status</th>
                     <th className="px-4 py-3 font-medium">assignee</th>
+                    <th className="px-4 py-3 font-medium">tags</th>
                     <th className="px-4 py-3 font-medium">updated_at</th>
                     <th className="px-4 py-3 font-medium">created_at</th>
                   </tr>
@@ -132,7 +133,25 @@ export default async function ConversationsPage(
                         {conversation.status}
                       </td>
                       <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
-                        {conversation.assigneeId ?? '—'}
+                        {conversation.assigneeName ?? '—'}
+                      </td>
+                      <td className="px-4 py-2">
+                        {conversation.tags.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {conversation.tags.map((tag) => (
+                              <span
+                                key={tag.id}
+                                className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs whitespace-nowrap text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                              >
+                                {tag.name}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-zinc-400 dark:text-zinc-600">
+                            —
+                          </span>
+                        )}
                       </td>
                       {/* Raw ISO, not toLocaleString(). The server's timezone is
                           the container's, not the reader's, so a "friendly"
@@ -148,7 +167,7 @@ export default async function ConversationsPage(
                   {result.page.items.length === 0 && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={6}
                         className="px-4 py-8 text-center text-zinc-500 dark:text-zinc-400"
                       >
                         No conversations on this page.

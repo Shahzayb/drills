@@ -1,8 +1,6 @@
 import { MiddlewareConsumer, Module, ValidationPipe } from '@nestjs/common';
 import { APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { ConversationsModule } from './conversations/conversations.module';
 import { HealthModule } from './health/health.module';
 import { InfoModule } from './info/info.module';
@@ -24,9 +22,7 @@ import { RedisModule } from './redis/redis.module';
     InfoModule,
     ConversationsModule,
   ],
-  controllers: [AppController],
   providers: [
-    AppService,
     {
       // Same reasoning as the pipe below: an interceptor installed in main.ts
       // would be missing from every e2e test.

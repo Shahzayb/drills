@@ -9,11 +9,12 @@ import {
   Patch,
   Query,
 } from '@nestjs/common';
+import { QueryBudget } from '../observability/query-budget.decorator';
 import { OrgId } from '../tenancy/org-id.decorator';
 import {
-  ConversationListItem,
   ConversationPage,
   ConversationsService,
+  ConversationSummary,
   MessageListItem,
 } from './conversations.service';
 import { ListConversationsQuery } from './dto/list-conversations.query';
@@ -36,7 +37,12 @@ import { UpdateConversationDto } from './dto/update-conversation.dto';
 export class ConversationsController {
   constructor(private readonly conversations: ConversationsService) {}
 
+  // Card 08's budget: list() runs 3 statements in the batched strategy
+  // (list, count, tags) and this is what the metadata has to sit on — see the
+  // note on ConversationsService.list() for why the service method itself is
+  // the wrong place.
   @Get()
+  @QueryBudget(3)
   list(
     @OrgId() orgId: string,
     @Query() query: ListConversationsQuery,
@@ -48,7 +54,7 @@ export class ConversationsController {
   get(
     @OrgId() orgId: string,
     @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<ConversationListItem> {
+  ): Promise<ConversationSummary> {
     return this.conversations.get(orgId, id);
   }
 
@@ -65,7 +71,7 @@ export class ConversationsController {
     @OrgId() orgId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: UpdateConversationDto,
-  ): Promise<ConversationListItem> {
+  ): Promise<ConversationSummary> {
     return this.conversations.updateStatus(orgId, id, body.status);
   }
 

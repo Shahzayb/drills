@@ -1,0 +1,9 @@
+
+  name=counter-on-r3 org=150 vus=10 warmup=20s measured=60s
+  measured requests : 77804
+  p50 / p95 / p99   : 7.32 / 10.54 / 13.67 ms
+  min / avg / max   : 4.47 / 7.67 / 56.10 ms
+  throughput        : 1296.73 req/s
+  (incl. warm-up)   : p50 7.37  p95 10.91  p99 14.76 ms
+
+RESULT,counter-on-r3,150,10,7.32,10.54,13.67,1296.73,77804
