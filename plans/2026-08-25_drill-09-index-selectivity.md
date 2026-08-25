@@ -312,10 +312,45 @@ where the full index would not fit in cache. Here the full index is 118 MB and t
 memory for it. Wrong tool, right instinct, and now with a number attached.
 
 **Related, and a decision for the user, not taken here:** `conversations_org_id_idx` (17 MB) is now
-redundant. `(org_id, updated_at DESC, id DESC)` has `org_id` as its leading column, so every query the
-single-column index can answer, the composite can answer too. It is 17 MB and a write cost on every
-insert, buying nothing. Dropping it is the right call; it is a judgment, so it is proposed rather than
-done.
+redundant — checked rather than assumed, because the tail-org run below shows the planner actively
+*choosing* it, which looks like the opposite conclusion.
+
+Dropped inside a rolled-back transaction, the tail org's plan C simply moves its bitmap source to the
+composite and gets marginally faster:
+
+```
+  WITH  conversations_org_id_idx   Bitmap Index Scan on conversations_org_id_idx
+                                   buffers 8            Execution Time: 3.201 ms
+  WITHOUT                          Bitmap Index Scan on conversations_org_updated_idx
+                                   buffers 7 read=12    Execution Time: 2.498 ms
+```
+
+The planner prefers the narrow index when both exist — a bitmap scan over a 17 MB index touches fewer
+pages than over a 118 MB one — but it does not *need* it: `org_id` leads the composite, so the
+composite answers everything the single-column index answers. The 17 MB and its per-insert write cost
+buy 12 buffer reads on one plan. Dropping it is the right call; it is a judgment, so it is proposed
+rather than done.
+
+---
+
+## The tail org: same query, same index, opposite decision
+
+`ORG_ID=150 pnpm db:explain plans`. Org 150 holds 2,631 conversations — 0.1% of the table.
+
+| plan | whale (org 1, 1M rows) | tail (org 150, 2,631 rows) |
+|---|---|---|
+| A — no composite index | Parallel Seq Scan, **107.9 ms** | Bitmap Heap Scan on `org_id_idx`, **3.4 ms** |
+| B — index scan | Index Scan, 0.255 ms | Index Scan, **0.193 ms** |
+| C — `sort=created_at` | Parallel Seq Scan, **115.6 ms** | Bitmap Heap Scan on `org_id_idx`, **1.9 ms** |
+
+This is the card's scenario stated as data. **Plan C is the same SQL against the same schema with the
+same indexes available, and the planner reaches the opposite decision** — refuse the index for org 1,
+use one for org 150 — purely because `org_id = 1` matches 40% of the table and `org_id = 150` matches
+0.1%.
+
+It is also why "we added an index and the whale didn't move" is such a common report. The small orgs
+were never the problem: even at plan A, with no composite index at all, the tail org answers in 3.4 ms.
+Every index decision on a skewed multi-tenant table is really a decision about one tenant.
 
 ---
 
