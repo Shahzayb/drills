@@ -56,6 +56,12 @@ rather than assume" command, which is why there's no separate `rls:status`. Cove
    production would be expensive, and `url` is logged with its query string in full — safe for
    today's parameters, not for a token or an email.
 
+## Releases
+
+| Tag | Version | Milestone | Notes |
+|---|---|---|---|
+| [drill/09](https://github.com/Shahzayb/drills/releases/tag/drill/09) | 0.9.0 | `drill/09` (closed) | First release actually cut. Tags `drill/01` and `drill/02` exist locally, were never pushed, and have no release. |
+
 ## Preferences
 
 - Structure is added when there is content for it, not in anticipation.
