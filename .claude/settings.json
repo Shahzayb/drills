@@ -1,0 +1,22 @@
+{
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/format-lint.sh",
+            "timeout": 120,
+            "statusMessage": "Running pnpm format + pnpm lint..."
+          }
+        ]
+      }
+    ]
+  },
+  "autoMemoryEnabled": false
+}

@@ -1,57 +1,65 @@
 ---
 name: memory-bank
-description: The Memory Bank (memory-bank/) — what each file holds, what earns a line in one, and how an update pass runs. Use at the start of any non-trivial task in this repo, when the user says "update memory bank", when they ask where things stand or what the current focus is, when they ask why something was built the way it was, and after finishing an implementation.
+description: Maintain a compact, decision-grade Memory Bank. Use at the start of any non-trivial task, when asked for project state or a memory update, and after a significant implementation.
 ---
 
 # Memory Bank
 
-My memory resets completely between sessions. After each reset the Memory Bank is my only link to previous work, so I read **all** of it at the start of a task, before anything else. Nothing loads automatically — reading is a deliberate first step.
+Read all four files before a non-trivial task. The bank is a working set, not a transcript of
+engineering work. Its job is to let a new session choose the correct next action quickly.
 
-Its value is entirely in being accurate and being read. A file too long to read is as useless as one that's wrong.
+## File ownership and budgets
 
-## The files
+| File | Owns | Target |
+| --- | --- | --- |
+| `projectbrief.md` | Goals, non-goals, scope | 250 words |
+| `techContext.md` | Current architecture and durable constraints | 3,500 words |
+| `progress.md` | Current state, next action, live validation, open decisions | 1,500 words |
+| `history.md` | Chronological plan index | 300 words per row |
 
-All Markdown, all directly under `memory-bank/`.
+Treat a budget as a limit. If a new fact would exceed it, replace a stale fact or compress an
+existing entry first. Do not add a fifth file merely to evade these limits.
 
-1. **`projectbrief.md`** — core requirements, goals, non-goals, why the project exists. Source of truth for scope; when the files disagree, this one wins.
-2. **`techContext.md`** — architecture, how the pieces relate, technologies, how to run and test things, technical constraints, decisions that shape the system.
-3. **`progress.md`** — where things stand: current focus, the next concrete step, the active plan, what works, known issues, standing preferences, and how the project's direction has evolved.
-4. **`history.md`** — every plan and implementation, one row each, oldest first: date, path to the plan file, a description, and status (`planned` / `implemented`). Read at the start of a session alongside the other three. It is append-only and the one deliberate exception to "no changelogs" below — it exists precisely to be the changelog the other files must not become.
+## The admission test
 
-   The description is one *row*, not one sentence — write it as long as it needs to be to carry the decision or result, not just the topic. "Wired backend to Postgres and Redis" is the topic; "no ORM, no Terminus (its indicators need TypeORM/Sequelize/Mongoose); `lazyConnect`+`enableOfflineQueue` can't combine on ioredis" is what a later session actually needs and would otherwise have to re-read the whole plan to recover. Favor the numbers, the rejected alternative, and the deliberate gap over the plain summary — those are exactly what's cheap to drop and expensive to reconstruct.
+Add a line only if all are true:
 
-Add another file only when there is content that doesn't fit these four and is too big to inline. Four is deliberately the smallest set that works; it grows from pressure, not from planning.
+1. A future session cannot cheaply recover it from code, tests, Git, or its linked plan.
+2. It changes a future decision, implementation, or validation step.
+3. It has one clear owning file and is stated as a fact, constraint, or unresolved decision.
 
-## What earns a line
+Otherwise, leave it out. Test counts, browser-playthrough narration, file inventories, function
+signatures, implementation chronology, and generic summaries fail this test. Link to the plan
+or code location if that detail may later matter.
 
-Record what a future session cannot cheaply reconstruct:
+## Writing rules
 
-- **Decisions and their reasoning**, including alternatives rejected. What changed is recoverable; why it changed is not. Decisions shaping the system go in `techContext.md`, decisions shaping the project's direction under `progress.md`'s evolution section.
-- **Current focus, the active plan, and the next concrete step** — all in `progress.md`, at the top where they're read first.
-- **Dead ends.** An attempt that failed with no decision attached is exactly what gets re-attempted next session. Say what happened and whether it's worth retrying.
-- **Constraints found the hard way** — version pins, gotchas, things that broke and the fix.
-- **Scope, and especially non-goals.**
+- One fact has one home. Never restate a history row in `techContext.md`, a technical contract
+  in `progress.md`, or a plan's detailed reasoning anywhere in the bank.
+- Prefer a short invariant with its consequence: “Mode C uses two STT passes; price both before
+  the first request.” Do not record the story of discovering it.
+- Keep only current contracts in `techContext.md`. Move superseded choices out.
+- Keep only actionable, unresolved information in `progress.md`. When resolved, promote one
+  durable constraint to `techContext.md` if needed, then remove the progress item.
+- `history.md` is chronological. Each row records date, plan link, outcome, status, and at
+  most one non-obvious enduring constraint; it must stay under 300 words. The linked plan
+  holds the detail. Compact old rows when they exceed the limit, without changing the outcome.
+- Record unknowns explicitly as `_Not yet established._`; never promote an inference to fact.
+- Never record secrets, values from `.env`, or private audio/recording data.
 
-Leave out:
+## Update protocol
 
-- File listings and function signatures. Reading the code is cheaper than trusting a stale summary. Where a contract genuinely can't be reconstructed cheaply, record *where it lives* rather than a copy of it.
-- Secret values. Record which vars are required and where the real values come from, never the value.
-- Facts that already load themselves into context elsewhere. Point at them instead.
-- Changelogs and session narration. This is a working set, not a history — that's what `history.md` is for, and only for.
-- Anything unverified. Write `_Not yet established._` and move on — a confidently wrong memory bank is worse than an empty one, because the next session acts on it without checking.
+After a significant implementation, update only the files whose owned facts changed:
 
-Keep one fact in one file and cross-reference by filename. Replace stale lines rather than appending. Plans are a separate store: link to one by filename, never copy its contents in.
+1. Update the active next action or validation gap in `progress.md`.
+2. Add or replace a durable contract in `techContext.md` only when it passes the admission test.
+3. Add a `planned` history row when the plan is written; change only that row to `implemented`
+   after its implementation lands.
 
-## Updating
+On an explicit memory-bank update, review all four files, remove duplication and stale state,
+and report only files that changed. Do not manufacture a next task or strategic direction:
+propose it to the user when it is a judgment call.
 
-Update after implementing something significant, on discovering a pattern worth keeping, and whenever the user asks.
-
-**Write directly** what you verified yourself — a test that now passes, a line that is now factually false, a constraint you actually hit. Write it, then say you did.
-
-**Propose first** for everything else — whether the work counts as done, what the next focus is, why a tradeoff was accepted. Show the exact lines and let the user correct them. Keep the batch small; two lines the user actually reads beat six they wave through.
-
-Inference is how a memory bank rots. An invented "next step" nobody agreed to becomes next session's starting assumption, and by then it reads as established fact.
-
-On an explicit **update memory bank**, review every file even where none is needed, and report one line per file including "no change" — silence reads as an oversight. `progress.md` decays fastest, so start there.
-
-`history.md` runs on its own trigger, independent of the rest of an update pass: append a `planned` line the moment a plan file is written (see `CLAUDE.md`'s plan-file step), and append or update that line to `implemented` the moment its implementation lands. Both are verified facts — the file existing, the work being done — so both are written directly, no proposal needed. Newest entry last, one line each; never rewrite history, only append.
+At the end of every session, run a removal pass: delete stale, duplicated, superseded, or
+non-actionable entries that fail the admission test. Preserve current decisions, constraints,
+and unresolved validation gaps; do not add a summary merely to record the session.

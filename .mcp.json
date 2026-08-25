@@ -11,6 +11,10 @@
       "command": "docker",
       "args": ["run", "--rm", "-i", "grafana/mcp-k6"],
       "env": {}
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
     }
   }
 }
