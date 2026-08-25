@@ -83,3 +83,10 @@ Once work is done or a decision is made, `memory-bank/` is out of date and needs
 - Comments must earn their place. Most code doesn't need one; when it does, keep it under 150 characters (spaces included). No essay-length comments.
   - Exception: you can point to a `plans/` file in a comment to explain *why* something is built the way it is, so a future pass doesn't "fix" it by mistake.
 - Never reference a `drills/` file from code or config — drills are for humans reading docs, not for the codebase.
+- Never create a new helper, utility, service layer, or component if an existing one can absorb the logic.
+- Prefer adding clean conditional paths or extending existing parameters inside established files rather than creating new wrapper classes.
+- Do not install new packages or write custom wrappers without searching the project tree for pre-existing internal solutions.
+- Follow professional project standards: use conventional commit messages, enforce type hints, and ensure credentials remain strictly in `.env`.
+- Commit chunks of work as you go to prevent context drift, isolate AI bugs, and create clean rollback points.
+  - Only applies to any branch other than the `main`.
+- When cutting a release: bump the version in `package.json`, tag the commit in Git (`drill/xx` format), push tags to remote, create a GitHub Release (`gh release create drill/xx --generate-notes`), link resolved issues, create a GitHub Milestone (if needed), and record the milestone in the Memory Bank.
