@@ -5,37 +5,49 @@ dead ends are one row each in `history.md`; this file is only what a session nee
 
 ## Current focus
 
-Nothing in flight. Drill 08 landed on 2026-08-17 (N+1 detection: assignee name + tags on the list,
-a per-request query counter with a budget, `pg_stat_statements` vs the statement log as the two
-zero-app-code detection methods).
+### Drill/09 — Make the planner refuse your index
 
-**The whale's absolute latency is dominated by card 09's still-open gap, not by anything drill 08
-touched.** An isolated `EXPLAIN` put the missing `(org_id, updated_at DESC, id DESC)` index's seq
-scan at 154.6ms against the LEFT JOINs' +30ms — and that gap is also why the whale's *k6* numbers
-this session were too noisy to trust (10 concurrent VUs thrashing a 128MB `shared_buffers` against
-a 230MB+ heap). Fixing card 09 should make the whale's k6 numbers trustworthy for the first time
-since drill 05.
+**What's going on.** Someone will always say "it's slow, add an index." Sometimes that works. Sometimes Postgres looks at your new index, estimates the filter matches 30% of the table, decides a sequential scan is genuinely cheaper, and ignores it — and engineers who've never watched that happen argue with the planner instead of reading the row estimates. The senior answer to "how do you decide what to index" is a story about the time the index didn't get used.
+
+```
+TITLE     — Design a composite index for the inbox filter, then produce a case where
+            Postgres is right to ignore it
+SCENARIO  - The list filters by org and status over a date range and sorts by updated_at.
+            It's a sequential scan across 2.5M rows. You add an index; small orgs get
+            fast and the whale org doesn't move. Your teammate wants to add three more
+            indexes and you need to explain why that's the wrong instinct.
+WHY       — "Why didn't the planner use your index?"
+TIMEBOX   — 2 evenings (~6h)
+PREREQS   — 04, 08
+BUILDS    — filter + date range on the list endpoint and the page · the composite index
+NEW TECH  — EXPLAIN (ANALYZE, BUFFERS), pg_stats, ANALYZE.
+            Budget 45 min reading one plan closely before you try to improve anything.
+THE TASK  — Add status filtering and a date range to the endpoint and the UI. Capture
+            EXPLAIN (ANALYZE, BUFFERS) on the whale org's query before any index.
+            Design a composite index. Decide the column order deliberately and write the
+            reasoning down *before* you measure. Capture the plan after.
+            Then deliberately build a query where the index exists and is not used — same
+            shape, low selectivity, the whale org's most common status. Capture that plan
+            too.
+            Compare estimated vs actual rows in each. Then find the tipping point: vary
+            the filter until the planner flips, and record the selectivity where it did.
+DONE WHEN — Three plans in the writeup — seq scan, index scan, index-ignored — each with
+            timing and buffer counts. The selectivity threshold where the planner flipped,
+            found empirically. Your before-you-measured reasoning about column order, kept
+            in the writeup whether it was right or not.
+WRITEUP   — Why that column order, and what happens to the plan if you swap the first two?
+            At what selectivity did the planner flip, and does that match the rule of
+            thumb you'd have guessed?
+            What did BUFFERS tell you that timing alone didn't?
+BORED? →  17 (streaming RSC, backend break) or SQ3 (ADRs)
+STRETCH   — Add a partial index for open conversations. Measure its size against the full
+            index and decide whether the saving justifies another index to maintain.
+TOPICS    — relational data layer · system design fluency · observability
+```
 
 ## Next step
 
-**Card 09 is next**, believed to be the composite-index card — read that with appropriate
-confidence: drill 05 guessed "card 08" would be about `count(*)`/keyset paging and was wrong about
-the number, not the technical content (actual card 08, 2026-08-17, was N+1 detection). The
-technical prediction stands independent of which card number picks it up:
-
-- **The composite index is where the whale's ~155ms list-query cost lives** — drill 08's isolated
-  `EXPLAIN` shows a `Parallel Seq Scan` with no usable index for
-  `WHERE org_id = $1 ORDER BY updated_at DESC, id DESC`. Fixing it should also make the whale's k6
-  numbers trustworthy again (see Current focus).
-- **`count(*)`/keyset paging is real but separate** — `count(*)` is a 33ms index-only scan once
-  vacuumed (refuting drill 03's original prediction), a different cost than the list query's
-  missing index. Whichever future card covers paging, this is its starting point, not card 09's.
-
-One measurement is still open, unchanged since drill 06: **the pool under load** —
-`PostgresService.stats()` sampled *during* a k6 run, or the `pg-pool.connect` spans across a traced
-run. Drill 08 predicted the N+1 there would show up as connection **hold time**, not pool
-**saturation** (drill 07 already pins one connection per request via `withOrg`), but never actually
-sampled `poolStats` to confirm — a real gap, not a closed measurement.
+TBD: Drill 10
 
 ## Active plan
 
