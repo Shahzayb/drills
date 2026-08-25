@@ -7,7 +7,7 @@ it, and naive code is often a recorded decision rather than debt.
 pnpm monorepo: `apps/backend` (NestJS, raw `pg`, no ORM) and `apps/frontend` (Next.js App Router),
 orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose.
 
-## Progression — 8 of 32
+## Progression — 9 of 32
 
 | # | Drill | Result worth remembering |
 |---|---|---|
@@ -19,6 +19,7 @@ orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose
 | 06 | Observability | One request id across 4 processes, structured logs, OTel spans behind a flag. |
 | 07 | Tenant isolation | Row-level security under four deliberately filterless endpoints; 14 tests fail without it. |
 | 08 | N+1 detection | Tail org: 2.77x throughput fixing a 37-query request down to 3; `pg_stat_statements` finds it, an ORM couldn't hide it either. |
+| 09 | Indexes and the planner | Seq scan 107.9ms -> index scan 0.255ms; the planner correctly ignores the same index at 31% selectivity when it can't serve the ORDER BY. |
 
 Current state and what's open live in `memory-bank/progress.md`; every decision and
 number is one row in `memory-bank/history.md`, with the full reasoning in `plans/`.
@@ -43,6 +44,7 @@ pnpm load:baseline      # k6 baseline run
 pnpm trace:on           # spans + collector + Jaeger on :16686 (trace:off)
 pnpm logs:trace <id>    # one request across all services
 pnpm check:tenancy      # RLS coverage + the serving role cannot bypass it
+pnpm db:explain plans   # query plans for the list endpoint (sweep, experiments, stats)
 pnpm format
 pnpm lint
 ```
