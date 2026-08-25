@@ -36,8 +36,22 @@ export default async function ConversationsPage(
   const page = first(searchParams.page, '1');
   const pageSize = first(searchParams.pageSize, DEFAULT_PAGE_SIZE);
   const sort = first(searchParams.sort, DEFAULT_SORT);
+  // Card 09's filter. No defaults: an absent status means "both", which is a
+  // different query from either value and the one the composite index is
+  // measured against. See plans/2026-08-25_drill-09-index-selectivity.md.
+  const status = first(searchParams.status, '');
+  const updatedFrom = first(searchParams.updatedFrom, '');
+  const updatedTo = first(searchParams.updatedTo, '');
 
-  const result = await fetchConversations({ orgId, page, pageSize, sort });
+  const result = await fetchConversations({
+    orgId,
+    page,
+    pageSize,
+    sort,
+    status,
+    updatedFrom,
+    updatedTo,
+  });
 
   // Timed *inside* the callback on purpose: `after` runs once the response is
   // finished, and the flush is part of the render. Stopping the clock before
@@ -62,13 +76,31 @@ export default async function ConversationsPage(
     );
   });
 
-  const href = (targetPage: number) =>
-    `/conversations?${new URLSearchParams({
+  // One link builder for every link on the page, because the bug it prevents is
+  // real and quiet: build the "next page" URL from scratch and the active
+  // filter silently disappears on the second page. Every link starts from the
+  // full current state and overrides only what it changes.
+  const linkTo = (overrides: Record<string, string>) => {
+    const next = new URLSearchParams({
       org: orgId,
-      page: String(targetPage),
+      page,
       pageSize,
       sort,
-    })}`;
+      ...overrides,
+    });
+    // Same rule as lib/api.ts: empty means absent, so a cleared filter leaves
+    // the URL rather than sitting in it as `status=`.
+    for (const [key, value] of [
+      ['status', status],
+      ['updatedFrom', updatedFrom],
+      ['updatedTo', updatedTo],
+    ] as const) {
+      const chosen = overrides[key] ?? value;
+      if (chosen) next.set(key, chosen);
+      else next.delete(key);
+    }
+    return `/conversations?${next}`;
+  };
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 font-sans dark:bg-black">
@@ -83,28 +115,105 @@ export default async function ConversationsPage(
           </p>
         </div>
 
-        {/* Sorting is a set of links, not a dropdown, because a dropdown needs
-            client JavaScript and this page deliberately ships none. */}
-        <nav className="flex gap-3 text-sm">
-          {['updated_at', 'created_at'].map((column) => (
-            <a
-              key={column}
-              href={`/conversations?${new URLSearchParams({
-                org: orgId,
-                page: '1',
-                pageSize,
-                sort: column,
-              })}`}
-              className={
-                column === sort
-                  ? 'font-medium text-black underline dark:text-zinc-50'
-                  : 'text-zinc-500 underline hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50'
-              }
+        {/* Sorting and the status filter are sets of links, not dropdowns,
+            because a dropdown needs client JavaScript and this page
+            deliberately ships none. Every one of them resets to page 1: a
+            filter that keeps you on page 40 of a list that is now 3 pages long
+            renders an empty table and reads as a bug. */}
+        <div className="flex flex-col gap-3 text-sm">
+          <nav className="flex items-baseline gap-3">
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              sort
+            </span>
+            {['updated_at', 'created_at'].map((column) => (
+              <a
+                key={column}
+                href={linkTo({ sort: column, page: '1' })}
+                className={
+                  column === sort
+                    ? 'font-medium text-black underline dark:text-zinc-50'
+                    : 'text-zinc-500 underline hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50'
+                }
+              >
+                {column}
+              </a>
+            ))}
+          </nav>
+
+          <nav className="flex items-baseline gap-3">
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              status
+            </span>
+            {[
+              { value: '', label: 'all' },
+              { value: 'open', label: 'open' },
+              { value: 'closed', label: 'closed' },
+            ].map((option) => (
+              <a
+                key={option.label}
+                href={linkTo({ status: option.value, page: '1' })}
+                className={
+                  option.value === status
+                    ? 'font-medium text-black underline dark:text-zinc-50'
+                    : 'text-zinc-500 underline hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50'
+                }
+              >
+                {option.label}
+              </a>
+            ))}
+          </nav>
+
+          {/* A GET form, so the range lands in the URL and the page stays
+              shareable and cacheable — and, like everything else here, needs no
+              JavaScript. The hidden inputs carry the state the form does not
+              own; without them, submitting the dates would reset org and sort.
+              <input type="date"> submits YYYY-MM-DD, which the API reads as
+              midnight in the *server's* timezone. */}
+          <form method="get" className="flex flex-wrap items-baseline gap-3">
+            <input type="hidden" name="org" value={orgId} />
+            <input type="hidden" name="pageSize" value={pageSize} />
+            <input type="hidden" name="sort" value={sort} />
+            <input type="hidden" name="status" value={status} />
+            <input type="hidden" name="page" value="1" />
+            <label className="text-xs text-zinc-500 dark:text-zinc-400">
+              updated from{' '}
+              <input
+                type="date"
+                name="updatedFrom"
+                defaultValue={updatedFrom}
+                className="rounded border border-black/[.12] bg-white px-2 py-1 font-mono text-xs text-black dark:border-white/[.18] dark:bg-zinc-950 dark:text-zinc-50"
+              />
+            </label>
+            <label className="text-xs text-zinc-500 dark:text-zinc-400">
+              to{' '}
+              <input
+                type="date"
+                name="updatedTo"
+                defaultValue={updatedTo}
+                className="rounded border border-black/[.12] bg-white px-2 py-1 font-mono text-xs text-black dark:border-white/[.18] dark:bg-zinc-950 dark:text-zinc-50"
+              />
+            </label>
+            <button
+              type="submit"
+              className="rounded border border-black/[.12] px-3 py-1 text-xs text-black hover:bg-zinc-100 dark:border-white/[.18] dark:text-zinc-50 dark:hover:bg-zinc-900"
             >
-              {column}
-            </a>
-          ))}
-        </nav>
+              apply
+            </button>
+            {(updatedFrom || updatedTo || status) && (
+              <a
+                href={linkTo({
+                  status: '',
+                  updatedFrom: '',
+                  updatedTo: '',
+                  page: '1',
+                })}
+                className="text-xs text-zinc-500 underline hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50"
+              >
+                clear filters
+              </a>
+            )}
+          </form>
+        </div>
 
         {result.ok ? (
           <>
@@ -190,7 +299,7 @@ export default async function ConversationsPage(
               <div className="flex gap-4">
                 {result.page.page > 1 ? (
                   <a
-                    href={href(result.page.page - 1)}
+                    href={linkTo({ page: String(result.page.page - 1) })}
                     className="underline hover:text-black dark:hover:text-zinc-50"
                   >
                     ← previous
@@ -202,7 +311,7 @@ export default async function ConversationsPage(
                 )}
                 {result.page.page < result.page.totalPages ? (
                   <a
-                    href={href(result.page.page + 1)}
+                    href={linkTo({ page: String(result.page.page + 1) })}
                     className="underline hover:text-black dark:hover:text-zinc-50"
                   >
                     next →

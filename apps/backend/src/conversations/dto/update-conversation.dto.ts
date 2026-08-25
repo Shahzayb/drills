@@ -1,4 +1,9 @@
 import { IsIn } from 'class-validator';
+import { STATUSES } from './list-conversations.query';
+// `import type`, not a value import: with emitDecoratorMetadata + isolatedModules
+// a type named in a decorated signature must be erasable at the import, or tsc
+// raises TS1272 trying to emit design:type metadata for it.
+import type { Status } from './list-conversations.query';
 
 /**
  * The only field this endpoint may change. `status` and nothing else — the
@@ -10,6 +15,6 @@ import { IsIn } from 'class-validator';
  * The org comes from the header decorator or it does not come at all.
  */
 export class UpdateConversationDto {
-  @IsIn(['open', 'closed'])
-  status!: 'open' | 'closed';
+  @IsIn(STATUSES)
+  status!: Status;
 }
