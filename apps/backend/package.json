@@ -25,7 +25,8 @@
     "check:tenancy": "node db/check-tenancy.mjs",
     "stats:on": "node db/stats.mjs on",
     "stats": "node db/stats.mjs report",
-    "stats:reset": "node db/stats.mjs reset"
+    "stats:reset": "node db/stats.mjs reset",
+    "explain": "node db/explain.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

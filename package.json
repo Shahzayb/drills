@@ -31,6 +31,7 @@
     "db:stats:on": "docker compose exec -T nest_server pnpm --filter=backend run stats:on",
     "db:stats": "docker compose exec -T nest_server pnpm --filter=backend run stats",
     "db:stats:reset": "docker compose exec -T nest_server pnpm --filter=backend run stats:reset",
+    "db:explain": "docker compose exec -T nest_server pnpm --filter=backend run explain",
     "load:baseline": "node k6/run-baseline.mjs",
     "docker:up": "docker compose up -d --pull always",
     "docker:up:prod": "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d",
