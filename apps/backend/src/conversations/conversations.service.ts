@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { TenantDb, TenantQuery } from '../tenancy/tenant-db.service';
 import {
   ListConversationsQuery,
@@ -12,6 +16,22 @@ interface ConversationRow {
   assignee_id: string | null;
   created_at: Date;
   updated_at: Date;
+  /**
+   * The sort key rendered by *Postgres*, selected only on the keyset arm.
+   *
+   * It exists because `pg` hands back `timestamptz` as a JS `Date`, and a
+   * `Date` holds milliseconds while Postgres stores **microseconds**. Building
+   * a cursor from `updated_at.toISOString()` therefore names an instant a few
+   * hundred microseconds *earlier* than the row it came from — and the next
+   * page's `(updated_at, id) < ($k, $i)` then silently drops every row tied on
+   * the untruncated value. Rows vanish, no error anywhere.
+   *
+   * Caught by the tie-block test and by nothing else: the seed's timestamps are
+   * all whole seconds, so the truncation is a no-op against 2.5M rows and only
+   * the fixtures, which use `now()`, ever have microseconds to lose. See
+   * plans/2026-08-26_drill-10-keyset-pagination.md.
+   */
+  cursor_key?: string;
 }
 
 /** What the batched list query returns — the naive path's row plus the name a
@@ -85,10 +105,70 @@ export interface ConversationPage {
   totalPages: number;
 }
 
+/**
+ * What the keyset arm returns, and what it deliberately does not.
+ *
+ * No `total`, no `totalPages`, no `page`. That absence is the drill: a count is
+ * the other half of what makes a deep page expensive, and paying for one here
+ * would hand back exactly the cost the cursor was added to remove. A client
+ * that needs "page 12 of 480" has to use `paging=offset` — which is the honest
+ * answer, and the reason that arm still exists.
+ *
+ * `hasMore` costs nothing: the page query asks for `pageSize + 1` rows and
+ * throws the extra away. See plans/2026-08-26_drill-10-keyset-pagination.md.
+ */
+export interface ConversationCursorPage {
+  items: ConversationListItem[];
+  pageSize: number;
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+/**
+ * What an opaque cursor carries, before base64url.
+ *
+ * `v` is the version. It is the whole point of making the cursor opaque: the
+ * key columns can change in a later release and old cursors can be rejected
+ * (or migrated) by version rather than by guessing at their shape.
+ *
+ * `f` is the query-shape fingerprint — sort column and every filter. A cursor
+ * minted under `sort=updated_at` and replayed under `sort=created_at` names a
+ * position in an ordering that no longer exists, and the rows that come back
+ * are wrong in a way nothing downstream can detect. With `f` it is a 400.
+ *
+ * Not signed. base64url is an encoding, not encryption, and anyone can decode
+ * this in one line — the plan file says so rather than implying otherwise.
+ */
+interface CursorPayload {
+  v: 1;
+  // The sort column's value on the last row of the previous page, exactly as
+  // Postgres rendered it — microseconds included. Never via a JS Date; see
+  // ConversationRow.cursor_key for what that costs.
+  k: string;
+  // That row's id — the tiebreaker, and the reason this is a *pair*.
+  i: string;
+  f: string;
+}
+
+const CURSOR_VERSION = 1;
+
+/** The id in a cursor reaches Postgres as `::uuid`; a malformed one would be a
+ *  500 (`22P02`) instead of the 400 it is. Same reasoning as ParseUUIDPipe on
+ *  the `:id` routes. */
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** A WHERE clause and the bind values its placeholders refer to, in order. */
 interface Filters {
   where: string;
   params: unknown[];
+}
+
+/** `Filters` after the paging arm has had its say — see `pagingFor`. A null
+ *  `offset` is what "this is the keyset arm" means everywhere below. */
+interface Paging extends Filters {
+  limit: number;
+  offset: number | null;
 }
 
 export interface MessageListItem {
@@ -136,6 +216,20 @@ type ListStrategy = 'naive' | 'batched';
 const LIST_STRATEGY: ListStrategy =
   process.env.LIST_STRATEGY === 'naive' ? 'naive' : 'batched';
 
+/**
+ * Whether the keyset predicate carries the `id` tiebreaker.
+ *
+ * `off` drops it, leaving `sort_col < $k` — which skips every row still tied on
+ * the value the cursor names. Read once at module load, same as LIST_STRATEGY
+ * and for the same reason: an arm that requires a different checkout measures
+ * the checkout, not the variable (drill 07).
+ *
+ * This exists so `pnpm db:test:notiebreak` can go red on purpose. A correctness
+ * argument nobody has watched fail is a claim, not a proof.
+ */
+const KEYSET_TIEBREAK: 'on' | 'off' =
+  process.env.KEYSET_TIEBREAK === 'off' ? 'off' : 'on';
+
 @Injectable()
 export class ConversationsService {
   constructor(private readonly tenants: TenantDb) {}
@@ -170,18 +264,104 @@ export class ConversationsService {
   async list(
     orgId: string,
     query: ListConversationsQuery,
-  ): Promise<ConversationPage> {
+  ): Promise<ConversationPage | ConversationCursorPage> {
+    // Rejected here rather than in the DTO. `@ValidateIf` reads like a guard
+    // and is the opposite of one — it *skips* the validators when its condition
+    // is false, so `paging=offset&cursor=…` would have been accepted and then
+    // quietly ignored. Two arms have to stay two arms.
+    if (query.paging === 'offset' && query.cursor) {
+      throw new BadRequestException(
+        'cursor is only valid with paging=keyset; the offset arm uses page',
+      );
+    }
+
     // Safe to interpolate only because it came out of SORT_COLUMNS, never off
     // the request. org_id is still a bind parameter, as every *value* must be.
     const sortColumn = SORT_COLUMNS[query.sort];
 
-    const filters = this.filtersFor(orgId, query);
+    const paging = this.pagingFor(orgId, query, sortColumn);
 
     return this.tenants.withOrg(orgId, (tx) =>
       LIST_STRATEGY === 'naive'
-        ? this.listNaive(tx, filters, query, sortColumn)
-        : this.listBatched(tx, filters, query, sortColumn),
+        ? this.listNaive(tx, paging, query, sortColumn)
+        : this.listBatched(tx, paging, query, sortColumn),
     );
+  }
+
+  /**
+   * Everything that differs between the two paging arms, resolved once, so the
+   * two list bodies below stay two bodies rather than four.
+   *
+   * The keyset arm's whole mechanism is three lines of it:
+   *
+   *   - a row comparison `(sort_col, id) < ($k, $i)` instead of an OFFSET,
+   *   - `LIMIT pageSize + 1` so `hasMore` needs no second query,
+   *   - and no count query at all.
+   *
+   * **Why a row constructor and not `a < $k OR (a = $k AND b < $i)`.** They are
+   * logically identical and are not planned identically: Postgres understands
+   * `ROW(a,b) < ROW(x,y)` as one lexicographic comparison and can turn it into
+   * a single multicolumn btree `Index Cond`, where the OR form typically
+   * degenerates into a filter or a BitmapOr over two ranges. `pnpm db:explain
+   * keyset` is what checks that claim rather than repeating it.
+   *
+   * The comparison direction is `<` because the ordering is `DESC, DESC` — the
+   * next page is the rows that sort *after* the cursor, which under DESC means
+   * smaller. Flip the ORDER BY and this has to flip with it; they are one
+   * decision written in two places, which is exactly the kind of pair that
+   * rots, hence this note.
+   */
+  private pagingFor(
+    orgId: string,
+    query: ListConversationsQuery,
+    sortColumn: string,
+  ): Paging {
+    const filters = this.filtersFor(orgId, query);
+
+    if (query.paging === 'offset') {
+      return {
+        where: filters.where,
+        params: filters.params,
+        limit: query.pageSize,
+        offset: (query.page - 1) * query.pageSize,
+      };
+    }
+
+    const params = [...filters.params];
+    const clauses = [filters.where];
+
+    if (query.cursor) {
+      const { k, i } = this.decodeCursor(query.cursor, query);
+      params.push(k);
+      const key = `$${params.length}::timestamptz`;
+
+      if (KEYSET_TIEBREAK === 'on') {
+        params.push(i);
+        clauses.push(
+          `(c.${sortColumn}, c.id) < (${key}, $${params.length}::uuid)`,
+        );
+      } else {
+        // The broken arm, on purpose: "strictly older" excludes every row still
+        // tied on the cursor's own timestamp, so the rest of a tie block is
+        // skipped. `pnpm db:test:notiebreak` is the red run.
+        //
+        // `i` is deliberately not bound here. It is not just unused — Postgres
+        // rejects a bind with more parameters than the statement references, so
+        // pushing it would make this arm a 500 instead of the *silently wrong
+        // answer* the drill is about. A crash would be the easy bug.
+        clauses.push(`c.${sortColumn} < ${key}`);
+      }
+    }
+
+    return {
+      where: clauses.join(' AND '),
+      params,
+      // The +1 row is the whole cost of knowing whether there is a next page.
+      // A count query would answer the same question and read every matching
+      // row to do it.
+      limit: query.pageSize + 1,
+      offset: null,
+    };
   }
 
   /**
@@ -236,30 +416,27 @@ export class ConversationsService {
    */
   private async listNaive(
     tx: TenantQuery,
-    filters: Filters,
+    paging: Paging,
     query: ListConversationsQuery,
     sortColumn: string,
-  ): Promise<ConversationPage> {
-    const { page, pageSize } = query;
-    const offset = (page - 1) * pageSize;
-
+  ): Promise<ConversationPage | ConversationCursorPage> {
     const [rows, count] = await Promise.all([
       tx.query<ConversationRow>(
         `SELECT c.id, c.status, c.assignee_id, c.created_at, c.updated_at
+                ${this.cursorKeyColumn(paging, sortColumn)}
            FROM conversations c
-          WHERE ${filters.where}
+          WHERE ${paging.where}
           ORDER BY c.${sortColumn} DESC, c.id DESC
-          LIMIT $${filters.params.length + 1} OFFSET $${filters.params.length + 2}`,
-        [...filters.params, pageSize, offset],
+          ${this.limitClause(paging)}`,
+        this.limitParams(paging),
       ),
-      tx.query<{ total: string }>(
-        `SELECT count(*) AS total FROM conversations c WHERE ${filters.where}`,
-        filters.params,
-      ),
+      this.countFor(tx, paging),
     ]);
 
+    const page = this.slice(rows.rows, query);
+
     const items: ConversationListItem[] = [];
-    for (const row of rows.rows) {
+    for (const row of page.rows) {
       let assigneeName: string | null = null;
       if (row.assignee_id) {
         const assignee = await tx.query<{ name: string }>(
@@ -284,7 +461,7 @@ export class ConversationsService {
       items.push(toItem(row, assigneeName, tags.rows));
     }
 
-    return this.toPage(items, count, page, pageSize);
+    return this.toResult(items, page, count, query);
   }
 
   /**
@@ -305,13 +482,10 @@ export class ConversationsService {
    */
   private async listBatched(
     tx: TenantQuery,
-    filters: Filters,
+    paging: Paging,
     query: ListConversationsQuery,
     sortColumn: string,
-  ): Promise<ConversationPage> {
-    const { page, pageSize } = query;
-    const offset = (page - 1) * pageSize;
-
+  ): Promise<ConversationPage | ConversationCursorPage> {
     // Still Promise.all, and it no longer buys concurrency: both statements
     // run on the one client the scope pinned, so `pg` queues them. That is a
     // real cost against drill 05's baseline and it is measured in
@@ -322,26 +496,26 @@ export class ConversationsService {
       tx.query<ConversationWithAssigneeRow>(
         `SELECT c.id, c.status, c.assignee_id, u.name AS assignee_name,
                 c.created_at, c.updated_at
+                ${this.cursorKeyColumn(paging, sortColumn)}
            FROM conversations c
            LEFT JOIN memberships m ON m.id = c.assignee_id
            LEFT JOIN users u       ON u.id = m.user_id
-          WHERE ${filters.where}
+          WHERE ${paging.where}
           ORDER BY c.${sortColumn} DESC, c.id DESC
-          LIMIT $${filters.params.length + 1} OFFSET $${filters.params.length + 2}`,
-        [...filters.params, pageSize, offset],
+          ${this.limitClause(paging)}`,
+        this.limitParams(paging),
       ),
       // Postgres cannot shortcut count(*): MVCC makes visibility per-row, so
       // this reads every matching row on every request. Free at 24 rows, the
       // whole cost of the page at 2.5M. Card 09's index makes it an index-only
       // scan rather than a heap scan — cheaper, still linear in matching rows.
-      // Cursor paging (which drops the count entirely) is a later card.
-      tx.query<{ total: string }>(
-        `SELECT count(*) AS total FROM conversations c WHERE ${filters.where}`,
-        filters.params,
-      ),
+      // Card 10's keyset arm is the one that finally drops it: `countFor`
+      // returns null there and this is 2 statements, not 3.
+      this.countFor(tx, paging),
     ]);
 
-    const ids = rows.rows.map((row) => row.id);
+    const page = this.slice(rows.rows, query);
+    const ids = page.rows.map((row) => row.id);
     const tagsByConversation = new Map<string, TagItem[]>();
     if (ids.length > 0) {
       const tagRows = await tx.query<ConversationTagRow>(
@@ -359,19 +533,97 @@ export class ConversationsService {
       }
     }
 
-    const items = rows.rows.map((row) =>
+    const items = page.rows.map((row) =>
       toItem(row, row.assignee_name, tagsByConversation.get(row.id) ?? []),
     );
 
-    return this.toPage(items, count, page, pageSize);
+    return this.toResult(items, page, count, query);
   }
 
-  private toPage(
+  /**
+   * The extra select-list column the keyset arm needs, and the offset arm does
+   * not get — so the query drill 05 baselined stays the query drill 05
+   * baselined.
+   *
+   * `to_char(... AT TIME ZONE 'UTC', ...)` rather than `::text` because the
+   * plain cast renders through the session's `DateStyle`, and a cursor whose
+   * format depends on a session setting is a cursor that breaks when someone
+   * changes one. `.US` is six digits of fraction — the full precision the
+   * column actually holds.
+   */
+  private cursorKeyColumn(paging: Paging, sortColumn: string): string {
+    if (paging.offset !== null) return '';
+    return `, to_char(c.${sortColumn} AT TIME ZONE 'UTC',
+                      'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_key`;
+  }
+
+  /** `LIMIT $n` on the keyset arm, `LIMIT $n OFFSET $n+1` on the offset one. */
+  private limitClause(paging: Paging): string {
+    const limit = `LIMIT $${paging.params.length + 1}`;
+    return paging.offset === null
+      ? limit
+      : `${limit} OFFSET $${paging.params.length + 2}`;
+  }
+
+  private limitParams(paging: Paging): unknown[] {
+    return paging.offset === null
+      ? [...paging.params, paging.limit]
+      : [...paging.params, paging.limit, paging.offset];
+  }
+
+  /**
+   * The count query, or nothing at all.
+   *
+   * Returning `null` rather than running a cheaper count is the point: the
+   * keyset arm has no `total` to report, so there is no query to make cheap.
+   * This is also why the endpoint drops from 3 statements to 2 on that arm.
+   */
+  private countFor(
+    tx: TenantQuery,
+    paging: Paging,
+  ): Promise<{ rows: { total: string }[] } | null> {
+    if (paging.offset === null) return Promise.resolve(null);
+    return tx.query<{ total: string }>(
+      `SELECT count(*) AS total FROM conversations c WHERE ${paging.where}`,
+      paging.params,
+    );
+  }
+
+  /**
+   * Trims the keyset arm's extra row off, and remembers that it was there.
+   *
+   * The offset arm asked for exactly `pageSize` and learns nothing from getting
+   * it — `hasMore` there comes from `total`.
+   */
+  private slice<T>(
+    rows: T[],
+    query: ListConversationsQuery,
+  ): { rows: T[]; hasMore: boolean } {
+    if (query.paging === 'offset') return { rows, hasMore: false };
+    const hasMore = rows.length > query.pageSize;
+    return { rows: hasMore ? rows.slice(0, query.pageSize) : rows, hasMore };
+  }
+
+  private toResult(
     items: ConversationListItem[],
-    count: { rows: { total: string }[] },
-    page: number,
-    pageSize: number,
-  ): ConversationPage {
+    page: { rows: ConversationRow[]; hasMore: boolean },
+    count: { rows: { total: string }[] } | null,
+    query: ListConversationsQuery,
+  ): ConversationPage | ConversationCursorPage {
+    if (count === null) {
+      const last = page.rows[page.rows.length - 1];
+      return {
+        items,
+        pageSize: query.pageSize,
+        hasMore: page.hasMore,
+        // Null on the last page, so "no more" is one check and not two. A
+        // cursor pointing past the end would still be *correct* — it returns an
+        // empty page — but it invites a client to keep asking.
+        nextCursor:
+          page.hasMore && last ? this.encodeCursor(last, query) : null,
+      };
+    }
+
     // One transaction, so the list and count queries share a snapshot and
     // `total` can no longer disagree with `items`. That consistency was not
     // the goal — it is a side effect of needing a transaction for
@@ -380,11 +632,97 @@ export class ConversationsService {
     const total = Number(count.rows[0].total);
     return {
       items,
-      page,
-      pageSize,
+      page: query.page,
+      pageSize: query.pageSize,
       total,
-      totalPages: Math.ceil(total / pageSize),
+      totalPages: Math.ceil(total / query.pageSize),
     };
+  }
+
+  /**
+   * The query shape a cursor belongs to: sort column and every filter.
+   *
+   * A cursor names a position in an ordering. Replay it against a different
+   * ordering or a different filter set and the position is meaningless — the
+   * rows that come back are wrong, and nothing downstream can tell. Carrying
+   * the shape turns that silent wrongness into a 400.
+   *
+   * Plain text, not a hash: without a secret a hash hides nothing a base64
+   * decode would not reveal, and the readable version makes the error message
+   * useful.
+   */
+  private fingerprint(query: ListConversationsQuery): string {
+    return [
+      query.sort,
+      query.status ?? '',
+      query.updatedFrom ?? '',
+      query.updatedTo ?? '',
+    ].join('|');
+  }
+
+  /**
+   * base64url over JSON. Opaque, not secret — see CursorPayload.
+   *
+   * What opacity buys: the key columns are not an API contract, so they can
+   * change behind `v`; a client cannot hand-assemble a half-valid position; and
+   * the fingerprint travels with it. What it does not buy is tamper-proofing —
+   * anyone can decode and re-encode this. An HMAC is what that would take, and
+   * it is a stated gap rather than a pretend one.
+   */
+  private encodeCursor(
+    row: ConversationRow,
+    query: ListConversationsQuery,
+  ): string {
+    const payload: CursorPayload = {
+      v: CURSOR_VERSION,
+      // `cursor_key`, never `row.updated_at.toISOString()`. The Date lost the
+      // microseconds before this line ever ran.
+      k: row.cursor_key!,
+      i: row.id,
+      f: this.fingerprint(query),
+    };
+    return Buffer.from(JSON.stringify(payload)).toString('base64url');
+  }
+
+  /**
+   * One message per cause. A single "invalid cursor" would make the
+   * fingerprint rule — the interesting one — impossible to learn from the API.
+   */
+  private decodeCursor(
+    cursor: string,
+    query: ListConversationsQuery,
+  ): CursorPayload {
+    let payload: Partial<CursorPayload>;
+    try {
+      payload = JSON.parse(
+        Buffer.from(cursor, 'base64url').toString('utf8'),
+      ) as Partial<CursorPayload>;
+    } catch {
+      throw new BadRequestException('cursor is not decodable');
+    }
+
+    if (payload?.v !== CURSOR_VERSION) {
+      throw new BadRequestException(
+        `cursor version ${String(payload?.v)} is not supported`,
+      );
+    }
+    // Date.parse only as a *shape* check — it truncates to milliseconds, so its
+    // result is deliberately thrown away and `k` is passed to Postgres verbatim.
+    if (typeof payload.k !== 'string' || Number.isNaN(Date.parse(payload.k))) {
+      throw new BadRequestException('cursor key is not a timestamp');
+    }
+    if (typeof payload.i !== 'string' || !UUID_PATTERN.test(payload.i)) {
+      throw new BadRequestException('cursor id is not a uuid');
+    }
+    // The whole reason the fingerprint is in there. Changing `sort` or a filter
+    // mid-walk is a new query, and the old position does not describe it.
+    if (payload.f !== this.fingerprint(query)) {
+      throw new BadRequestException(
+        'cursor was issued for a different sort or filter; start again from the first page',
+      );
+    }
+
+    return payload as CursorPayload;
   }
 
   // ---------------------------------------------------------------------------
