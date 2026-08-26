@@ -1,7 +1,8 @@
-import { fetchConversations } from '@/lib/api';
+import { fetchConversations, isCursorPage } from '@/lib/api';
 import { logger, since } from '@/lib/logger';
 import { renderStartedAt } from '@/lib/render-timing';
 import { after } from 'next/server';
+import { ConversationList } from './conversation-list';
 
 // There is no auth in this repo, so the tenant is a URL parameter with a
 // default. `?org=2` is how tenant isolation gets poked at by hand later.
@@ -24,7 +25,14 @@ const first = (value: string | string[] | undefined, fallback: string) =>
  * correct here and worth knowing rather than discovering.
  *
  * No `loading.tsx` and no <Suspense>: the card wants a blocking server render
- * with no spinner, so the absence is the point. Drill 10 changes that.
+ * with no spinner, so the absence is the point.
+ *
+ * Card 10 gives this page two modes. The default is **keyset**: the first page
+ * is fetched here, on the server, and handed to a client component that appends
+ * the rest through the cursor. `?mode=offset` is the numbered pager this page
+ * has had since drill 03 — kept because "jump to page 40" is the one thing a
+ * cursor cannot do, and because it is the other arm of the measurement.
+ * See plans/2026-08-26_drill-10-keyset-pagination.md.
  */
 export default async function ConversationsPage(
   props: PageProps<'/conversations'>,
@@ -42,6 +50,9 @@ export default async function ConversationsPage(
   const status = first(searchParams.status, '');
   const updatedFrom = first(searchParams.updatedFrom, '');
   const updatedTo = first(searchParams.updatedTo, '');
+  // Anything that is not the literal 'offset' is keyset — a typo'd mode lands
+  // on the default rather than on an error page.
+  const mode = first(searchParams.mode, 'keyset') === 'offset' ? 'offset' : 'keyset'; // prettier-ignore
 
   const result = await fetchConversations({
     orgId,
@@ -51,6 +62,7 @@ export default async function ConversationsPage(
     status,
     updatedFrom,
     updatedTo,
+    paging: mode === 'keyset' ? 'keyset' : undefined,
   });
 
   // Timed *inside* the callback on purpose: `after` runs once the response is
@@ -86,6 +98,9 @@ export default async function ConversationsPage(
       page,
       pageSize,
       sort,
+      // Carried like every other bit of state: switch the sort while paging by
+      // cursor and the numbered pager should not reappear underneath you.
+      ...(mode === 'offset' ? { mode } : {}),
       ...overrides,
     });
     // Same rule as lib/api.ts: empty means absent, so a cleared filter leaves
@@ -110,8 +125,12 @@ export default async function ConversationsPage(
             Conversations
           </h1>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Org {orgId}, sorted by {sort} desc. Rendered on the server — disable
-            JavaScript and the rows are still here.
+            Org {orgId}, sorted by {sort} desc. The first page is rendered on
+            the server either way —{' '}
+            {mode === 'keyset'
+              ? 'load more fetches the next cursor page'
+              : 'this is the numbered pager, and it needs no JavaScript'}
+            .
           </p>
         </div>
 
@@ -217,112 +236,106 @@ export default async function ConversationsPage(
 
         {result.ok ? (
           <>
-            <div className="overflow-x-auto rounded-lg border border-black/[.08] bg-white dark:border-white/[.145] dark:bg-zinc-950">
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-black/[.08] text-xs text-zinc-500 dark:border-white/[.145] dark:text-zinc-400">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">id</th>
-                    <th className="px-4 py-3 font-medium">status</th>
-                    <th className="px-4 py-3 font-medium">assignee</th>
-                    <th className="px-4 py-3 font-medium">tags</th>
-                    <th className="px-4 py-3 font-medium">updated_at</th>
-                    <th className="px-4 py-3 font-medium">created_at</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.page.items.map((conversation) => (
-                    <tr
-                      key={conversation.id}
-                      className="border-b border-black/[.05] last:border-0 dark:border-white/[.08]"
-                    >
-                      <td className="px-4 py-2 font-mono text-xs text-zinc-500 dark:text-zinc-400">
-                        {conversation.id}
-                      </td>
-                      <td className="px-4 py-2 text-black dark:text-zinc-50">
-                        {conversation.status}
-                      </td>
-                      <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
-                        {conversation.assigneeName ?? '—'}
-                      </td>
-                      <td className="px-4 py-2">
-                        {conversation.tags.length > 0 ? (
-                          <div className="flex flex-wrap gap-1">
-                            {conversation.tags.map((tag) => (
-                              <span
-                                key={tag.id}
-                                className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs whitespace-nowrap text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-                              >
-                                {tag.name}
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="text-zinc-400 dark:text-zinc-600">
-                            —
-                          </span>
-                        )}
-                      </td>
-                      {/* Raw ISO, not toLocaleString(). The server's timezone is
-                          the container's, not the reader's, so a "friendly"
-                          format here would be confidently wrong. */}
-                      <td className="px-4 py-2 font-mono text-xs text-zinc-600 dark:text-zinc-400">
-                        {conversation.updatedAt}
-                      </td>
-                      <td className="px-4 py-2 font-mono text-xs text-zinc-600 dark:text-zinc-400">
-                        {conversation.createdAt}
-                      </td>
-                    </tr>
-                  ))}
-                  {result.page.items.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={6}
-                        className="px-4 py-8 text-center text-zinc-500 dark:text-zinc-400"
-                      >
-                        No conversations on this page.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <ConversationList
+              initialItems={result.page.items}
+              initialCursor={
+                isCursorPage(result.page) ? result.page.nextCursor : null
+              }
+              query={{
+                org: orgId,
+                pageSize,
+                sort,
+                ...(status ? { status } : {}),
+                ...(updatedFrom ? { updatedFrom } : {}),
+                ...(updatedTo ? { updatedTo } : {}),
+              }}
+            />
 
-            <div className="flex items-center justify-between text-sm">
-              <p className="text-zinc-600 dark:text-zinc-400">
-                Page {result.page.page} of {result.page.totalPages || 1} ·{' '}
-                {result.page.total} conversations
-              </p>
-              {/* Plain anchors, not next/link. A full document request is what
-                  makes "this works with JavaScript off" provable rather than
-                  merely claimed. next/link is the normal choice in a real app —
-                  see the plan file. */}
-              <div className="flex gap-4">
-                {result.page.page > 1 ? (
-                  <a
-                    href={linkTo({ page: String(result.page.page - 1) })}
-                    className="underline hover:text-black dark:hover:text-zinc-50"
-                  >
-                    ← previous
-                  </a>
-                ) : (
-                  <span className="text-zinc-400 dark:text-zinc-600">
-                    ← previous
-                  </span>
-                )}
-                {result.page.page < result.page.totalPages ? (
-                  <a
-                    href={linkTo({ page: String(result.page.page + 1) })}
-                    className="underline hover:text-black dark:hover:text-zinc-50"
-                  >
-                    next →
-                  </a>
-                ) : (
-                  <span className="text-zinc-400 dark:text-zinc-600">
-                    next →
-                  </span>
-                )}
+            {!isCursorPage(result.page) && (
+              <div className="flex items-center justify-between text-sm">
+                <p className="text-zinc-600 dark:text-zinc-400">
+                  Page {result.page.page} of {result.page.totalPages || 1} ·{' '}
+                  {result.page.total} conversations
+                </p>
+                {/* Plain anchors, not next/link. A full document request is what
+                    makes "this works with JavaScript off" provable rather than
+                    merely claimed. next/link is the normal choice in a real app —
+                    see the plan file. */}
+                <div className="flex gap-4">
+                  {result.page.page > 1 ? (
+                    <a
+                      href={linkTo({ page: String(result.page.page - 1) })}
+                      className="underline hover:text-black dark:hover:text-zinc-50"
+                    >
+                      ← previous
+                    </a>
+                  ) : (
+                    <span className="text-zinc-400 dark:text-zinc-600">
+                      ← previous
+                    </span>
+                  )}
+                  {result.page.page < result.page.totalPages ? (
+                    <a
+                      href={linkTo({ page: String(result.page.page + 1) })}
+                      className="underline hover:text-black dark:hover:text-zinc-50"
+                    >
+                      next →
+                    </a>
+                  ) : (
+                    <span className="text-zinc-400 dark:text-zinc-600">
+                      next →
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* The two arms, and what each costs, stated on the page rather than
+                only in the plan. `total` is missing from the cursor arm because
+                the API does not compute one — that is the trade, not a bug. */}
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              {mode === 'keyset' ? (
+                <>
+                  cursor paging — no total, no page numbers, flat cost at any
+                  depth.{' '}
+                  <a
+                    href={linkTo({ mode: 'offset', page: '1' })}
+                    className="underline hover:text-black dark:hover:text-zinc-50"
+                  >
+                    switch to numbered pages
+                  </a>
+                </>
+              ) : (
+                <>
+                  offset paging — page numbers and a total, and every page costs
+                  more than the last.{' '}
+                  <a
+                    href={linkTo({ mode: 'keyset', page: '1' })}
+                    className="underline hover:text-black dark:hover:text-zinc-50"
+                  >
+                    switch to load-more
+                  </a>
+                </>
+              )}
+            </p>
+
+            {/* Load-more is the one thing on this page that needs JavaScript.
+                Rather than degrade silently into a list that cannot be
+                continued, say so and point at the path that does not. */}
+            {mode === 'keyset' && (
+              <noscript>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Load more needs JavaScript.{' '}
+                  <a
+                    className="underline"
+                    href={linkTo({ mode: 'offset', page: '1' })}
+                  >
+                    Use numbered pages instead
+                  </a>{' '}
+                  — they are plain links and work without it.
+                </p>
+              </noscript>
+            )}
           </>
         ) : (
           <div className="flex flex-col gap-2 rounded-lg border border-red-200 bg-red-50 p-6 dark:border-red-900/50 dark:bg-red-950/30">

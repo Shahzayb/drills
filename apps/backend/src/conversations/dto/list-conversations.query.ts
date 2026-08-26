@@ -1,5 +1,13 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsISO8601, IsOptional, Max, Min } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsISO8601,
+  IsOptional,
+  Matches,
+  Max,
+  Min,
+} from 'class-validator';
 
 export const DEFAULT_PAGE_SIZE = 50;
 
@@ -33,6 +41,24 @@ export const SORT_COLUMNS = {
 export type SortKey = keyof typeof SORT_COLUMNS;
 
 /**
+ * Which paging arm runs. `offset` is the default so drill 05's baseline URL
+ * (`?page=1&pageSize=20`) and every recorded k6 run keep measuring the same
+ * thing — and so the numbered pager, the only way to jump to page 40, does not
+ * disappear the day the cursor lands.
+ *
+ * Both arms stay on one commit, same reasoning as LIST_STRATEGY: an A/B whose
+ * arms are two different checkouts measures the checkout. See
+ * plans/2026-08-26_drill-10-keyset-pagination.md.
+ */
+export const PAGING_MODES = ['offset', 'keyset'] as const;
+
+export type PagingMode = (typeof PAGING_MODES)[number];
+
+/** base64url, and long enough for the payload plus a fingerprint. The ceiling
+ *  is what keeps a megabyte of base64 away from JSON.parse. */
+const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,512}$/;
+
+/**
  * Validated by the global ValidationPipe before the handler runs, so the
  * controller and the service only ever see values that are already in range.
  *
@@ -57,6 +83,29 @@ export class ListConversationsQuery {
 
   @IsIn(Object.keys(SORT_COLUMNS))
   sort: SortKey = 'updated_at';
+
+  @IsIn(PAGING_MODES)
+  paging: PagingMode = 'offset';
+
+  /**
+   * Where the keyset page resumes. Opaque on purpose — see
+   * ConversationsService.encodeCursor.
+   *
+   * The pattern is a shape check, not validation: what the cursor *contains* is
+   * the service's business and it raises its own 400s. All this stops is a
+   * megabyte of base64 reaching JSON.parse.
+   *
+   * A cursor sent with `paging=offset` is rejected by `list()`, not here. A
+   * `@ValidateIf` would have done the opposite of what it reads like — it
+   * *skips* the validators when the condition is false, so the mismatched
+   * combination would have been silently accepted and then ignored, which is
+   * drill 08's QUERY_COUNTER bug wearing a different hat.
+   */
+  @IsOptional()
+  @Matches(CURSOR_PATTERN, {
+    message: 'cursor must be a base64url string of 8-512 characters',
+  })
+  cursor?: string;
 
   // The three below are optional with no default, and that is the drill: "no
   // status filter" and "status=open" have to be two different queries, or card

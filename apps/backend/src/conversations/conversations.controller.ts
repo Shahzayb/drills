@@ -12,6 +12,7 @@ import {
 import { QueryBudget } from '../observability/query-budget.decorator';
 import { OrgId } from '../tenancy/org-id.decorator';
 import {
+  ConversationCursorPage,
   ConversationPage,
   ConversationsService,
   ConversationSummary,
@@ -41,12 +42,16 @@ export class ConversationsController {
   // (list, count, tags) and this is what the metadata has to sit on — see the
   // note on ConversationsService.list() for why the service method itself is
   // the wrong place.
+  //
+  // Card 10's keyset arm runs 2 (list, tags) — it has no count. The budget
+  // stays 3: it is a ceiling on the worst arm, and lowering it would make the
+  // offset arm, which is still supported, breach on every request.
   @Get()
   @QueryBudget(3)
   list(
     @OrgId() orgId: string,
     @Query() query: ListConversationsQuery,
-  ): Promise<ConversationPage> {
+  ): Promise<ConversationPage | ConversationCursorPage> {
     return this.conversations.list(orgId, query);
   }
 

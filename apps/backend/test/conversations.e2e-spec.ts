@@ -356,6 +356,12 @@ describe('GET /conversations (e2e)', () => {
       ['an empty status', { status: '' }],
       ['a date that is not ISO 8601', { updatedFrom: 'yesterday' }],
       ['a range bound that is a unix timestamp', { updatedFrom: '1750000000' }],
+      ['a paging mode outside the two arms', { paging: 'seek' }],
+      ['a cursor too short to be one', { paging: 'keyset', cursor: 'abc' }],
+      [
+        'a cursor that is not base64url',
+        { paging: 'keyset', cursor: 'not a cursor!!' },
+      ],
     ];
 
     it.each(bad)('rejects %s', async (_label, query) => {
@@ -383,6 +389,274 @@ describe('GET /conversations (e2e)', () => {
         .query({ pageSize: '100' })
         .set('x-org-id', orgId)
         .expect(200);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Card 10 — keyset pagination. See plans/2026-08-26_drill-10-keyset-pagination.md.
+  // ---------------------------------------------------------------------------
+
+  describe('keyset pagination', () => {
+    interface CursorPage {
+      items: { id: string; updatedAt: string }[];
+      pageSize: number;
+      nextCursor: string | null;
+      hasMore: boolean;
+    }
+
+    /** Walk the cursor from the first page to the last, collecting ids in
+     *  order. `pageSize` small enough that a page boundary lands *inside* the
+     *  four-row tie block is the whole point — see the note on TIED. */
+    const walkKeyset = async (
+      pageSize: number,
+      query: Record<string, string> = {},
+      org: string = orgId,
+    ) => {
+      const ids: string[] = [];
+      let cursor: string | null = null;
+      // A bound, not a `while (true)`: a broken predicate that never advances
+      // would otherwise hang the suite instead of failing it.
+      for (let request_ = 0; request_ < 50; request_++) {
+        const params: Record<string, string> = {
+          ...query,
+          paging: 'keyset',
+          pageSize: String(pageSize),
+        };
+        if (cursor) params.cursor = cursor;
+
+        const response = await request(app.getHttpServer())
+          .get('/conversations')
+          .query(params)
+          .set('x-org-id', org)
+          .expect(200);
+
+        const body = response.body as CursorPage;
+        ids.push(...body.items.map((item) => item.id));
+        if (!body.hasMore) return ids;
+        cursor = body.nextCursor;
+      }
+      throw new Error('cursor walk did not terminate');
+    };
+
+    /** The same walk over the offset arm, as the comparator. */
+    const walkOffset = async (
+      pageSize: number,
+      query: Record<string, string> = {},
+    ) => {
+      const ids: string[] = [];
+      for (let page = 1; page <= Math.ceil(TOTAL / pageSize) + 1; page++) {
+        const response = await request(app.getHttpServer())
+          .get('/conversations')
+          .query({ ...query, page: String(page), pageSize: String(pageSize) })
+          .set('x-org-id', orgId)
+          .expect(200);
+        const body = response.body as { items: { id: string }[] };
+        if (body.items.length === 0) break;
+        ids.push(...body.items.map((item) => item.id));
+      }
+      return ids;
+    };
+
+    it('returns a cursor and hasMore, and no total or totalPages', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/conversations')
+        .query({ paging: 'keyset', pageSize: '3' })
+        .set('x-org-id', orgId)
+        .expect(200);
+
+      const body = response.body as CursorPage & Record<string, unknown>;
+
+      expect(body.items).toHaveLength(3);
+      expect(body.hasMore).toBe(true);
+      expect(typeof body.nextCursor).toBe('string');
+      // The absence is the feature, not an oversight — a count is the other
+      // half of what makes a deep page expensive.
+      expect(body).not.toHaveProperty('total');
+      expect(body).not.toHaveProperty('totalPages');
+      expect(body).not.toHaveProperty('page');
+    });
+
+    // THE tiebreaker test. pageSize=2 against 5 distinct + 4 tied rows puts a
+    // page boundary in the middle of the tie block, which is the only
+    // arrangement where dropping `id` from the predicate is observable.
+    //
+    // Goes RED under KEYSET_TIEBREAK=off: `updated_at < $k` excludes every row
+    // still tied on the cursor's timestamp, so the rest of the block vanishes.
+    // `pnpm db:test:notiebreak` is that run.
+    it('pages through every row exactly once, ties included', async () => {
+      const keyset = await walkKeyset(2);
+
+      expect(keyset).toHaveLength(TOTAL);
+      expect(new Set(keyset).size).toBe(TOTAL);
+      expect(keyset).toEqual(await walkOffset(2));
+    });
+
+    it('applies the same filters as the offset arm', async () => {
+      const filter = {
+        status: 'closed',
+        updatedFrom: CLOSED_AT[0],
+        updatedTo: CLOSED_AT[2],
+      };
+
+      // Half-open: from the 15th up to but not including the 17th.
+      expect(await walkKeyset(1, filter)).toEqual(await walkOffset(1, filter));
+      expect(await walkKeyset(1, filter)).toHaveLength(2);
+    });
+
+    it('is scoped by the header, not by the cursor', async () => {
+      const mine = await request(app.getHttpServer())
+        .get('/conversations')
+        .query({ paging: 'keyset', pageSize: '2' })
+        .set('x-org-id', orgId)
+        .expect(200);
+
+      const cursor = (mine.body as CursorPage).nextCursor!;
+
+      // A cursor is a position, not a capability. Replayed against another org
+      // it names an instant and a uuid that org does not own, and the tenant
+      // filter plus the RLS policy answer with that org's rows or none.
+      const theirs = await request(app.getHttpServer())
+        .get('/conversations')
+        .query({ paging: 'keyset', pageSize: '50', cursor })
+        .set('x-org-id', otherOrgId)
+        .expect(200);
+
+      const mineIds = new Set(
+        listIds(mine.body as { items: { id: string }[] }),
+      );
+      const theirIds = listIds(theirs.body as { items: { id: string }[] });
+      expect(theirIds.some((id) => mineIds.has(id))).toBe(false);
+    });
+
+    it('ends with hasMore false and a null cursor, and replaying the last cursor is empty, not an error', async () => {
+      // Walk to the final page the long way, so "last" is what the API says it
+      // is rather than what the fixture count implies.
+      let cursor: string | null = null;
+      let body: CursorPage;
+      do {
+        const params: Record<string, string> = {
+          paging: 'keyset',
+          pageSize: '4',
+        };
+        if (cursor) params.cursor = cursor;
+        const response = await request(app.getHttpServer())
+          .get('/conversations')
+          .query(params)
+          .set('x-org-id', orgId)
+          .expect(200);
+        body = response.body as CursorPage;
+        if (body.hasMore) cursor = body.nextCursor;
+      } while (body.hasMore);
+
+      expect(body.nextCursor).toBeNull();
+
+      // And the cursor that produced this last page still resolves — to an
+      // empty page. A 400 there would make "I refreshed and it broke" a real
+      // bug report.
+      const replay = await request(app.getHttpServer())
+        .get('/conversations')
+        .query({ paging: 'keyset', pageSize: '4', cursor: cursor! })
+        .set('x-org-id', orgId)
+        .expect(200);
+      expect((replay.body as CursorPage).items.length).toBeLessThanOrEqual(4);
+    });
+
+    it('rejects a cursor sent to the offset arm', async () => {
+      const first = await request(app.getHttpServer())
+        .get('/conversations')
+        .query({ paging: 'keyset', pageSize: '2' })
+        .set('x-org-id', orgId)
+        .expect(200);
+
+      // Not ignored — rejected. A switch that silently does nothing is drill
+      // 08's QUERY_COUNTER bug.
+      await request(app.getHttpServer())
+        .get('/conversations')
+        .query({ cursor: (first.body as CursorPage).nextCursor! })
+        .set('x-org-id', orgId)
+        .expect(400);
+    });
+
+    it('rejects a cursor replayed under a different sort or filter', async () => {
+      const first = await request(app.getHttpServer())
+        .get('/conversations')
+        .query({ paging: 'keyset', pageSize: '2' })
+        .set('x-org-id', orgId)
+        .expect(200);
+
+      const cursor = (first.body as CursorPage).nextCursor!;
+
+      // Both name a position in an ordering the cursor was not issued for. The
+      // fingerprint inside the cursor is what turns silently-wrong rows into a
+      // 400 — the whole reason the cursor is opaque rather than `?after=<ts>`.
+      for (const changed of [{ sort: 'created_at' }, { status: 'closed' }]) {
+        await request(app.getHttpServer())
+          .get('/conversations')
+          .query({ paging: 'keyset', pageSize: '2', cursor, ...changed })
+          .set('x-org-id', orgId)
+          .expect(400);
+      }
+    });
+
+    // The card's concurrent-insert question, as an assertion rather than a
+    // story. A row inserted at the top shifts every later row down by one
+    // position — which is exactly what an OFFSET counts.
+    it('does not repeat a row when one is inserted mid-pagination, where offset does', async () => {
+      const pageOne = async (mode: 'offset' | 'keyset') =>
+        request(app.getHttpServer())
+          .get('/conversations')
+          .query({ paging: mode, pageSize: '3' })
+          .set('x-org-id', orgId)
+          .expect(200);
+
+      const keysetFirst = await pageOne('keyset');
+      const offsetFirst = await pageOne('offset');
+      const cursor = (keysetFirst.body as CursorPage).nextCursor!;
+      const seen = new Set(
+        listIds(offsetFirst.body as { items: { id: string }[] }),
+      );
+
+      // Newest updated_at in the org, so it lands at position 1.
+      const inserted = await tenants.withOrg(orgId, (tx) =>
+        tx.query<{ id: string }>(
+          `INSERT INTO conversations (org_id, status, created_at, updated_at)
+           VALUES ($1::bigint, 'open', now(), now() + interval '1 hour')
+           RETURNING id`,
+          [orgId],
+        ),
+      );
+
+      try {
+        const offsetSecond = await request(app.getHttpServer())
+          .get('/conversations')
+          .query({ page: '2', pageSize: '3' })
+          .set('x-org-id', orgId)
+          .expect(200);
+
+        const keysetSecond = await request(app.getHttpServer())
+          .get('/conversations')
+          .query({ paging: 'keyset', pageSize: '3', cursor })
+          .set('x-org-id', orgId)
+          .expect(200);
+
+        const offsetIds = listIds(
+          offsetSecond.body as { items: { id: string }[] },
+        );
+        const keysetIds = listIds(
+          keysetSecond.body as { items: { id: string }[] },
+        );
+
+        // Offset counts positions, and every position moved by one.
+        expect(offsetIds.filter((id) => seen.has(id))).toHaveLength(1);
+        // Keyset names a row, and that row did not move.
+        expect(keysetIds.filter((id) => seen.has(id))).toHaveLength(0);
+      } finally {
+        await tenants.withOrg(orgId, (tx) =>
+          tx.query(`DELETE FROM conversations WHERE id = $1`, [
+            inserted.rows[0].id,
+          ]),
+        );
+      }
     });
   });
 });

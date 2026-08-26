@@ -1,6 +1,6 @@
 {
   "name": "drills",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -27,11 +27,13 @@
     "db:activity": "docker compose exec -T postgres_db sh -c 'psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" -c \"select pid, state, left(query, 140) as query from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid() order by state\"'",
     "db:test": "docker compose exec nest_server pnpm --filter=backend run test:e2e",
     "db:test:naive": "docker compose exec -T -e LIST_STRATEGY=naive nest_server pnpm --filter=backend run test:e2e",
+    "db:test:notiebreak": "docker compose exec -T -e KEYSET_TIEBREAK=off nest_server pnpm --filter=backend run test:e2e",
     "check:tenancy": "docker compose exec -T nest_server pnpm --filter=backend run check:tenancy",
     "db:stats:on": "docker compose exec -T nest_server pnpm --filter=backend run stats:on",
     "db:stats": "docker compose exec -T nest_server pnpm --filter=backend run stats",
     "db:stats:reset": "docker compose exec -T nest_server pnpm --filter=backend run stats:reset",
-    "db:explain": "docker compose exec -T nest_server pnpm --filter=backend run explain",
+    "db:explain": "docker compose exec -T -e ORG_ID -e STATUS -e SORT -e DAYS -e DEPTHS nest_server pnpm --filter=backend run explain",
+    "db:paging": "docker compose exec -T -e ORG_ID -e PAGE_SIZE -e ROUNDS -e DEPTHS -e MAX_PAGES nest_server pnpm --filter=backend run paging",
     "load:baseline": "node k6/run-baseline.mjs",
     "docker:up": "docker compose up -d --pull always",
     "docker:up:prod": "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d",

@@ -133,8 +133,23 @@ export interface ConversationPage {
   totalPages: number;
 }
 
+/** Card 10's keyset arm. No `total` and no `totalPages` — the API does not
+ *  compute them, deliberately; see the backend service for why. */
+export interface ConversationCursorPage {
+  items: Conversation[];
+  pageSize: number;
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+/** Which shape came back. `page` in the body is the discriminator the API
+ *  already gives us — the offset arm has one, the cursor arm does not. */
+export const isCursorPage = (
+  page: ConversationPage | ConversationCursorPage,
+): page is ConversationCursorPage => !('total' in page);
+
 export type ConversationsResult = (
-  | { ok: true; page: ConversationPage }
+  | { ok: true; page: ConversationPage | ConversationCursorPage }
   | { ok: false; error: string; status?: number }
 ) & { source: string; requestId: string; durMs: number };
 
@@ -159,6 +174,9 @@ export async function fetchConversations(params: {
   status?: string;
   updatedFrom?: string;
   updatedTo?: string;
+  // Card 10. Absent means the offset arm, which is still the API's default.
+  paging?: string;
+  cursor?: string;
 }): Promise<ConversationsResult> {
   const query = new URLSearchParams({
     page: params.page,
@@ -170,7 +188,17 @@ export async function fetchConversations(params: {
   // <input type="date"> submits `updatedFrom=`, and forwarding that would turn
   // "I cleared the filter" into a 400 from @IsISO8601. Absent and empty mean
   // the same thing to a reader, so they have to mean the same thing here.
-  for (const key of ['status', 'updatedFrom', 'updatedTo'] as const) {
+  //
+  // `cursor` is in the same list for the same reason, and one more: the API
+  // rejects a cursor sent to the offset arm outright, so forwarding an empty
+  // one would 400 every unpaged request.
+  for (const key of [
+    'status',
+    'updatedFrom',
+    'updatedTo',
+    'paging',
+    'cursor',
+  ] as const) {
     const value = params[key];
     if (value) query.set(key, value);
   }
@@ -199,7 +227,8 @@ export async function fetchConversations(params: {
 
     return {
       ok: true,
-      page: (await response.json()) as ConversationPage,
+      page: (await response.json()) as
+        ConversationPage | ConversationCursorPage,
       source,
       requestId,
       durMs,
