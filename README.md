@@ -1,6 +1,6 @@
 # drills
 
-A learning repo. A multi-tenant customer-feedback platform built across 32 drills, each
+A playground repo. A multi-tenant customer-feedback platform built across 32 drills, each
 one breaking something on purpose and measuring it at scale. Nothing is built ahead of the drill that needs
 it, and naive code is often a recorded decision rather than debt.
 
