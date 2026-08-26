@@ -21,9 +21,10 @@ None open — every plan file in `plans/` is shipped. `history.md` lists them wi
 `pnpm db:test` runs the e2e suite inside the container. Two suites are *expected* to fail, and a
 green run of either means the switch stopped switching: `pnpm db:test:naive` (`LIST_STRATEGY=naive`)
 fails **two** query-budget assertions, and `pnpm db:test:notiebreak` (`KEYSET_TIEBREAK=off`) fails
-**one** — the tie-block walk, which returns 9 of 12 rows with no error. Baseline numbers and query plans for drill 03 are in its plan file — the
-`before` column cards 09/10 are compared against; drill 04's plan records the same queries at 2.5M
-rows.
+**one** — the tie-block walk, which returns 9 of 12 rows with no error.
+
+Baseline numbers and query plans for drill 03 are in its plan file — the `before` column cards 09
+and 10 were compared against; drill 04's plan records the same queries at 2.5M rows.
 
 `pnpm logs:trace <id>` reconstructs one request across all services. `pnpm trace:on` adds spans, a
 collector and Jaeger on `:16686`; `pnpm trace:off` puts it back. `pnpm db:stats:on`/`db:stats`/
