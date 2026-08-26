@@ -5,6 +5,7 @@
 //   pnpm db:explain sweep     walk the date cutoff, print the chosen scan node
 //   pnpm db:explain experiments  price the two indexes that were NOT shipped
 //   pnpm db:explain stats     pg_stats for the filtered columns + index sizes
+//   pnpm db:explain keyset    card 10: OFFSET at depth vs the cursor's row comparison
 //
 // Two things here are load-bearing and neither is obvious.
 //
@@ -25,9 +26,12 @@
 import pg from 'pg';
 
 const subcommand = process.argv[2];
-const USAGE = 'usage: node db/explain.mjs <plans|sweep|experiments|stats>';
+const USAGE =
+  'usage: node db/explain.mjs <plans|sweep|experiments|stats|keyset>';
 
-if (!['plans', 'sweep', 'experiments', 'stats'].includes(subcommand)) {
+if (
+  !['plans', 'sweep', 'experiments', 'stats', 'keyset'].includes(subcommand)
+) {
   console.error(USAGE);
   process.exit(1);
 }
@@ -61,7 +65,13 @@ const client = new pg.Client({
   database: process.env.POSTGRES_DB,
 });
 
-const ORG_ID = process.env.ORG_ID ?? '1';
+// `||`, not `??`. The root script forwards these with `docker compose exec -e
+// ORG_ID`, and an unset host variable arrives inside the container as the empty
+// string rather than as absent — `??` would keep it and every query would run
+// for org ''. Before the -e flags existed the variable never arrived at all:
+// `ORG_ID=150 pnpm db:explain plans` silently measured org 1 for the whole of
+// drill 09. A knob that quietly does nothing, again.
+const ORG_ID = process.env.ORG_ID || '1';
 const INDEX_NAME = 'conversations_org_updated_idx';
 const PAGE_SIZE = 50;
 
@@ -296,8 +306,8 @@ async function sweep() {
   // Same reason as plans(): the app role sees nothing until the scope is open.
   await openScope();
 
-  const status = process.env.STATUS ?? 'closed';
-  const sortColumn = process.env.SORT ?? 'created_at';
+  const status = process.env.STATUS || 'closed';
+  const sortColumn = process.env.SORT || 'created_at';
   const at = await anchor();
 
   const { rows: totalRows } = await client.query(
@@ -483,6 +493,141 @@ async function stats() {
   }
 }
 
+// ---------------------------------------------------------------- keyset
+
+/**
+ * Card 10. The same page, reached two ways, at the same depth.
+ *
+ * The number to read is NOT the milliseconds — it is `Actual Rows` on the node
+ * *below* the Limit. OFFSET is a Limit-node parameter: the scan still produces
+ * every row up to the offset and the Limit throws them away one at a time. The
+ * cursor is a WHERE clause, so the scan starts where the last page stopped and
+ * produces `pageSize` rows however deep the page is.
+ *
+ * See plans/2026-08-26_drill-10-keyset-pagination.md.
+ */
+const keysetQuery = (sortColumn) => `
+  SELECT c.id, c.status, c.assignee_id, u.name AS assignee_name,
+         c.created_at, c.updated_at
+    FROM conversations c
+    LEFT JOIN memberships m ON m.id = c.assignee_id
+    LEFT JOIN users u       ON u.id = m.user_id
+   WHERE c.org_id = $1 AND (c.${sortColumn}, c.id) < ($2::timestamptz, $3::uuid)
+   ORDER BY c.${sortColumn} DESC, c.id DESC
+   LIMIT ${PAGE_SIZE}`;
+
+/** The hand-expanded OR form the row comparison replaces. Logically identical,
+ *  and the whole question is whether the planner treats it that way. */
+const keysetOrQuery = (sortColumn) => `
+  SELECT c.id, c.status, c.assignee_id, u.name AS assignee_name,
+         c.created_at, c.updated_at
+    FROM conversations c
+    LEFT JOIN memberships m ON m.id = c.assignee_id
+    LEFT JOIN users u       ON u.id = m.user_id
+   WHERE c.org_id = $1
+     AND (c.${sortColumn} < $2::timestamptz
+          OR (c.${sortColumn} = $2::timestamptz AND c.id < $3::uuid))
+   ORDER BY c.${sortColumn} DESC, c.id DESC
+   LIMIT ${PAGE_SIZE}`;
+
+const offsetQuery = (sortColumn, offset) => `
+  SELECT c.id, c.status, c.assignee_id, u.name AS assignee_name,
+         c.created_at, c.updated_at
+    FROM conversations c
+    LEFT JOIN memberships m ON m.id = c.assignee_id
+    LEFT JOIN users u       ON u.id = m.user_id
+   WHERE c.org_id = $1
+   ORDER BY c.${sortColumn} DESC, c.id DESC
+   LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
+
+/**
+ * Where page `depth` starts, as the pair a cursor carries.
+ *
+ * Found with an OFFSET, which is the joke: the only way to *jump* to the
+ * cursor for page 5,000 is the mechanism the cursor exists to replace. A real
+ * client never does this — it walks. Here it is scaffolding, run outside every
+ * EXPLAIN so it costs nothing that gets reported.
+ *
+ * `to_char` and not a JS Date round trip: timestamptz holds microseconds and a
+ * JS Date holds milliseconds, and the truncated value names a different row.
+ */
+async function cursorAt(sortColumn, depth) {
+  const { rows } = await client.query(
+    `SELECT to_char(${sortColumn} AT TIME ZONE 'UTC',
+                    'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS k, id
+       FROM conversations
+      WHERE org_id = $1
+      ORDER BY ${sortColumn} DESC, id DESC
+      LIMIT 1 OFFSET ${(depth - 1) * PAGE_SIZE}`,
+    [ORG_ID],
+  );
+  return rows[0];
+}
+
+async function keyset() {
+  await openScope();
+
+  const sortColumn = process.env.SORT || 'updated_at';
+  const depths = (process.env.DEPTHS || '1,100,5000').split(',').map(Number);
+
+  console.log(
+    `org ${ORG_ID}  sort=${sortColumn}  pageSize=${PAGE_SIZE}  ` +
+      `index ${(await hasIndex()) ? 'present' : 'ABSENT'}`,
+  );
+  console.log(
+    '\n  depth      arm            node                       ' +
+      'rows below Limit      ms   shared hit/read',
+  );
+
+  /** Actual Rows on the node directly under the Limit — the discarded work. */
+  const belowLimit = (plan) => {
+    const limit = (function find(node) {
+      if (node['Node Type'] === 'Limit') return node;
+      for (const child of node.Plans ?? []) {
+        const found = find(child);
+        if (found) return found;
+      }
+      return null;
+    })(plan.Plan);
+    const child = limit?.Plans?.[0] ?? plan.Plan;
+    return child['Actual Rows'] * (child['Actual Loops'] ?? 1);
+  };
+
+  const row = async (depth, arm, sql, params) => {
+    const plan = await explainJson(sql, params);
+    const scan = findScan(plan.Plan) ?? plan.Plan;
+    console.log(
+      `  ${String(depth).padStart(5)}      ${arm.padEnd(14)} ` +
+        `${scan['Node Type'].padEnd(26)} ${String(belowLimit(plan)).padStart(10)}` +
+        `      ${plan['Execution Time'].toFixed(2).padStart(8)}   ` +
+        `${scan['Shared Hit Blocks']}/${scan['Shared Read Blocks']}`,
+    );
+  };
+
+  for (const depth of depths) {
+    const at = await cursorAt(sortColumn, depth);
+    await row(depth, 'offset', offsetQuery(sortColumn, (depth - 1) * PAGE_SIZE), [ORG_ID]); // prettier-ignore
+    await row(depth, 'keyset row', keysetQuery(sortColumn), [ORG_ID, at.k, at.id]); // prettier-ignore
+    await row(depth, 'keyset OR', keysetOrQuery(sortColumn), [ORG_ID, at.k, at.id]); // prettier-ignore
+  }
+
+  // The claim the whole predicate choice rests on, printed rather than argued:
+  // does `(a, b) < (x, y)` reach the index as ONE Index Cond?
+  const at = await cursorAt(sortColumn, 100);
+  await explainText(
+    'row comparison — is it an Index Cond?',
+    keysetQuery(sortColumn),
+    [ORG_ID, at.k, at.id],
+  );
+  await explainText('the OR form, same position', keysetOrQuery(sortColumn), [
+    ORG_ID,
+    at.k,
+    at.id,
+  ]);
+
+  await client.query('COMMIT');
+}
+
 // -------------------------------------------------------------------- main
 
 await client.connect();
@@ -490,6 +635,7 @@ try {
   if (subcommand === 'plans') await plans();
   else if (subcommand === 'sweep') await sweep();
   else if (subcommand === 'experiments') await experiments();
+  else if (subcommand === 'keyset') await keyset();
   else await stats();
 } finally {
   await client.end();
