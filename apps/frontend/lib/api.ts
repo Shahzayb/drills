@@ -156,12 +156,25 @@ export async function fetchConversations(params: {
   page: string;
   pageSize: string;
   sort: string;
+  status?: string;
+  updatedFrom?: string;
+  updatedTo?: string;
 }): Promise<ConversationsResult> {
   const query = new URLSearchParams({
     page: params.page,
     pageSize: params.pageSize,
     sort: params.sort,
   });
+
+  // Appended only when set, and an empty string counts as unset — an empty
+  // <input type="date"> submits `updatedFrom=`, and forwarding that would turn
+  // "I cleared the filter" into a 400 from @IsISO8601. Absent and empty mean
+  // the same thing to a reader, so they have to mean the same thing here.
+  for (const key of ['status', 'updatedFrom', 'updatedTo'] as const) {
+    const value = params[key];
+    if (value) query.set(key, value);
+  }
+
   const source = `${API_URL}/conversations?${query}`;
   const requestId = await getRequestId();
 

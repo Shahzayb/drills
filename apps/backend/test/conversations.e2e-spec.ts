@@ -40,7 +40,19 @@ describe('GET /conversations (e2e)', () => {
   // between requests and paging would drop or repeat rows.
   const DISTINCT = 5;
   const TIED = 4;
-  const TOTAL = DISTINCT + TIED;
+
+  // Card 09's fixtures: the only closed rows in the org, at three timestamps
+  // fixed in absolute terms rather than relative to now(). A date-range test
+  // needs an instant it can name twice — once in the fixture and once in the
+  // assertion — and `now() - interval` cannot be named twice.
+  const CLOSED_AT = [
+    '2026-06-15T12:00:00.000Z',
+    '2026-06-16T12:00:00.000Z',
+    '2026-06-17T12:00:00.000Z',
+  ];
+  const CLOSED = CLOSED_AT.length;
+  const OPEN = DISTINCT + TIED;
+  const TOTAL = OPEN + CLOSED;
 
   const listIds = (body: { items: { id: string }[] }) =>
     body.items.map((item) => item.id);
@@ -89,6 +101,16 @@ describe('GET /conversations (e2e)', () => {
                 now() - make_interval(days => 1)
            FROM generate_series(1, $2::int)`,
         [orgId, TIED],
+      );
+
+      // created_at = updated_at here on purpose: it keeps the two sort columns
+      // agreeing for these rows, so a filter test can never accidentally pass
+      // because the rows happened to be ordered differently.
+      await tx.query(
+        `INSERT INTO conversations (org_id, status, created_at, updated_at)
+         SELECT $1::bigint, 'closed', t, t
+           FROM unnest($2::timestamptz[]) AS t`,
+        [orgId, CLOSED_AT],
       );
     });
 
@@ -216,6 +238,104 @@ describe('GET /conversations (e2e)', () => {
     });
   });
 
+  // Card 09. See plans/2026-08-25_drill-09-index-selectivity.md.
+  describe('filtering by status and updated_at range', () => {
+    interface Page {
+      items: { id: string; status: string; updatedAt: string }[];
+      total: number;
+      totalPages: number;
+    }
+
+    const list = (query: Record<string, string>) =>
+      request(app.getHttpServer())
+        .get('/conversations')
+        .query(query)
+        .set('x-org-id', orgId)
+        .expect(200);
+
+    it('returns only open rows for status=open', async () => {
+      const body = (await list({ status: 'open' })).body as Page;
+
+      expect(body.items).toHaveLength(OPEN);
+      expect(body.items.every((item) => item.status === 'open')).toBe(true);
+    });
+
+    it('returns only closed rows for status=closed', async () => {
+      const body = (await list({ status: 'closed' })).body as Page;
+
+      expect(body.items).toHaveLength(CLOSED);
+      expect(body.items.every((item) => item.status === 'closed')).toBe(true);
+    });
+
+    // The highest-value assertion in this file. `total` and `totalPages` come
+    // from a *second* statement, and filtering the page while leaving the count
+    // alone is a silent bug: a pager that promises pages of rows that are not
+    // there. It is why the WHERE is built once in ConversationsService.
+    it('applies the filter to total, not just to items', async () => {
+      const all = (await list({})).body as Page;
+      const closed = (await list({ status: 'closed' })).body as Page;
+
+      expect(all.total).toBe(TOTAL);
+      expect(closed.total).toBe(CLOSED);
+      expect(closed.totalPages).toBe(1);
+    });
+
+    it('treats updatedFrom as inclusive and updatedTo as exclusive', async () => {
+      const body = (
+        await list({ updatedFrom: CLOSED_AT[1], updatedTo: CLOSED_AT[2] })
+      ).body as Page;
+
+      // Exactly the middle row: the lower bound admits its own instant, the
+      // upper bound does not. Anything else here means two adjacent ranges both
+      // claim the same row.
+      expect(body.items).toHaveLength(1);
+      expect(body.total).toBe(1);
+      expect(new Date(body.items[0].updatedAt).toISOString()).toBe(
+        CLOSED_AT[1],
+      );
+    });
+
+    // Written expecting a 400 and it came back 200 — `20260615` is the ISO 8601
+    // *basic* format, which @IsISO8601 accepts and Postgres parses the same way
+    // as the extended one. Kept as a passing test rather than deleted: it is
+    // the difference between "this validator rejects what I imagined" and
+    // "this validator rejects what the standard rejects".
+    it('accepts the ISO 8601 basic format, dashes omitted', async () => {
+      const body =
+        (await list({ updatedFrom: '20260616', updatedTo: '20260617' })) // prettier-ignore
+        .body as Page;
+
+      expect(body.total).toBe(1);
+      expect(new Date(body.items[0].updatedAt).toISOString()).toBe(
+        CLOSED_AT[1],
+      );
+    });
+
+    it('combines the status filter and the range', async () => {
+      const body = (await list({ status: 'open', updatedTo: CLOSED_AT[0] }))
+        .body as Page;
+
+      // Every open row is newer than the closed block, so the range excludes
+      // all of them and the status filter has nothing left to match.
+      expect(body.items).toEqual([]);
+      expect(body.total).toBe(0);
+    });
+
+    // Card 08's budget still has to hold with card 09's filters on: the WHERE
+    // grew, the statement count did not. Without this, a filter added later by
+    // fetching rows and post-filtering in JS would pass every test above.
+    it('still costs three statements with every filter applied', async () => {
+      const response = await list({
+        status: 'closed',
+        updatedFrom: CLOSED_AT[0],
+        updatedTo: CLOSED_AT[2],
+        sort: 'created_at',
+      });
+
+      expect(response.headers['x-query-count']).toBe('3');
+    });
+  });
+
   describe('rejection at the edge', () => {
     // Every one of these is a 400 from the ValidationPipe or the @OrgId
     // decorator. None of them reaches the service, and none of them reaches
@@ -232,6 +352,10 @@ describe('GET /conversations (e2e)', () => {
         { sort: 'id; DROP TABLE conversations' },
       ],
       ['an unknown parameter', { pageSze: '10' }],
+      ['a status outside the two the column allows', { status: 'archived' }],
+      ['an empty status', { status: '' }],
+      ['a date that is not ISO 8601', { updatedFrom: 'yesterday' }],
+      ['a range bound that is a unix timestamp', { updatedFrom: '1750000000' }],
     ];
 
     it.each(bad)('rejects %s', async (_label, query) => {

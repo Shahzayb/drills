@@ -85,6 +85,12 @@ export interface ConversationPage {
   totalPages: number;
 }
 
+/** A WHERE clause and the bind values its placeholders refer to, in order. */
+interface Filters {
+  where: string;
+  params: unknown[];
+}
+
 export interface MessageListItem {
   // bigserial. A string all the way out, same reasoning as assigneeId above.
   id: string;
@@ -145,10 +151,14 @@ export class ConversationsService {
    * written the way the feature request reads). See
    * plans/2026-08-17_drill-08-n-plus-one.md.
    *
-   * This one keeps its explicit `WHERE org_id = $1` where the four below have
-   * none. Two reasons: it is the query drill 05 baselined and card 09
+   * This one keeps its explicit `WHERE c.org_id = $1` where the four below
+   * have none. Two reasons: it is the query drill 05 baselined and card 09
    * compares against, and a belt-and-braces filter on the one hot path is a
    * defensible production choice even with policies underneath.
+   *
+   * Card 09 adds the optional status filter and `updated_at` range, and the
+   * composite index in migration 005 that serves them. Both arms get the same
+   * WHERE from `filtersFor` — see it for why that is built once.
    *
    * `@QueryBudget(3)` lives on the *controller's* handler, not here — see
    * conversations.controller.ts. LoggingInterceptor reads metadata off
@@ -165,11 +175,52 @@ export class ConversationsService {
     // the request. org_id is still a bind parameter, as every *value* must be.
     const sortColumn = SORT_COLUMNS[query.sort];
 
+    const filters = this.filtersFor(orgId, query);
+
     return this.tenants.withOrg(orgId, (tx) =>
       LIST_STRATEGY === 'naive'
-        ? this.listNaive(tx, orgId, query, sortColumn)
-        : this.listBatched(tx, orgId, query, sortColumn),
+        ? this.listNaive(tx, filters, query, sortColumn)
+        : this.listBatched(tx, filters, query, sortColumn),
     );
+  }
+
+  /**
+   * The WHERE the page query and the count query both run, built once.
+   *
+   * Built once because the alternative is the bug this card is most likely to
+   * ship: filter the page and forget the count, and `total`/`totalPages`
+   * describe a different result set than `items` — a pager that promises 12
+   * pages of a 3-page list, with no error anywhere.
+   *
+   * Every statement that uses this aliases `conversations` as `c`, including
+   * the two count queries and the naive arm's page query, which had no alias
+   * before. That is the entire reason the alias exists: one string has to be
+   * valid in all three places.
+   *
+   * The date bounds are half-open — `>= from` and `< to`. A `<=` upper bound on
+   * a timestamptz makes "up to the 25th" include the first instant of the 26th,
+   * so two adjacent ranges both claim the boundary row.
+   *
+   * See plans/2026-08-25_drill-09-index-selectivity.md.
+   */
+  private filtersFor(orgId: string, query: ListConversationsQuery): Filters {
+    const params: unknown[] = [orgId];
+    const clauses = ['c.org_id = $1'];
+
+    if (query.status) {
+      params.push(query.status);
+      clauses.push(`c.status = $${params.length}`);
+    }
+    if (query.updatedFrom) {
+      params.push(query.updatedFrom);
+      clauses.push(`c.updated_at >= $${params.length}::timestamptz`);
+    }
+    if (query.updatedTo) {
+      params.push(query.updatedTo);
+      clauses.push(`c.updated_at < $${params.length}::timestamptz`);
+    }
+
+    return { where: clauses.join(' AND '), params };
   }
 
   /**
@@ -185,7 +236,7 @@ export class ConversationsService {
    */
   private async listNaive(
     tx: TenantQuery,
-    orgId: string,
+    filters: Filters,
     query: ListConversationsQuery,
     sortColumn: string,
   ): Promise<ConversationPage> {
@@ -194,16 +245,16 @@ export class ConversationsService {
 
     const [rows, count] = await Promise.all([
       tx.query<ConversationRow>(
-        `SELECT id, status, assignee_id, created_at, updated_at
-           FROM conversations
-          WHERE org_id = $1
-          ORDER BY ${sortColumn} DESC, id DESC
-          LIMIT $2 OFFSET $3`,
-        [orgId, pageSize, offset],
+        `SELECT c.id, c.status, c.assignee_id, c.created_at, c.updated_at
+           FROM conversations c
+          WHERE ${filters.where}
+          ORDER BY c.${sortColumn} DESC, c.id DESC
+          LIMIT $${filters.params.length + 1} OFFSET $${filters.params.length + 2}`,
+        [...filters.params, pageSize, offset],
       ),
       tx.query<{ total: string }>(
-        `SELECT count(*) AS total FROM conversations WHERE org_id = $1`,
-        [orgId],
+        `SELECT count(*) AS total FROM conversations c WHERE ${filters.where}`,
+        filters.params,
       ),
     ]);
 
@@ -254,7 +305,7 @@ export class ConversationsService {
    */
   private async listBatched(
     tx: TenantQuery,
-    orgId: string,
+    filters: Filters,
     query: ListConversationsQuery,
     sortColumn: string,
   ): Promise<ConversationPage> {
@@ -274,18 +325,19 @@ export class ConversationsService {
            FROM conversations c
            LEFT JOIN memberships m ON m.id = c.assignee_id
            LEFT JOIN users u       ON u.id = m.user_id
-          WHERE c.org_id = $1
+          WHERE ${filters.where}
           ORDER BY c.${sortColumn} DESC, c.id DESC
-          LIMIT $2 OFFSET $3`,
-        [orgId, pageSize, offset],
+          LIMIT $${filters.params.length + 1} OFFSET $${filters.params.length + 2}`,
+        [...filters.params, pageSize, offset],
       ),
-      // The first thing expected to fall over. Postgres cannot shortcut
-      // count(*): MVCC makes visibility per-row, so this reads every matching
-      // row on every request. Free at 24 rows, the whole cost of the page at
-      // 2.5M. Not this card's problem — card 09 is where this changes.
+      // Postgres cannot shortcut count(*): MVCC makes visibility per-row, so
+      // this reads every matching row on every request. Free at 24 rows, the
+      // whole cost of the page at 2.5M. Card 09's index makes it an index-only
+      // scan rather than a heap scan — cheaper, still linear in matching rows.
+      // Cursor paging (which drops the count entirely) is a later card.
       tx.query<{ total: string }>(
-        `SELECT count(*) AS total FROM conversations WHERE org_id = $1`,
-        [orgId],
+        `SELECT count(*) AS total FROM conversations c WHERE ${filters.where}`,
+        filters.params,
       ),
     ]);
 
