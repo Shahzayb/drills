@@ -5,12 +5,11 @@ dead ends are one row each in `history.md`; this file is only what a session nee
 
 ## Current focus
 
-None. Drill 09 shipped — `plans/2026-08-25_drill-09-index-selectivity.md`.
+None.
 
 ## Next step
 
-Drill 10 — caching. `cacheComponents` is off on purpose and Next 16 does not cache `fetch` by
-default, both so this card has something real to turn on. Card text not yet written into this file.
+Drill 10
 
 ## Active plan
 
