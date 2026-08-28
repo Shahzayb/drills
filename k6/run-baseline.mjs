@@ -3,6 +3,7 @@
 //
 //   pnpm load:baseline                          conversations-baseline.js
 //   ORG_ID=150 pnpm load:baseline                tail org
+//   PAGE=100 PAGE_SIZE=50 pnpm load:baseline      page depth / size
 //   NAME=tracing-off pnpm load:baseline          labels the report
 //   node k6/run-baseline.mjs other.js           any script in k6/
 //   node k6/run-baseline.mjs other.js --vus 5   trailing args go to `k6 run`
@@ -27,12 +28,14 @@ if (!existsSync(new URL(script, import.meta.url))) {
 
 // The knobs conversations-baseline.js reads, defaulted to match it. Forwarded to
 // whatever script runs — a script that ignores them is unaffected, which is what
-// keeps this runner generic. VUS and DURATION are also read here, because the
-// report filename is built from them.
+// keeps this runner generic. VUS, DURATION, PAGE and PAGE_SIZE are also read
+// here, because the report filename is built from them.
 const ORG_ID = process.env.ORG_ID || '1';
 const VUS = process.env.VUS || '10';
 const WARMUP = process.env.WARMUP || '20s';
 const DURATION = process.env.DURATION || '60s';
+const PAGE = process.env.PAGE || '1';
+const PAGE_SIZE = process.env.PAGE_SIZE || '20';
 const P95_BUDGET_MS = process.env.P95_BUDGET_MS;
 
 // Which arm of an A/B this run is — the one thing the filename could never
@@ -68,14 +71,14 @@ const stamp =
 const scriptName = script.replace(/\.js$/, '');
 const RUN =
   `${stamp}${NAME ? `-${NAME}` : ''}` +
-  `-${scriptName}-org${ORG_ID}-vus${VUS}-${DURATION}`;
+  `-${scriptName}-org${ORG_ID}-vus${VUS}-page${PAGE}-size${PAGE_SIZE}-${DURATION}`;
 
 // k6 writes the dashboard at the *end* of the run and fails the output if the
 // directory is missing, so a forgotten mkdir costs the full run, not its first
 // second. Same for the summary — handleSummary does not create directories.
 mkdirSync(new URL(`reports/${RUN}/`, import.meta.url), { recursive: true });
 
-const env = { ORG_ID, VUS, WARMUP, DURATION, NAME };
+const env = { ORG_ID, VUS, WARMUP, DURATION, PAGE, PAGE_SIZE, NAME };
 if (P95_BUDGET_MS) env.P95_BUDGET_MS = P95_BUDGET_MS;
 
 // Where the script's handleSummary writes its block. A script without one just
