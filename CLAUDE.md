@@ -90,3 +90,6 @@ Once work is done or a decision is made, `memory-bank/` is out of date and needs
 - Commit chunks of work as you go to prevent context drift, isolate AI bugs, and create clean rollback points.
   - Only applies to any branch other than the `main`.
 - When cutting a release: bump the version in `package.json`, tag the commit in Git (`drill/xx` format), push tags to remote, create a GitHub Release (`gh release create drill/xx --generate-notes`), link resolved issues, create a GitHub Milestone (if needed), and record the milestone in the Memory Bank.
+- Use clear subject/verb/object constructions. Do not use cleft sentences, contrastive appositives, appended-glosses, or trailing clauses.
+- Assume I may edit documents myself. Especially markdown documents.
+- When writing markdown documents, don't include references to conversations or threads a reader would not know about.
