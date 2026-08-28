@@ -25,6 +25,8 @@ const ORG_ID = __ENV.ORG_ID || '1';
 const VUS = Number(__ENV.VUS || 10);
 const WARMUP = __ENV.WARMUP || '20s';
 const DURATION = __ENV.DURATION || '60s';
+const PAGE = Number(__ENV.PAGE || 1);
+const PAGE_SIZE = Number(__ENV.PAGE_SIZE || 20);
 
 // Stretch goal / card 31: fails the run if the measured p95 goes past a stated
 // number. Off unless set, because a failed threshold exits 99 and would abort
@@ -36,7 +38,7 @@ const P95_BUDGET_MS = __ENV.P95_BUDGET_MS;
 // run by hand, and then the summary is printed and not written.
 const SUMMARY_OUT = __ENV.SUMMARY_OUT;
 
-const URL = `${BASE_URL}/conversations?page=1&pageSize=20`;
+const URL = `${BASE_URL}/conversations?page=${PAGE}&pageSize=${PAGE_SIZE}`;
 
 /** '60s' -> 60. Only ever fed the DURATION above. */
 const seconds = (s) => Number(String(s).replace('s', ''));
@@ -121,7 +123,7 @@ export function handleSummary(data) {
 
   const report = [
     '',
-    `  ${NAME ? `name=${NAME} ` : ''}org=${ORG_ID} vus=${VUS} warmup=${WARMUP} measured=${DURATION}`,
+    `  ${NAME ? `name=${NAME} ` : ''}org=${ORG_ID} vus=${VUS} warmup=${WARMUP} measured=${DURATION} page=${PAGE} pageSize=${PAGE_SIZE}`,
     `  measured requests : ${count}`,
     `  p50 / p95 / p99   : ${n(v.med)} / ${n(v['p(95)'])} / ${n(v['p(99)'])} ms`,
     `  min / avg / max   : ${n(v.min)} / ${n(v.avg)} / ${n(v.max)} ms`,
@@ -131,8 +133,10 @@ export function handleSummary(data) {
     `  (incl. warm-up)   : p50 ${n(overall.values.med)}  p95 ${n(overall.values['p(95)'])}  p99 ${n(overall.values['p(99)'])} ms`,
     '',
     // Machine-readable row, for wherever the table is being kept. NAME leads —
-    // an empty leading field keeps every other column where it was.
-    `RESULT,${NAME},${ORG_ID},${VUS},${n(v.med)},${n(v['p(95)'])},${n(v['p(99)'])},${n(rps)},${count}`,
+    // an empty leading field keeps every other column where it was. PAGE and
+    // PAGE_SIZE sit with the other run params after VUS; rows recorded before
+    // they existed have two fewer columns.
+    `RESULT,${NAME},${ORG_ID},${VUS},${PAGE},${PAGE_SIZE},${n(v.med)},${n(v['p(95)'])},${n(v['p(99)'])},${n(rps)},${count}`,
     '',
   ].join('\n');
 
