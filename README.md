@@ -21,7 +21,7 @@ orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose
 | 08 | N+1 detection | Tail org: 2.77x throughput fixing a 37-query request down to 3; `pg_stat_statements` finds it, an ORM couldn't hide it either. |
 | 09 | Indexes and the planner | Seq scan 107.9ms -> index scan 0.255ms; the planner correctly ignores the same index at 31% selectivity when it can't serve the ORDER BY. |
 | 10 | Keyset pagination | Page 5,000: offset 197ms and climbing, keyset 3.9ms flat. Without the `id` tiebreaker the whale skips 128,870 rows in one page turn, 200 OK. |
-| 11 | Full-text search | Whale org: LIKE 3,316ms, GIN 293ms on a 4.1% term and 22.7ms on a 0.045% one. The index was invisible to the planner until `@@` was marked leakproof — RLS was switching it off. |
+| 11 | Full-text search | Whale org under load: 1.12 req/s on LIKE, 442 req/s on a GIN. The 426MB index was invisible to the planner until `@@` was marked leakproof — drill 07's RLS was switching it off — and the tsvector column cost 2,593MB, six times the index. |
 
 Current state and what's open live in `memory-bank/progress.md`; every decision and
 number is one row in `memory-bank/history.md`, with the full reasoning in `plans/`.

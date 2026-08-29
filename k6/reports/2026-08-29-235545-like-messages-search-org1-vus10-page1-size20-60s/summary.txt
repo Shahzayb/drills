@@ -1,0 +1,9 @@
+
+  name=like org=1 vus=10 warmup=20s measured=60s q=export limit=20
+  measured requests : 67
+  p50 / p95 / p99   : 7811.23 / 24705.01 / 24993.52 ms
+  min / avg / max   : 2004.33 / 9677.64 / 25064.46 ms
+  throughput        : 1.12 req/s
+  (incl. warm-up)   : p50 8096.61  p95 24703.21  p99 24986.00 ms
+
+RESULT,like,1,10,export,20,7811.23,24705.01,24993.52,1.12,67
