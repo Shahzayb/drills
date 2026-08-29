@@ -32,6 +32,8 @@ Not every task needs a plan file. Use this as the bar:
 
 ## 3. Implementing a plan
 
+`plans/` contain specs and implementation details.
+
 - Follow the plan as written.
 - If the work turns out to need something the plan didn't cover, **stop and tell me** — don't quietly re-plan mid-implementation.
 
@@ -93,3 +95,5 @@ Once work is done or a decision is made, `memory-bank/` is out of date and needs
 - Use clear subject/verb/object constructions. Do not use cleft sentences, contrastive appositives, appended-glosses, or trailing clauses.
 - Assume I may edit documents myself. Especially markdown documents.
 - When writing markdown documents, don't include references to conversations or threads a reader would not know about.
+- Write-ups go into the `drills/`, not the `plans/`.
+- Clean up any Docker containers, images, and volumes you create, but never touch anything created by the default `docker-compose` setup.
