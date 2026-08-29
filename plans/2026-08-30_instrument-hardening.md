@@ -1,6 +1,6 @@
 # Instrument hardening — make a knob that does nothing fail loudly
 
-**Status:** planned
+**Status:** implemented
 
 ## Context
 
