@@ -48,6 +48,19 @@ if (process.argv[2] === 'live') {
   }
 
   const { arms } = await response.json();
+
+  // The container answering is older than the code that reports arms, which is
+  // the exact situation this command exists to surface. It is also the first
+  // thing that happened when this was run against a live stack.
+  if (!arms) {
+    console.error(
+      `${api}/info answered without an arms block — nest_server is running ` +
+        `code older than src/info/info.controller.ts.\n\n` +
+        `  docker compose up -d --force-recreate nest_server\n`,
+    );
+    process.exit(1);
+  }
+
   console.log(`${api}  (resolved at module load, not re-read per request)\n`);
   for (const [name, value] of Object.entries(arms)) {
     console.log(`  ${name.padEnd(18)} ${value}`);
