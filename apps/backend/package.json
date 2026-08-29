@@ -27,7 +27,8 @@
     "stats": "node db/stats.mjs report",
     "stats:reset": "node db/stats.mjs reset",
     "explain": "node db/explain.mjs",
-    "paging": "node db/paging.mjs"
+    "paging": "node db/paging.mjs",
+    "search": "node db/search.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
