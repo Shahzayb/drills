@@ -89,12 +89,21 @@ const isInfra = (name) => INFRA.test(name) || INFRA_NAMES.has(name);
 
 const failures = [];
 
-/** Every `process.env.X` in a file, in source order, deduplicated. */
+/**
+ * Every knob a file reads, deduplicated.
+ *
+ * Both spellings, and the second one is not optional: converting the
+ * instruments to `knob('ORG_ID', '1')` made every db knob invisible to a
+ * scanner that only knew `process.env.X`, and this check went green while
+ * checking nothing. The red runs in the plan's verification section are what
+ * caught it, which is the drill 08 lesson one level up — a check needs a test
+ * that fails when it stops checking.
+ */
 function envReads(source) {
   const names = new Set();
-  for (const m of source.matchAll(/process\.env\.([A-Z][A-Z0-9_]*)/g)) {
-    names.add(m[1]);
-  }
+  const pattern =
+    /(?:process\.env\.|\bknob(?:Number|List)?\(\s*')([A-Z][A-Z0-9_]*)/g;
+  for (const m of source.matchAll(pattern)) names.add(m[1]);
   return [...names];
 }
 
