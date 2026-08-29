@@ -159,6 +159,15 @@ export default async function ConversationsPage(
             ))}
           </nav>
 
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            <a
+              href={`/search?org=${orgId}`}
+              className="text-zinc-500 underline hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50"
+            >
+              search messages
+            </a>
+          </p>
+
           <nav className="flex items-baseline gap-3">
             <span className="text-xs text-zinc-500 dark:text-zinc-400">
               status
