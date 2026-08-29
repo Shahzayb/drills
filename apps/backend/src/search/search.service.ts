@@ -41,6 +41,14 @@ export type SearchStrategy = 'like' | 'fts';
 const SEARCH_STRATEGY: SearchStrategy =
   process.env.SEARCH_STRATEGY === 'like' ? 'like' : 'fts';
 
+/**
+ * `%`, `_` and `\` are the user's literal text, not pattern syntax. Unescaped,
+ * `100%` matches every message in the org and `snake_case` silently matches
+ * `snakeXcase` too — and only on the `like` arm, which would put a difference
+ * into every A/B run that has nothing to do with the tsvector.
+ */
+const escapeLike = (term: string) => term.replace(/[\\%_]/g, '\\$&');
+
 const toHit = (row: HitRow): MessageHit => ({
   id: row.id,
   conversationId: row.conversation_id,
@@ -65,10 +73,11 @@ export class SearchService {
     orgId: string,
     query: SearchMessagesQuery,
   ): Promise<MessageSearchResult> {
-    const predicate =
-      SEARCH_STRATEGY === 'like'
-        ? `m.message ILIKE '%' || $2 || '%'`
-        : `m.tsv @@ websearch_to_tsquery('english', $2)`;
+    const like = SEARCH_STRATEGY === 'like';
+    const predicate = like
+      ? `m.message ILIKE '%' || $2 || '%' ESCAPE '\\'`
+      : `m.tsv @@ websearch_to_tsquery('english', $2)`;
+    const term = like ? escapeLike(query.q) : query.q;
 
     const items = await this.tenants.withOrg(orgId, async (tx) => {
       const { rows } = await tx.query<HitRow>(
@@ -77,7 +86,7 @@ export class SearchService {
           WHERE m.org_id = $1 AND ${predicate}
           ORDER BY m.created_at DESC, m.id DESC
           LIMIT $3`,
-        [orgId, query.q, query.limit],
+        [orgId, term, query.limit],
       );
       return rows.map(toHit);
     });
