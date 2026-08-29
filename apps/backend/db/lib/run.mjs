@@ -44,15 +44,38 @@ export const knobNumber = (name, fallback) =>
 export const knobList = (name, fallback) =>
   knob(name, fallback).split(',').map(Number);
 
-/** The one Postgres client, built from the five variables env_file supplies. */
-export const client = (user = process.env.POSTGRES_USER) =>
-  new pg.Client({
+/**
+ * The one Postgres client, built from the five variables env_file supplies.
+ *
+ * Missing credentials throw here rather than at connect time. pg reports an
+ * absent password as `SASL: SCRAM-SERVER-FIRST-MESSAGE: client password must be
+ * a string` from inside its auth code, and an absent user by quietly falling
+ * back to the OS username. Neither names the variable that is missing.
+ *
+ * No 'postgres' default for the database: POSTGRES_DB is `drills` here, so that
+ * fallback would connect to a real but wrong database and measure it — the
+ * exact silent-default failure this file exists to stop.
+ */
+export const client = (user = process.env.POSTGRES_USER) => {
+  const missing = ['POSTGRES_PASSWORD', 'POSTGRES_DB'].filter(
+    (n) => !process.env[n],
+  );
+  if (!user) missing.unshift('POSTGRES_USER');
+  if (missing.length) {
+    throw new Error(
+      `${missing.join(', ')} not set — db/ instruments run inside the ` +
+        `container, where env_file supplies them: docker compose exec nest_server`,
+    );
+  }
+
+  return new pg.Client({
     host: process.env.POSTGRES_HOST ?? 'localhost',
     port: Number(process.env.POSTGRES_PORT ?? 5432),
     user,
     password: process.env.POSTGRES_PASSWORD,
     database: process.env.POSTGRES_DB,
   });
+};
 
 /** Median, not mean. One GC pause should not own the number. */
 export const median = (values) => {

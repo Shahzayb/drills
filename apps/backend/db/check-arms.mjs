@@ -26,11 +26,18 @@
 // from anywhere else is invisible to it, the same limit check-tenancy.mjs
 // states about org_id. See plans/2026-08-30_instrument-hardening.md.
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = new URL('../../../', import.meta.url).pathname;
+const root = fileURLToPath(new URL('../../../', import.meta.url));
 const read = (p) => readFileSync(join(root, p), 'utf8');
+
+// This runs on the host, where nothing loads .env — Compose reads it itself, so
+// BACKEND_PORT=4000 there publishes 4000 while plain Node still reads 3002 and
+// reports the server down. The shell still wins over the file, so
+// `BACKEND_PORT=4000 pnpm arms` overrides both.
+if (existsSync(join(root, '.env'))) process.loadEnvFile(join(root, '.env'));
 
 // -------------------------------------------------------------- live arms
 
@@ -47,7 +54,17 @@ if (process.argv[2] === 'live') {
     process.exit(1);
   }
 
-  const { arms } = await response.json();
+  // Whatever is on that port may not be nest_server at all. An unguarded
+  // .json() turns "a dev server answers here" into a SyntaxError stack from the
+  // one command whose job is saying what is answering.
+  const body = await response.json().catch(() => null);
+  if (!body) {
+    console.error(
+      `${api}/info did not answer with JSON — is that nest_server?`,
+    );
+    process.exit(1);
+  }
+  const { arms } = body;
 
   // The container answering is older than the code that reports arms, which is
   // the exact situation this command exists to surface. It is also the first
@@ -131,13 +148,22 @@ function walk(dir, extension, files = []) {
 
 // -------------------------------------------------------- 1. the app's arms
 
-// The nest_server block only — next_app forwards its own subset, and the arms
-// this checks are all read by the API.
+// The nest_server block only — every other service forwards its own subset, and
+// the arms this checks are all read by the API.
+//
+// Ends at the next service key rather than at a named one: keying on
+// `next_app:` meant renaming that service silently widened this to every
+// service below nest_server, and a variable forwarded to the collector would
+// have passed as forwarded to the API.
 const compose = read('docker-compose.yml');
-const nestBlock = compose.slice(
-  compose.indexOf('\n  nest_server:'),
-  compose.indexOf('\n  next_app:'),
-);
+const nestStart = compose.indexOf('\n  nest_server:');
+if (nestStart === -1) {
+  console.error('docker-compose.yml has no nest_server service');
+  process.exit(1);
+}
+const after = compose.slice(nestStart + 1);
+const nextService = after.slice(1).search(/^ {2}\S/m);
+const nestBlock = nextService === -1 ? after : after.slice(0, nextService + 1);
 const forwardedToNest = new Set(
   [...nestBlock.matchAll(/^ +- ([A-Z][A-Z0-9_]*)=\$\{/gm)].map((m) => m[1]),
 );

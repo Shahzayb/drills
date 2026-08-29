@@ -17,6 +17,14 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+// This runs on the host, where nothing loads .env — Compose reads it itself, so
+// BACKEND_PORT=4000 there publishes 4000 while plain Node still reads 3002,
+// finds nothing, and records `arms: null` in every run.json without a word. The
+// shell still wins over the file.
+const envFile = fileURLToPath(new URL('../.env', import.meta.url));
+if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 const [script = 'conversations-baseline.js', ...k6Args] = process.argv.slice(2);
 
@@ -132,12 +140,18 @@ const args = [
 // before k6 starts, so neither touches the measured window. A number whose arm
 // and checkout cannot be recovered is a number that gets retyped into prose
 // with its conditions left behind — drill 08's README defect.
-const arms = await fetch(
-  `http://localhost:${process.env.BACKEND_PORT || 3002}/info`,
-)
+//
+// Timed out rather than left open: a server that accepts the connection and
+// never answers — nest_server mid-recompile, a stale process on the port — has
+// no timeout of its own worth waiting for, and this sits in front of the run.
+const infoUrl = `http://localhost:${process.env.BACKEND_PORT || 3002}/info`;
+const arms = await fetch(infoUrl, { signal: AbortSignal.timeout(2000) })
   .then((response) => (response.ok ? response.json() : null))
   .then((body) => body?.arms ?? null)
   .catch(() => null);
+
+// Recorded runs are the point, so say it rather than leaving a null in the file.
+if (!arms) console.warn(`no arm state from ${infoUrl} — recording arms: null`);
 
 const gitSha = spawnSync('git', ['rev-parse', '--short', 'HEAD'], {
   encoding: 'utf8',
