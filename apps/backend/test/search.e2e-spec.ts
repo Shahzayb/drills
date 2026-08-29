@@ -103,7 +103,9 @@ describe('GET /messages/search (e2e)', () => {
       // and silently leave the other's rows behind.
       for (const id of [orgId, otherOrgId]) {
         await tenants.withOrg(id, async (tx) => {
-          await tx.query(`DELETE FROM messages WHERE org_id = $1::bigint`, [id]);
+          await tx.query(`DELETE FROM messages WHERE org_id = $1::bigint`, [
+            id,
+          ]);
           await tx.query(
             `DELETE FROM conversations WHERE org_id = $1::bigint`,
             [id],
