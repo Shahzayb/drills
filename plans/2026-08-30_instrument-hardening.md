@@ -1,6 +1,6 @@
 # Instrument hardening — make a knob that does nothing fail loudly
 
-**Status:** phase 1 implemented (PR #8) · phase 2 planned
+**Status:** implemented (both phases)
 
 ## Context
 
@@ -100,6 +100,10 @@ This does not go into `check-tenancy.mjs`. That script answers whether the schem
 this one answers whether the harness is wired, and merging them would produce a checker with
 two unrelated subjects.
 
+The forwarding half of this is superseded by 6.4: once the runner generates the `-e` flags, the
+check reads the catalog instead of the `package.json` scripts. The reserved-name half is
+unchanged.
+
 ### 4. One run record per run, so numbers stop being retyped
 
 Each instrument writes `apps/backend/db/reports/<stamp>-<instrument>-<sub>[-<name>]/` containing
@@ -123,7 +127,7 @@ none of that cost.
 
 ### 6. A runner and a host/container split (phase 2)
 
-Everything above is phase 1 and is shipped. This section is planned and not yet built. It exists
+Everything above is phase 1. This section is phase 2, shipped on the same branch. It exists
 because phase 1 made one thing measurably worse and left another untouched.
 
 `package.json` holds 48 scripts and 3,780 characters. Two families are 72% of that, and both are
@@ -245,11 +249,16 @@ still coherent without it.
 
 #### 6.4 `check:arms` retargets and shrinks
 
-Check 2 today walks root `package.json` → `apps/backend/package.json` → instrument source to ask
-whether a human remembered a `-e` flag. Once the runner generates those flags that bug class stops
+Check 2 walked root `package.json` → `apps/backend/package.json` → instrument source to ask
+whether a human remembered a `-e` flag. The runner generates those flags, so that bug class stops
 existing, and the check becomes catalog-versus-source in one file pair, in both directions: a knob
 read but absent from the catalog is unreachable, and a catalog entry no instrument reads is a dead
 flag. The second is a new catch. Checks 1 and 3 are unaffected.
+
+`GIT_SHA` is the one knob the runner forwards without a catalog entry, because it computes it
+rather than reading it. The check matches the run-record knobs by name anywhere in the runner —
+the same crude test check 3 uses on the k6 runner, and it is stated here for the same reason: it
+catches a rename that half-lands, not a name mentioned and unused.
 
 ## What does not change
 
@@ -321,6 +330,18 @@ Phase 2, same red-then-green rule:
     still opens an interactive prompt.
 13. Every command in 1-6 above still runs verbatim.
 
+Results. `package.json` went from 3,780 characters to 2,298 across the same 48 scripts; the
+longest is now `docker:reset` at 124, where it was `db:activity` at 235, and 18 scripts over 80
+characters became 7. `apps/backend/package.json` lost its four passthroughs. Bare `pnpm db:paging`
+prints its three subcommands and six knobs; `--orgg 150` fails with `Unknown option '--orgg'`
+before anything connects. `pnpm db:paging depths --org 1 --depths 1,10 --rounds 1` and
+`ORG_ID=1 DEPTHS=1,10 ROUNDS=1 pnpm db:paging depths` wrote byte-identical `knobs` blocks, with
+`PAGE_SIZE` and `MAX_PAGES` still reading `(default)` — the runner forwards nothing for a knob
+nobody set, so provenance survives. Both new `check:arms` directions go red: a catalog entry no
+instrument reads is named a flag that does nothing, and a knob removed from the catalog is named
+unreachable. `pnpm db:log:on` / `:status` / `:off` round-trips −1 → 0 → −1. `pnpm db:test` 85/85,
+`db:test:naive` still exactly 2 failed / 83 passed.
+
 A review of phase 1 found five defects, fixed in `f0a17be`: `BACKEND_PORT` read on the host
 without loading `.env`, which recorded `arms: null` in every k6 `run.json` without a word; the
 compose slice keyed on the literal `next_app:` service name, so renaming that service would have
@@ -367,10 +388,10 @@ instruments, so landing it first guaranteed a conflict. `drill-11` merged first,
 landed against a tree that already contained `search.mjs`, bringing it into `lib/run.mjs` in the
 same pass.
 
-Phase 2 waits for PR #8 to merge. It moves `check-arms.mjs` and rewrites the four instrument
-scripts that PR touches, so landing the two together would mean reviewing a wiring change and a
-layout change in one diff. The plan edit that added 6 rides along with PR #8, because the
-`Out of scope` reversal annotates a decision made there; the implementation does not.
+Phase 2 landed on the same branch, by decision rather than by default. Splitting it into a
+follow-up would have left PR #8 shipping a `-e` forwarding check whose entire subject —
+hand-maintained `-e` lists — the next PR deletes. The two are one argument, so they are one
+branch.
 
 ## Out of scope
 

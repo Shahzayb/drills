@@ -15,8 +15,10 @@
 // exports TERM as the terminal type, so `-e TERM` forwards 'xterm-256color'
 // into the instrument (drill 11).
 //
-// Runs on the HOST, not in the container, unlike db/check-tenancy.mjs — it
-// reads docker-compose.yml and package.json, which are not mounted.
+// Lives in scripts/ because it runs on the HOST: it reads docker-compose.yml
+// and scripts/measure.mjs, neither of which is mounted into the container.
+// That is the split — scripts/ runs on your machine, apps/backend/db/ runs in
+// the container, and db/check-tenancy.mjs is the container-side counterpart.
 //
 // This does not go in check-tenancy.mjs. That script answers whether the schema
 // is protected, this one answers whether the harness is wired, and one checker
@@ -30,7 +32,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = fileURLToPath(new URL('../../../', import.meta.url));
+const root = fileURLToPath(new URL('../', import.meta.url));
 const read = (p) => readFileSync(join(root, p), 'utf8');
 
 // This runs on the host, where nothing loads .env — Compose reads it itself, so
@@ -187,24 +189,38 @@ for (const file of walk('apps/backend/src', '.ts')) {
 
 // -------------------------------------------- 2. the instruments' own knobs
 
-const rootScripts = JSON.parse(read('package.json')).scripts;
-const backendScripts = JSON.parse(read('apps/backend/package.json')).scripts;
+// scripts/measure.mjs declares every knob once and generates the -e flags from
+// that declaration, so "someone forgot a flag" is no longer reachable. What is
+// still reachable is the declaration disagreeing with the code: a knob the
+// instrument reads that the catalog never sends, and a catalog entry no
+// instrument reads. Both directions are checked.
+const catalog = read('scripts/measure.mjs');
 
-/** The root scripts that end up running `db/<file>.mjs`. */
-function invokersOf(file) {
-  const backendNames = Object.entries(backendScripts)
-    .filter(([, body]) => body.includes(file))
-    .map(([name]) => name);
+/** Every `env:` name the catalog declares for one instrument file. */
+function catalogFor(file) {
+  const entry = catalog.indexOf(`file: '${file}'`);
+  if (entry === -1) return null;
 
-  return Object.entries(rootScripts).filter(([, body]) =>
-    backendNames.some((name) => new RegExp(`run ${name}(\\s|$)`).test(body)),
+  // From this instrument's `file:` to the next one, so knobs are not read out
+  // of a neighbouring block.
+  const next = catalog.indexOf("file: 'db/", entry + 1);
+  const block = catalog.slice(entry, next === -1 ? undefined : next);
+  return new Set(
+    [...block.matchAll(/env: '([A-Z][A-Z0-9_]*)'/g)].map((m) => m[1]),
   );
 }
 
+// Forwarded for every instrument rather than per block: NAME through the
+// catalog's COMMON list, GIT_SHA computed by the runner itself. Matched by name
+// anywhere in the file, the same crude test check 3 uses on the k6 runner — it
+// catches a rename that half-lands, not a name that is mentioned and unused.
+const common = new Set(
+  RUN_RECORD_KNOBS.filter((n) => new RegExp(`\\b${n}\\b`).test(catalog)),
+);
+
 for (const path of walk('apps/backend/db', '.mjs')) {
-  // lib/ is shared, so its knobs are charged to the files that import it, and
-  // this file is a checker rather than an instrument.
-  if (path.includes('/lib/') || path.endsWith('check-arms.mjs')) continue;
+  // lib/ is shared, so its knobs are charged to the files that import it.
+  if (path.includes('/lib/')) continue;
 
   const file = path.replace('apps/backend/', '');
   const source = read(path);
@@ -220,22 +236,36 @@ for (const path of walk('apps/backend/db', '.mjs')) {
     }
   }
 
-  const invokers = invokersOf(file);
-  if (!invokers.length && required.length) {
-    failures.push(
-      `${file} reads ${required.join(', ')} and no root script runs it`,
-    );
+  const declared = catalogFor(file);
+
+  // seed.mjs, stats.mjs and check-tenancy.mjs are run by other scripts and read
+  // no knobs of their own; an instrument that reads one must be in the catalog.
+  if (!declared) {
+    if (required.length) {
+      failures.push(
+        `${file} reads ${required.join(', ')} but scripts/measure.mjs has no ` +
+          `catalog entry for it — nothing forwards them`,
+      );
+    }
+    continue;
   }
 
-  for (const [scriptName, body] of invokers) {
-    for (const name of required) {
-      if (RESERVED.has(name)) continue;
-      if (!new RegExp(`-e ${name}(\\s|=)`).test(body)) {
-        failures.push(
-          `pnpm ${scriptName} does not forward -e ${name}, which ${file} reads ` +
-            `— setting it in the shell does nothing`,
-        );
-      }
+  for (const name of required) {
+    if (RESERVED.has(name)) continue;
+    if (!declared.has(name) && !common.has(name)) {
+      failures.push(
+        `${file} reads ${name}, which scripts/measure.mjs does not declare ` +
+          `— setting it in the shell does nothing`,
+      );
+    }
+  }
+
+  for (const name of declared) {
+    if (!envReads(source).includes(name)) {
+      failures.push(
+        `scripts/measure.mjs declares ${name} for ${file}, which does not read ` +
+          `it — a flag that does nothing`,
+      );
     }
   }
 }
