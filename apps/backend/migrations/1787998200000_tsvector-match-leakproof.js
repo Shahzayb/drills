@@ -7,10 +7,11 @@
  * With RLS on `messages` and `@@` not leakproof, the planner does not merely
  * cost the GIN index badly — it generates no index path for it. `SET
  * enable_seqscan = off` leaves the sequential scan marked `Disabled: true` and
- * still chooses it, because there is nothing else. Whale org, one term:
+ * still chooses it, because there is nothing else. Whale org, ERR_2452, median
+ * of 5 client round-trips with the first discarded (`db:search plans`):
  *
- *   not leakproof   2,383 ms   Parallel Seq Scan, 651,104 buffer reads
- *   leakproof          23 ms   Bitmap Index Scan on messages_org_tsv_idx
+ *   not leakproof   3,621 ms   Seq Scan, 707,129 buffer reads
+ *   leakproof          25 ms   Bitmap Heap Scan on messages_org_tsv_idx
  *
  * WHY
  *

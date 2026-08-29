@@ -15,10 +15,13 @@
 // Knobs (forwarded by the root script with `docker compose exec -e`, without
 // which they silently do nothing):
 //
-//   ORG_ID=150   the tail org — several of these numbers invert there
-//   TERM=refund  a single term instead of the default ladder
-//   ROUNDS=5     timed repetitions per cell, median reported
-//   LIMIT=20     page size
+//   ORG_ID=150          the tail org — several of these numbers invert there
+//   SEARCH_TERM=refund  a single term instead of the default ladder
+//   ROUNDS=5            timed repetitions per cell, median reported
+//   LIMIT=20            page size
+//
+// SEARCH_TERM, not TERM: every interactive shell exports TERM as the terminal
+// type, so `-e TERM` would forward 'xterm-256color' in as the search term.
 //
 // Full reasoning and the captured output:
 // plans/2026-08-29_drill-11-full-text-search.md.
@@ -58,7 +61,9 @@ const INDEX_NAME = 'messages_org_tsv_idx';
 // differently enough that reporting only one of them would be a lie by
 // selection. Counted with
 //   select count(*) from messages where org_id = 1 and message ilike '%export%';
-const TERMS = process.env.TERM ? [process.env.TERM] : ['export', 'ERR_2452'];
+const TERMS = process.env.SEARCH_TERM
+  ? [process.env.SEARCH_TERM]
+  : ['export', 'ERR_2452'];
 
 const client = new pg.Client({
   host: process.env.POSTGRES_HOST ?? 'localhost',
@@ -184,13 +189,24 @@ async function asOwner(fn) {
   }
 }
 
-/** Runs `fn` with the GIN index dropped and puts it back by rolling back to a
- *  savepoint. DDL is transactional in Postgres, which is what makes the "before"
- *  plan reproducible after the migration has landed. */
+/**
+ * Runs `fn` with the GIN index dropped and puts it back by rolling back to a
+ * savepoint. DDL is transactional in Postgres, which is what makes the "before"
+ * plan reproducible after the migration has landed.
+ *
+ * DROP INDEX takes ACCESS EXCLUSIVE on `messages` and holds it until the
+ * savepoint unwinds, so every other session's reads and writes queue behind
+ * `fn()` — which in `indexes` mode is a whole CREATE INDEX. lock_timeout makes
+ * a contended run fail here with a plain error instead of blocking the app and
+ * charging the wait to whatever else was being measured at the time.
+ */
 async function withoutIndex(fn) {
   await client.query('SAVEPOINT no_index');
   try {
-    await asOwner(() => client.query(`DROP INDEX ${INDEX_NAME}`));
+    await asOwner(async () => {
+      await client.query(`SET LOCAL lock_timeout = '5s'`);
+      await client.query(`DROP INDEX ${INDEX_NAME}`);
+    });
     await fn();
   } finally {
     await client.query('ROLLBACK TO SAVEPOINT no_index');
@@ -268,23 +284,40 @@ async function plans() {
   const chart = [];
 
   for (const term of TERMS) {
-    const matches = Number(
-      await scalar(
-        `SELECT count(*) FROM messages WHERE org_id = $1 AND message ILIKE '%' || $2 || '%'`,
+    // One count per predicate, not one per term. The two arms do not match the
+    // same rows — that disagreement is the whole of `gaps` mode — so printing
+    // the ILIKE count beside an FTS row reports the wrong query's answer.
+    const counted = (predicate) =>
+      scalar(
+        `SELECT count(*) FROM messages WHERE org_id = $1 AND ${predicate}`,
         [ORG_ID, term],
-      ),
-    );
+      ).then(Number);
 
-    const row = async (arm, sql) => {
+    const matched = {
+      like: await counted(`message ILIKE '%' || $2 || '%'`),
+      fts: await counted(`tsv @@ websearch_to_tsquery('english', $2)`),
+    };
+
+    /** Every row in this table is a median of ROUNDS client round-trips with
+     *  the first discarded — controls included. An EXPLAIN ANALYZE's own
+     *  `Execution Time` is a single cold run and excludes planning and the
+     *  round-trip, so mixing the two under one `median ms` header would compare
+     *  a cold server-side number against a warm end-to-end one. */
+    const print = async (arm, sql, matches) => {
       const plan = await explainJson(sql, [ORG_ID, term]);
       const scan = findScan(plan.Plan) ?? plan.Plan;
       const ms = await timed(sql, [ORG_ID, term]);
-      chart.push({ label: `${term} ${arm}`, ms });
       console.log(
         `  ${term.padEnd(15)} ${arm.padEnd(18)} ${scan['Node Type'].padEnd(31)}` +
           `${matches.toLocaleString().padStart(9)}  ${ms.toFixed(2).padStart(10)}   ` +
           `${scan['Shared Hit Blocks']}/${scan['Shared Read Blocks']}`,
       );
+      return ms;
+    };
+
+    const row = async (arm, sql) => {
+      const ms = await print(arm, sql, matched[arm]);
+      chart.push({ label: `${term} ${arm}`, ms });
     };
 
     await row('like', likeQuery);
@@ -293,16 +326,7 @@ async function plans() {
     // The two controls. Without them "FTS is fast" is a claim about tsvector
     // rather than about the index, and the reason the index nearly went unused
     // stays invisible.
-    const control = async (arm) => {
-      const plan = await explainJson(ftsQuery, [ORG_ID, term]);
-      const scan = findScan(plan.Plan) ?? plan.Plan;
-      console.log(
-        `  ${term.padEnd(15)} ${arm.padEnd(18)} ${scan['Node Type'].padEnd(31)}` +
-          `${matches.toLocaleString().padStart(9)}  ` +
-          `${plan['Execution Time'].toFixed(2).padStart(10)}   ` +
-          `${scan['Shared Hit Blocks']}/${scan['Shared Read Blocks']}`,
-      );
-    };
+    const control = (arm) => print(arm, ftsQuery, matched.fts);
 
     // The index is present and valid the whole time this runs. It is the
     // security qual from drill 07's RLS policy that puts it out of reach.
@@ -332,6 +356,11 @@ async function plans() {
  * COLUMN costs more disk than the GIN index built on top of it.
  */
 async function indexes() {
+  console.log(
+    '\n  Takes ACCESS EXCLUSIVE on messages for the length of each build.\n' +
+      '  Every other session blocks on it — do not run this beside k6.\n',
+  );
+
   await openScope();
 
   // Session-level and stated, because a build time without its
