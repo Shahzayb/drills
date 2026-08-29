@@ -23,7 +23,13 @@
 //
 // Full reasoning and the captured output: plans/2026-08-25_drill-09-index-selectivity.md.
 
-import pg from 'pg';
+import {
+  client as pgClient,
+  header,
+  knob,
+  knobList,
+  record,
+} from './lib/run.mjs';
 
 const subcommand = process.argv[2];
 const USAGE =
@@ -57,21 +63,21 @@ if (!APP_USER) {
   process.exit(1);
 }
 
-const client = new pg.Client({
-  host: process.env.POSTGRES_HOST ?? 'localhost',
-  port: Number(process.env.POSTGRES_PORT ?? 5432),
-  user: process.env.POSTGRES_USER,
-  password: process.env.POSTGRES_PASSWORD,
-  database: process.env.POSTGRES_DB,
-});
+const client = pgClient();
 
-// `||`, not `??`. The root script forwards these with `docker compose exec -e
-// ORG_ID`, and an unset host variable arrives inside the container as the empty
-// string rather than as absent — `??` would keep it and every query would run
-// for org ''. Before the -e flags existed the variable never arrived at all:
-// `ORG_ID=150 pnpm db:explain plans` silently measured org 1 for the whole of
-// drill 09. A knob that quietly does nothing, again.
-const ORG_ID = process.env.ORG_ID || '1';
+// The `||` rule these knobs are read under, and the reason the empty string
+// counts as absent, live in db/lib/run.mjs. `ORG_ID=150 pnpm db:explain plans`
+// silently measured org 1 for the whole of drill 09 before the -e flags existed.
+const ORG_ID = knob('ORG_ID', '1');
+const STATUS = knob('STATUS', 'closed');
+// The two subcommands that read SORT want different columns by default, so the
+// default is the subcommand's rather than one shared value.
+const SORT = knob(
+  'SORT',
+  subcommand === 'keyset' ? 'updated_at' : 'created_at',
+);
+const DAYS = knobList('DAYS', '548,365,270,180,120,90,60,45,30,21,14,7,3,1');
+const DEPTHS = knobList('DEPTHS', '1,100,5000');
 const INDEX_NAME = 'conversations_org_updated_idx';
 const PAGE_SIZE = 50;
 
@@ -306,8 +312,8 @@ async function sweep() {
   // Same reason as plans(): the app role sees nothing until the scope is open.
   await openScope();
 
-  const status = process.env.STATUS || 'closed';
-  const sortColumn = process.env.SORT || 'created_at';
+  const status = STATUS;
+  const sortColumn = SORT;
   const at = await anchor();
 
   const { rows: totalRows } = await client.query(
@@ -329,9 +335,7 @@ async function sweep() {
 
   // DAYS overrides the ladder, so the flip found by the coarse pass can be
   // bisected without editing the file: DAYS=90,85,80,75,70 pnpm db:explain sweep
-  const ladder = process.env.DAYS
-    ? process.env.DAYS.split(',').map(Number)
-    : [548, 365, 270, 180, 120, 90, 60, 45, 30, 21, 14, 7, 3, 1];
+  const ladder = DAYS;
 
   const sql = listQuery(sortColumn);
   for (const days of ladder) {
@@ -567,8 +571,8 @@ async function cursorAt(sortColumn, depth) {
 async function keyset() {
   await openScope();
 
-  const sortColumn = process.env.SORT || 'updated_at';
-  const depths = (process.env.DEPTHS || '1,100,5000').split(',').map(Number);
+  const sortColumn = SORT;
+  const depths = DEPTHS;
 
   console.log(
     `org ${ORG_ID}  sort=${sortColumn}  pageSize=${PAGE_SIZE}  ` +
@@ -630,6 +634,8 @@ async function keyset() {
 
 // -------------------------------------------------------------------- main
 
+header(`explain ${subcommand}`);
+
 await client.connect();
 try {
   if (subcommand === 'plans') await plans();
@@ -640,3 +646,5 @@ try {
 } finally {
   await client.end();
 }
+
+record('explain', subcommand, {});

@@ -1,0 +1,235 @@
+// Fails when a knob cannot reach the code that reads it. `pnpm check:arms`
+// from the repo root.
+//
+// Two questions, both of which have cost this repo a set of numbers:
+//
+//   1. Is every arm switch read in apps/backend/src forwarded by the
+//      nest_server `environment:` list? A variable missing from that list is
+//      not forwarded at all — `KEYSET_TIEBREAK=off docker compose up -d`
+//      looks like it works and runs the default arm (drill 10).
+//   2. Is every knob read in db/ forwarded by `docker compose exec -e` in the
+//      root script that invokes it? Drill 09's ORG_ID and drill 11's INSERTS
+//      were not, and both printed the default back as though they had arrived.
+//
+// Plus a name check: a knob may not be called TERM. Every interactive shell
+// exports TERM as the terminal type, so `-e TERM` forwards 'xterm-256color'
+// into the instrument (drill 11).
+//
+// Runs on the HOST, not in the container, unlike db/check-tenancy.mjs — it
+// reads docker-compose.yml and package.json, which are not mounted.
+//
+// This does not go in check-tenancy.mjs. That script answers whether the schema
+// is protected, this one answers whether the harness is wired, and one checker
+// with two subjects is harder to read than two with one each.
+//
+// Honest limit: it finds `process.env.X` reads in two directories. A knob read
+// from anywhere else is invisible to it, the same limit check-tenancy.mjs
+// states about org_id. See plans/2026-08-30_instrument-hardening.md.
+
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+
+const root = new URL('../../../', import.meta.url).pathname;
+const read = (p) => readFileSync(join(root, p), 'utf8');
+
+// -------------------------------------------------------------- live arms
+
+// `pnpm arms` — what the running container is actually serving, as opposed to
+// what the shell believes it asked for. The static check below proves a
+// variable can arrive; this proves it did. A container started before the
+// variable changed is the other half of drill 10's lost evening.
+if (process.argv[2] === 'live') {
+  const api = `http://localhost:${process.env.BACKEND_PORT || 3002}`;
+  const response = await fetch(`${api}/info`).catch(() => null);
+
+  if (!response?.ok) {
+    console.error(`no answer from ${api}/info — is nest_server up?`);
+    process.exit(1);
+  }
+
+  const { arms } = await response.json();
+  console.log(`${api}  (resolved at module load, not re-read per request)\n`);
+  for (const [name, value] of Object.entries(arms)) {
+    console.log(`  ${name.padEnd(18)} ${value}`);
+  }
+  process.exit(0);
+}
+
+// Supplied by `env_file: .env` on every service, so they need no -e flag and no
+// entry in the environment list. Connection details, never an A/B arm.
+const INFRA = /^(POSTGRES_|REDIS_)/;
+const INFRA_NAMES = new Set([
+  'PORT',
+  'NODE_ENV',
+  'BACKEND_INTERNAL_URL',
+  'BACKEND_PORT',
+  'FRONTEND_PORT',
+]);
+
+// Names the shell already owns. TERM is the one that has actually bitten.
+const RESERVED = new Set([
+  'TERM',
+  'PATH',
+  'HOME',
+  'USER',
+  'SHELL',
+  'LANG',
+  'PWD',
+  'EDITOR',
+  'PAGER',
+  'LOGNAME',
+  'TMPDIR',
+]);
+
+// Written by lib/run.mjs rather than by the instrument, so every instrument
+// that imports it needs both forwarded.
+const RUN_RECORD_KNOBS = ['NAME', 'GIT_SHA'];
+
+const isInfra = (name) => INFRA.test(name) || INFRA_NAMES.has(name);
+
+const failures = [];
+
+/** Every `process.env.X` in a file, in source order, deduplicated. */
+function envReads(source) {
+  const names = new Set();
+  for (const m of source.matchAll(/process\.env\.([A-Z][A-Z0-9_]*)/g)) {
+    names.add(m[1]);
+  }
+  return [...names];
+}
+
+function walk(dir, extension, files = []) {
+  for (const entry of readdirSync(join(root, dir))) {
+    const path = join(dir, entry);
+    if (statSync(join(root, path)).isDirectory()) walk(path, extension, files);
+    else if (entry.endsWith(extension)) files.push(path);
+  }
+  return files;
+}
+
+// -------------------------------------------------------- 1. the app's arms
+
+// The nest_server block only — next_app forwards its own subset, and the arms
+// this checks are all read by the API.
+const compose = read('docker-compose.yml');
+const nestBlock = compose.slice(
+  compose.indexOf('\n  nest_server:'),
+  compose.indexOf('\n  next_app:'),
+);
+const forwardedToNest = new Set(
+  [...nestBlock.matchAll(/^ +- ([A-Z][A-Z0-9_]*)=\$\{/gm)].map((m) => m[1]),
+);
+
+for (const file of walk('apps/backend/src', '.ts')) {
+  if (file.includes('.spec.')) continue;
+  for (const name of envReads(read(file))) {
+    if (isInfra(name)) continue;
+    if (RESERVED.has(name)) {
+      failures.push(`${file} reads ${name}, which the shell already owns`);
+      continue;
+    }
+    if (!forwardedToNest.has(name)) {
+      failures.push(
+        `${file} reads ${name}, missing from the nest_server environment: list ` +
+          `in docker-compose.yml — setting it in the shell does nothing`,
+      );
+    }
+  }
+}
+
+// -------------------------------------------- 2. the instruments' own knobs
+
+const rootScripts = JSON.parse(read('package.json')).scripts;
+const backendScripts = JSON.parse(read('apps/backend/package.json')).scripts;
+
+/** The root scripts that end up running `db/<file>.mjs`. */
+function invokersOf(file) {
+  const backendNames = Object.entries(backendScripts)
+    .filter(([, body]) => body.includes(file))
+    .map(([name]) => name);
+
+  return Object.entries(rootScripts).filter(([, body]) =>
+    backendNames.some((name) => new RegExp(`run ${name}(\\s|$)`).test(body)),
+  );
+}
+
+for (const path of walk('apps/backend/db', '.mjs')) {
+  // lib/ is shared, so its knobs are charged to the files that import it, and
+  // this file is a checker rather than an instrument.
+  if (path.includes('/lib/') || path.endsWith('check-arms.mjs')) continue;
+
+  const file = path.replace('apps/backend/', '');
+  const source = read(path);
+  const required = envReads(source).filter((n) => !isInfra(n));
+
+  // Only the files that write a run record — importing lib/run.mjs for the
+  // client alone needs neither.
+  if (source.includes('record(')) required.push(...RUN_RECORD_KNOBS);
+
+  for (const name of required) {
+    if (RESERVED.has(name)) {
+      failures.push(`${file} reads ${name}, which the shell already owns`);
+    }
+  }
+
+  const invokers = invokersOf(file);
+  if (!invokers.length && required.length) {
+    failures.push(
+      `${file} reads ${required.join(', ')} and no root script runs it`,
+    );
+  }
+
+  for (const [scriptName, body] of invokers) {
+    for (const name of required) {
+      if (RESERVED.has(name)) continue;
+      if (!new RegExp(`-e ${name}(\\s|=)`).test(body)) {
+        failures.push(
+          `pnpm ${scriptName} does not forward -e ${name}, which ${file} reads ` +
+            `— setting it in the shell does nothing`,
+        );
+      }
+    }
+  }
+}
+
+// ------------------------------------------------------ 3. the k6 scripts
+
+// k6 reads its knobs from __ENV, and k6/run-baseline.mjs decides which ones
+// cross into the container. A script reading a name the runner does not forward
+// gets the script's own default, silently, exactly like the two cases above.
+//
+// Crude on purpose: it asks whether the name appears anywhere in the runner,
+// not whether it reaches the env object. A rename that half-lands is the case
+// it catches, and that is the case that has happened.
+const runner = read('k6/run-baseline.mjs');
+
+for (const file of readdirSync(join(root, 'k6')).filter((f) =>
+  f.endsWith('.js'),
+)) {
+  const source = read(join('k6', file));
+  const names = new Set(
+    [...source.matchAll(/__ENV\.([A-Z][A-Z0-9_]*)/g)].map((m) => m[1]),
+  );
+
+  for (const name of names) {
+    // Set by the runner itself rather than by the operator.
+    if (name === 'SUMMARY_OUT') continue;
+    if (!new RegExp(`\\b${name}\\b`).test(runner)) {
+      failures.push(
+        `k6/${file} reads __ENV.${name}, which k6/run-baseline.mjs does not ` +
+          `forward — setting it in the shell does nothing`,
+      );
+    }
+  }
+}
+
+// ------------------------------------------------------------------ verdict
+
+if (failures.length) {
+  console.error(`check:arms — ${failures.length} problem(s)\n`);
+  for (const failure of failures) console.error(`  ✗ ${failure}`);
+  console.error('');
+  process.exit(1);
+}
+
+console.log('check:arms — every knob reaches the code that reads it');

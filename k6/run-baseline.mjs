@@ -16,7 +16,7 @@
 // still yours to run, and skipping them moves the whale's count(*) by 2x.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 
 const [script = 'conversations-baseline.js', ...k6Args] = process.argv.slice(2);
 
@@ -84,8 +84,21 @@ mkdirSync(new URL(`reports/${RUN}/`, import.meta.url), { recursive: true });
 // It is NOT in the report filename: a search term can be any text, and the
 // filename is a filename. messages-search.js prints it in the summary instead.
 const Q = process.env.Q || 'export';
+// Both k6 scripts read it, so it is a knob whether or not anyone sets it. The
+// default is the Compose service name, which is where k6 runs.
+const BASE_URL = process.env.BASE_URL || 'http://nest_server:3002';
 
-const env = { ORG_ID, VUS, WARMUP, DURATION, PAGE, PAGE_SIZE, NAME, Q };
+const env = {
+  ORG_ID,
+  VUS,
+  WARMUP,
+  DURATION,
+  PAGE,
+  PAGE_SIZE,
+  NAME,
+  Q,
+  BASE_URL,
+};
 if (P95_BUDGET_MS) env.P95_BUDGET_MS = P95_BUDGET_MS;
 
 // Where the script's handleSummary writes its block. A script without one just
@@ -115,7 +128,40 @@ const args = [
   ...k6Args,
 ];
 
+// The arm state the API is serving, and the commit under test. Both are read
+// before k6 starts, so neither touches the measured window. A number whose arm
+// and checkout cannot be recovered is a number that gets retyped into prose
+// with its conditions left behind — drill 08's README defect.
+const arms = await fetch(
+  `http://localhost:${process.env.BACKEND_PORT || 3002}/info`,
+)
+  .then((response) => (response.ok ? response.json() : null))
+  .then((body) => body?.arms ?? null)
+  .catch(() => null);
+
+const gitSha = spawnSync('git', ['rev-parse', '--short', 'HEAD'], {
+  encoding: 'utf8',
+}).stdout?.trim();
+
+writeFileSync(
+  new URL(`reports/${RUN}/run.json`, import.meta.url),
+  JSON.stringify(
+    {
+      instrument: 'k6',
+      script,
+      name: NAME || null,
+      at: new Date().toISOString(),
+      gitSha: gitSha || null,
+      knobs: env,
+      arms,
+    },
+    null,
+    2,
+  ) + '\n',
+);
+
 console.log(`k6/reports/${RUN}/\n`);
+if (arms) console.log(`server arms: ${JSON.stringify(arms)}\n`);
 
 const { status, error } = spawnSync('docker', args, { stdio: 'inherit' });
 
