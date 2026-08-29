@@ -513,6 +513,16 @@ const SECONDARY_INDEXES = [
     'messages_conversation_id_idx',
     'CREATE INDEX messages_conversation_id_idx ON messages (conversation_id)',
   ],
+  // Card 11. The most expensive one to maintain during a COPY by a wide margin
+  // — 18 lexemes per row means ~180M index entries — and the cheapest to
+  // rebuild afterwards in one pass. `messages.tsv` itself is a generated
+  // column, so it is never in a COPY column list and cannot be dropped the same
+  // way; the load pays to compute it either way.
+  // See plans/2026-08-29_drill-11-full-text-search.md.
+  [
+    'messages_org_tsv_idx',
+    'CREATE INDEX messages_org_tsv_idx ON messages USING gin (org_id, tsv)',
+  ],
 ];
 
 async function main() {
