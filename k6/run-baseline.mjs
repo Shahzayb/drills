@@ -2,6 +2,7 @@
 // `pnpm load:baseline`'s inline shell one-liner.
 //
 //   pnpm load:baseline                          conversations-baseline.js
+//   node k6/run-baseline.mjs messages-search.js  card 11's search endpoint
 //   ORG_ID=150 pnpm load:baseline                tail org
 //   PAGE=100 PAGE_SIZE=50 pnpm load:baseline      page depth / size
 //   NAME=tracing-off pnpm load:baseline          labels the report
@@ -78,7 +79,13 @@ const RUN =
 // second. Same for the summary — handleSummary does not create directories.
 mkdirSync(new URL(`reports/${RUN}/`, import.meta.url), { recursive: true });
 
-const env = { ORG_ID, VUS, WARMUP, DURATION, PAGE, PAGE_SIZE, NAME };
+// Card 11's knob. Forwarded unconditionally like the rest — a script that does
+// not read it is unaffected, which is the whole reason this runner is generic.
+// It is NOT in the report filename: a search term can be any text, and the
+// filename is a filename. messages-search.js prints it in the summary instead.
+const Q = process.env.Q || 'export';
+
+const env = { ORG_ID, VUS, WARMUP, DURATION, PAGE, PAGE_SIZE, NAME, Q };
 if (P95_BUDGET_MS) env.P95_BUDGET_MS = P95_BUDGET_MS;
 
 // Where the script's handleSummary writes its block. A script without one just
