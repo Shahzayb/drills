@@ -1,0 +1,9 @@
+
+  name=fts org=1 vus=10 warmup=20s measured=60s q=export limit=20
+  measured requests : 26526
+  p50 / p95 / p99   : 16.51 / 44.30 / 66.71 ms
+  min / avg / max   : 3.16 / 22.52 / 1474.49 ms
+  throughput        : 442.10 req/s
+  (incl. warm-up)   : p50 16.27  p95 44.04  p99 67.02 ms
+
+RESULT,fts,1,10,export,20,16.51,44.30,66.71,442.10,26526

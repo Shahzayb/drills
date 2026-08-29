@@ -245,3 +245,73 @@ export async function fetchConversations(params: {
     };
   }
 }
+
+export interface MessageHit {
+  id: string;
+  conversationId: string;
+  message: string;
+  createdAt: string;
+}
+
+export interface MessageSearchPage {
+  items: MessageHit[];
+  strategy: 'like' | 'fts';
+}
+
+export type MessageSearchResult = (
+  | { ok: true; page: MessageSearchPage }
+  | { ok: false; error: string; status?: number }
+) & { source: string; requestId: string; durMs: number };
+
+/**
+ * Card 11's search endpoint, through the same single hop as everything else —
+ * a bare `fetch` here would drop the org header, the request id and the
+ * traceparent without saying so.
+ *
+ * `q` is passed through unvalidated, same rule as `page` and `sort` above: the
+ * API owns the length bounds, and a second copy of them here is a second copy
+ * to keep in sync. A one-character `q` therefore renders the API's 400.
+ */
+export async function searchMessages(params: {
+  orgId: string;
+  q: string;
+  limit: string;
+}): Promise<MessageSearchResult> {
+  const query = new URLSearchParams({ q: params.q, limit: params.limit });
+  const source = `${API_URL}/messages/search?${query}`;
+  const requestId = await getRequestId();
+
+  try {
+    const { response, durMs } = await callApi(source, requestId, {
+      headers: { 'x-org-id': params.orgId },
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      return {
+        ok: false,
+        error: detail || `API responded ${response.status}`,
+        status: response.status,
+        source,
+        requestId,
+        durMs,
+      };
+    }
+
+    return {
+      ok: true,
+      page: (await response.json()) as MessageSearchPage,
+      source,
+      requestId,
+      durMs,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      source,
+      requestId,
+      durMs: error instanceof UpstreamError ? error.durMs : 0,
+    };
+  }
+}

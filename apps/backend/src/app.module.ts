@@ -9,6 +9,7 @@ import { LoggingInterceptor } from './observability/logging.interceptor';
 import { requestContextMiddleware } from './observability/request-context.middleware';
 import { PostgresModule } from './postgres/postgres.module';
 import { RedisModule } from './redis/redis.module';
+import { SearchModule } from './search/search.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { RedisModule } from './redis/redis.module';
     HealthModule,
     InfoModule,
     ConversationsModule,
+    SearchModule,
   ],
   providers: [
     {
