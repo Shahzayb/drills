@@ -1,6 +1,6 @@
 # Instrument hardening — make a knob that does nothing fail loudly
 
-**Status:** implemented
+**Status:** phase 1 implemented (PR #8) · phase 2 planned
 
 ## Context
 
@@ -121,6 +121,136 @@ every command printed in `plans/` and `drills/`, including numbers whose reprodu
 instructions are the command line. The reserved-name denylist in 3 buys most of the safety for
 none of that cost.
 
+### 6. A runner and a host/container split (phase 2)
+
+Everything above is phase 1 and is shipped. This section is planned and not yet built. It exists
+because phase 1 made one thing measurably worse and left another untouched.
+
+`package.json` holds 48 scripts and 3,780 characters. Two families are 72% of that, and both are
+one line copy-pasted:
+
+| Family | Scripts | Chars | Worst |
+|---|---|---|---|
+| psql one-liners | 7 | 1,124 | `db:activity` 235, `db:reset` 194, `db:log:on` 186 |
+| instrument invocations | 4 | 709 | `db:search` 219, `db:paging` 180 |
+
+The psql family repeats `docker compose exec -T postgres_db sh -c 'psql -U "$POSTGRES_USER" -d
+"$POSTGRES_DB"` — 84 characters — seven times, 588 characters of pure prefix. `CLAUDE.md`
+restricts shell to one-liners inside `package.json`, and a 235-character `psql` call with
+embedded SQL is not one. Phase 1 made the instrument half worse by adding
+`GIT_SHA=$(git rev-parse --short HEAD)` and five to ten `-e` flags to each of four scripts.
+
+`load:baseline` does this job for k6 in 24 characters, because it points at a `.mjs` runner. The
+precedent is already in the tree and the `db:*` scripts never adopted it.
+
+The knobs are also undiscoverable. There is no `--help`. `db:search` forwards eight knobs, but
+`indexes` reads `ONLY` and `MAINTENANCE_WORK_MEM` while `writes` reads `ROWS` and `INSERTS` — the
+`-e` list is the union across all four modes, so it tells the operator nothing. Subcommands
+appear only in a usage string printed after you get it wrong.
+
+#### 6.1 One invariant for the layout
+
+```
+scripts/              runs on your machine
+  setup.sh
+  measure.mjs         new — the four instruments
+  psql.mjs            new — the seven psql one-liners
+  check-arms.mjs      moved from apps/backend/db/
+
+apps/backend/db/      runs in the container
+  explain paging search bench-copy seed stats check-tenancy
+  lib/ reports/
+```
+
+`check-arms.mjs` runs on the host today and says so in its own header, sitting beside
+`check-tenancy.mjs`, which does not. Nothing can tell them apart without opening the file. The
+move costs two lines in `package.json`; no file in `plans/`, `memory-bank/` or `drills/` names it
+by path. Its `root` constant goes from `../../../` to `../`, and its `.env` path with it.
+
+`k6/run-baseline.mjs` also runs on the host and stays where it is. It is cohesive with `k6/*.js`
+and `k6/reports/`, and splitting it from them to satisfy a directory rule would cost more than
+the rule is worth.
+
+#### 6.2 `scripts/measure.mjs`
+
+It owns a catalog — instrument, its subcommands, and its knobs with flag name, environment name,
+default, and a one-line description — and builds the `docker compose exec` line itself, the way
+`k6/run-baseline.mjs` builds its `docker run`.
+
+The command names do not change. `plans/` and `memory-bank/` hold 45 recorded `pnpm db:*`
+reproduction commands, and this is the same reason 5 rejects a `DRILL_` prefix. `pnpm db:paging
+depths` stays; only what sits behind it moves.
+
+```json
+"db:paging": "node scripts/measure.mjs paging"
+```
+
+709 characters across four entries becomes roughly 130.
+
+Both spellings work, flags winning: `pnpm db:paging depths --org 150` and `ORG_ID=150 pnpm
+db:paging depths` both run. Recorded commands stay valid and new ones are self-documenting.
+
+Argument parsing is `parseArgs` from `node:util`. No CLI library is a direct dependency today —
+`commander`, `yargs` and `minimist` are transitive deps of build tooling — and the builtin covers
+positionals, typed options and defaults. It is the right choice rather than merely an adequate
+one because it **rejects unknown flags**: `--orgg 150` fails with
+`ERR_PARSE_ARGS_UNKNOWN_OPTION` before a query runs. Two implementation notes. Catch that error
+and print the knob list, because its default message trails into confusing advice about `--`. And
+do not put defaults in the `parseArgs` config: it returns configured defaults as though they were
+supplied, which would destroy the `(env)`/`(default)` provenance 1 exists to print. Defaults stay
+in `knob()`, inside the container.
+
+Forwarding becomes generated rather than maintained. The runner emits `-e NAME=value` only for
+knobs that have a value, from a flag or from the host environment. The bare `-e NAME`
+pass-through disappears, and with it the empty-string hazard that made the `||`-not-`??` rule
+load-bearing. Keep `||` in `knob()` anyway — it still guards a direct in-container run.
+
+`apps/backend/package.json` loses four passthroughs. `explain`, `paging`, `search` and
+`bench:copy` are one-line `node db/X.mjs` wrappers, so the runner execs
+`docker compose exec -T -w /app/apps/backend nest_server node db/paging.mjs depths` directly.
+`GIT_SHA` moves out of JSON into the runner, where `k6/run-baseline.mjs` already computes it with
+`spawnSync('git', …)`.
+
+Bare invocation prints the thing that is missing today:
+
+```
+$ pnpm db:paging
+paging — offset vs keyset at depth
+
+  depths       offset/keyset at 5 depths, N rounds each
+  walk         cost of paging the whole list
+  concurrent   both arms under concurrent load
+
+knobs
+  --org         1                    which org to measure
+  --page-size   50
+  --rounds      3
+  --depths      1,10,100,1000,5000
+  --max-pages   400                  walk only
+  --name        (none)               labels the report directory
+```
+
+#### 6.3 `scripts/psql.mjs`
+
+`db:migrate:status`, `db:reset`, `db:psql`, `db:log:on`, `db:log:off`, `db:log:status` and
+`db:activity` become `node scripts/psql.mjs <name>`. 1,124 characters becomes roughly 250, and
+the SQL moves somewhere it can carry a comment explaining why — `db:activity`'s `left(query, 140)`
+and `pid <> pg_backend_pid()` currently have nowhere to be explained.
+
+The script names do not change, so the 54 recorded `pnpm db:migrate`, `db:reset` and `db:log:*`
+commands keep working. `db:psql` keeps its interactive TTY; the rest keep `-T`.
+
+This part is separable. It is `package.json` hygiene rather than measurement, and phase 2 is
+still coherent without it.
+
+#### 6.4 `check:arms` retargets and shrinks
+
+Check 2 today walks root `package.json` → `apps/backend/package.json` → instrument source to ask
+whether a human remembered a `-e` flag. Once the runner generates those flags that bug class stops
+existing, and the check becomes catalog-versus-source in one file pair, in both directions: a knob
+read but absent from the catalog is unreachable, and a catalog entry no instrument reads is a dead
+flag. The second is a new catch. Checks 1 and 3 are unaffected.
+
 ## What does not change
 
 - No benchmark framework, no adapter layer, no configuration DSL. The instruments measure
@@ -149,6 +279,16 @@ none of that cost.
 | `package.json` | `pnpm arms`, `pnpm check:arms` | +2 |
 | `apps/backend/test/*.e2e-spec.ts` | assert `/info` reports the arm the container was started with | +20 |
 
+Phase 2:
+
+| File | Change | Est. |
+|---|---|---|
+| `scripts/measure.mjs` | new — catalog, `parseArgs`, `docker compose exec`, help | +180 |
+| `scripts/psql.mjs` | new — seven named queries | +90 |
+| `scripts/check-arms.mjs` | moved from `apps/backend/db/`; check 2 retargets | ~ +20 / −45 |
+| `package.json` | 11 scripts collapse; 3,780 chars → ~2,360 | ~ −1,420 chars |
+| `apps/backend/package.json` | drop four passthrough scripts | −4 |
+
 ## Verification
 
 Each check reproduces a recorded defect and must go red before the fix and green after.
@@ -167,6 +307,27 @@ Each check reproduces a recorded defect and must go red before the fix and green
    the shell's opinion.
 6. `pnpm format`, `pnpm lint`, `pnpm db:test` green.
 
+Phase 2, same red-then-green rule:
+
+7. `pnpm db:paging` with no subcommand prints its subcommands and knobs, and exits non-zero.
+8. `pnpm db:paging depths --org 150` and `ORG_ID=150 pnpm db:paging depths` produce the same
+   `run.json`, with `knobs.ORG_ID` reading `150` and provenance `env`.
+9. `pnpm db:paging depths --orgg 150` fails naming the unknown flag, before any query runs. This
+   is the case no static check can reach today.
+10. With no flag set, the header prints `ORG_ID 1 (default)`. Provenance survives the runner.
+11. Add a catalog entry no instrument reads and `pnpm check:arms` fails on the dead flag; remove
+    one an instrument does read and it fails on the unreachable knob.
+12. `pnpm db:log:on && pnpm db:log:status && pnpm db:log:off` round-trips, and `pnpm db:psql`
+    still opens an interactive prompt.
+13. Every command in 1-6 above still runs verbatim.
+
+A review of phase 1 found five defects, fixed in `f0a17be`: `BACKEND_PORT` read on the host
+without loading `.env`, which recorded `arms: null` in every k6 `run.json` without a word; the
+compose slice keyed on the literal `next_app:` service name, so renaming that service would have
+widened check 1 to every service below `nest_server`; an unguarded `response.json()` in
+`pnpm arms`; no timeout on the k6 arm fetch; and `client()` reporting absent credentials as pg's
+SASL error, which names nothing.
+
 There is no A/B to run and no number to defend. The `/info` fetch and the file write sit outside
 every timed region, which is a requirement on the implementation rather than a result to
 measure.
@@ -177,6 +338,14 @@ measure.
   directories. A knob read from an unusual place is invisible to it. This is the same limit
   `check-tenancy.mjs` states about `org_id`, and the same answer applies: the convention is
   written down because the checker depends on it.
+- **A typo at the prompt is invisible, and 6 only half-fixes it.** No static check can see
+  `ORGG=150 pnpm db:paging depths`, because an unknown environment variable is indistinguishable
+  from the ambient environment. Once 6 lands, flags are checked and environment variables are
+  not: `--orgg 150` is a hard error, `ORGG=150` still is not. The environment path survives only
+  to keep the recorded commands running, so flags are the surface to recommend.
+- **The catalog in 6 is a second place knobs are written.** It relocates the duplication from
+  four `package.json` strings into one object that can be checked mechanically; it does not
+  delete it. That is why 6.4 has to exist.
 - **`/info` reporting configuration is a local-only affordance.** A real service should not
   publish its feature-flag state on an unauthenticated endpoint. This repo has no secrets in an
   arm name and no reader outside the laptop, so the trade is fine here and would not be fine in
@@ -192,15 +361,30 @@ measure.
 
 ## Sequencing
 
-The `drill-11` branch is unmerged and its head commit rewrites `db/search.mjs`'s knobs and
-timing method. This plan touches `k6/run-baseline.mjs` and the `db/` instruments, so landing it
-first guarantees a conflict on that branch. Merge `drill-11` first, then land this against a
-tree that already contains `search.mjs`, and bring `search.mjs` into `lib/run.mjs` in the same
-pass.
+Phase 1, as decided at the time: the `drill-11` branch was unmerged and its head commit rewrote
+`db/search.mjs`'s knobs and timing method. This plan touches `k6/run-baseline.mjs` and the `db/`
+instruments, so landing it first guaranteed a conflict. `drill-11` merged first, and phase 1
+landed against a tree that already contained `search.mjs`, bringing it into `lib/run.mjs` in the
+same pass.
+
+Phase 2 waits for PR #8 to merge. It moves `check-arms.mjs` and rewrites the four instrument
+scripts that PR touches, so landing the two together would mean reviewing a wiring change and a
+layout change in one diff. The plan edit that added 6 rides along with PR #8, because the
+`Out of scope` reversal annotates a decision made there; the implementation does not.
 
 ## Out of scope
 
-- A shared harness, runner abstraction, or plugin system.
+- A shared **measurement** harness is still rejected: the timing loops differ, and forcing them
+  into one shape trades validity for tidiness. A shared **invocation** runner is 6. This plan
+  originally rejected both as one item, which is how `package.json` ended up holding 709
+  characters of shell for four commands.
+- **The reporting layer.** 57 hand-placed `padEnd`/`padStart` calls across three instruments,
+  `search.mjs indexes()` at 178 lines, and `rows` in `run.json` populated for `db:paging` alone.
+  Instruments returning rows to one shared renderer is a real change, and folding it into 6 would
+  make that phase unreviewable. Deferred, not dropped.
+- **The other 37 scripts.** Turbo, docker lifecycle, trace, and the four `db:test:*` arms. The
+  test arms stay verbatim on purpose: `-e LIST_STRATEGY=naive` visible in the string is what makes
+  the A/B legible at a glance.
 - Re-running any past measurement. If a recorded number was produced through a knob that did
   not arrive, this plan surfaces the risk and does not settle it. Drill 09's conclusions were
   already re-checked after its `ORG_ID` defect and survived.
