@@ -18,6 +18,8 @@ None open — every plan file in `plans/` is shipped. `history.md` lists them wi
 ## What works
 
 `pnpm docker:up`, then `pnpm db:migrate` and `pnpm db:seed` — or `pnpm db:reset` for both.
+Every instrument and toggle is listed in `techContext.md` under Commands.
+
 `pnpm db:test` runs the e2e suite inside the container (83 tests). Three suites are *expected* to
 fail, and a green run of any of them means the switch stopped switching: `pnpm db:test:naive`
 (`LIST_STRATEGY=naive`) fails **two** query-budget assertions, `pnpm db:test:notiebreak`
@@ -27,30 +29,9 @@ fail, and a green run of any of them means the switch stopped switching: `pnpm d
 Baseline numbers and query plans for drill 03 are in its plan file — the `before` column cards 09
 and 10 were compared against; drill 04's plan records the same queries at 2.5M rows.
 
-`pnpm logs:trace <id>` reconstructs one request across all services. `pnpm trace:on` adds spans, a
-collector and Jaeger on `:16686`; `pnpm trace:off` puts it back. `pnpm db:stats:on`/`db:stats`/
-`db:stats:reset` drive `pg_stat_statements`, off by default behind
-`PG_PRELOAD=pg_stat_statements docker compose up -d postgres_db` (postmaster-context, needs a
-recreate — see known issue below for the trap in that).
-
-`pnpm db:explain <plans|sweep|experiments|stats|keyset>` reads query plans for the list endpoint —
-three captures, the selectivity sweep, rejected indexes priced inside a rolled-back transaction, and
-OFFSET-at-depth against the cursor. `pnpm db:paging <depths|walk|concurrent>` measures the same
-endpoint over HTTP: the depth curve with the arms interleaved, the export tool's cumulative walk, and
-the concurrent-insert trace. Knobs reach the container only because the root scripts forward them
-with `docker compose exec -e` — plain `ORG_ID=150 pnpm db:explain …` did nothing at all until
-drill 10.
-
-`pnpm db:search <plans|indexes|gaps|writes>` is drill 11's instrument: LIKE vs full-text search with
-both plans, the build time and on-disk size of five candidate indexes each built in a rolled-back
-transaction, the inputs where the two disagree, and the write-throughput arms. `db:search writes`
-leaves several hundred MB of dead tuples behind (rolled-back COPYs) — `pg_relation_size('messages')`
-reads high until autovacuum catches up, so size numbers should be taken before it or after a
-`VACUUM`.
-
-`pnpm check:tenancy` audits RLS coverage and the serving role's attributes, read-only — the "check
-rather than assume" command, which is why there's no separate `rls:status`. Covers five tables:
-`conversations`, `messages`, `memberships`, `tags`, `conversation_tags`.
+`db:search writes` leaves several hundred MB of dead tuples behind (rolled-back COPYs), so
+`pg_relation_size('messages')` reads high until autovacuum catches up: take size numbers before it
+or after a `VACUUM`.
 
 ## Known issues
 
