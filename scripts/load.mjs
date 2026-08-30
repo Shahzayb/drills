@@ -143,9 +143,14 @@ if (values.help) {
 // built from these values, so the runner has to know them, and a k6 summary
 // prints values rather than provenance. lib/scenario.js keeps a matching set
 // for hand-runs, and `pnpm check:arms` fails when the two disagree.
+//
+// `||` and not `??`, the same rule db/lib/run.mjs states: an unset variable
+// forwarded by a shell arrives as the empty string, not as absent. With `??`
+// that empty string beat the default, dropped out at the `if` below, and named
+// the run directory `-orgundefined-` while the container measured org 1.
 const env = {};
 for (const k of knobs) {
-  const value = values[k.flag] ?? process.env[k.env] ?? k.def;
+  const value = values[k.flag] || process.env[k.env] || k.def;
   if (value) env[k.env] = value;
 }
 

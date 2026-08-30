@@ -286,7 +286,12 @@ const loader = read('scripts/load.mjs');
 // were reduced to a URL and a summary line, so lib/ is scanned rather than
 // skipped — the opposite of db/lib/, whose knobs belong to their importers.
 // reports/ is skipped because it is ~60 directories of recorded output.
-for (const path of walk('k6', '.js').filter((f) => !f.includes('/reports/'))) {
+const k6Files = walk('k6', '.js').filter((f) => !f.includes('/reports/'));
+
+// Every default a k6 script writes for itself, by knob name.
+const k6Defaults = new Map();
+
+for (const path of k6Files) {
   const source = read(path);
 
   for (const name of envReads(source)) {
@@ -304,23 +309,32 @@ for (const path of walk('k6', '.js').filter((f) => !f.includes('/reports/'))) {
     }
   }
 
-  // The one place a default is written twice on purpose: the catalog has to
-  // know it to build the report directory name, and the script has to know it
-  // to be runnable by hand. Two copies that disagree means a hand-run and a
-  // `pnpm load` run measure different things and both look right.
-  for (const [, name, scriptDefault] of source.matchAll(
+  for (const [, name, value] of source.matchAll(
     /__ENV\.([A-Z][A-Z0-9_]*)\s*\|\|\s*'([^']*)'/g,
   )) {
-    const declared = loader.match(
-      new RegExp(`env: '${name}',\\s*def: '([^']*)'`),
+    k6Defaults.set(name, { value, path });
+  }
+}
+
+// The one place a default is written twice on purpose: the catalog has to know
+// it to build the report directory name, and the script has to know it to be
+// runnable by hand. Two copies that disagree means a hand-run and a `pnpm load`
+// run measure different things and both look right.
+//
+// Driven from the catalog's declarations rather than the script's reads, so
+// EVERY declaration is compared. PAGE_SIZE is declared under both scripts, and
+// looking the name up once in the file only ever checked the first of them —
+// the same trap check 2 avoids by slicing per block in catalogFor().
+for (const [, name, declared] of loader.matchAll(
+  /env: '([A-Z][A-Z0-9_]*)',\s*def: '([^']*)'/g,
+)) {
+  const script = k6Defaults.get(name);
+  if (script && script.value !== declared) {
+    failures.push(
+      `${script.path} defaults ${name} to '${script.value}' but ` +
+        `scripts/load.mjs declares '${declared}' — a hand-run and ` +
+        `\`pnpm load\` would measure different things`,
     );
-    if (declared && declared[1] !== scriptDefault) {
-      failures.push(
-        `${path} defaults ${name} to '${scriptDefault}' but scripts/load.mjs ` +
-          `declares '${declared[1]}' — a hand-run and \`pnpm load\` would ` +
-          `measure different things`,
-      );
-    }
   }
 }
 

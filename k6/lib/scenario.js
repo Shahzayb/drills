@@ -112,8 +112,25 @@ export function request(url) {
   check(res, { 'status is 200': (r) => r.status === 200 });
 }
 
-/** '60s' -> 60. Only ever fed the DURATION above. */
-const seconds = (s) => Number(String(s).replace('s', ''));
+/**
+ * A k6 duration to seconds. '60s', '1m', '2m30s', '1h' all parse.
+ *
+ * Not `Number(replace('s',''))`: k6 accepts every one of those spellings and
+ * `--duration 1m` would have made this NaN, so the summary printed a correct
+ * p99 next to `throughput NaN req/s` and put NaN in the RESULT row. Resolved at
+ * init rather than in handleSummary, so a duration this cannot read fails the
+ * run before it spends 80 seconds measuring.
+ */
+const UNITS = { h: 3600, m: 60, s: 1, ms: 0.001 };
+function seconds(d) {
+  const parts = [...String(d).matchAll(/(\d+(?:\.\d+)?)(ms|[hms])/g)];
+  const total = parts.reduce((sum, [, n, u]) => sum + Number(n) * UNITS[u], 0);
+  if (!parts.length || !total)
+    throw new Error(`DURATION=${d} is not a duration`);
+  return total;
+}
+
+const MEASURED_SECONDS = seconds(DURATION);
 
 /**
  * The summary block, byte-identical to what the run printed — a summary built
@@ -132,7 +149,7 @@ export function summary(data, { params, columns }) {
   // NOT the counter's own rate. k6 divides a counter's rate by the *whole* run
   // duration, warm-up included — 80s here, not 60s — which understates the
   // measured phase by 25%. Throughput is per measured second or it is wrong.
-  const rps = count / seconds(DURATION);
+  const rps = count / MEASURED_SECONDS;
 
   const n = (x) => x.toFixed(2);
 

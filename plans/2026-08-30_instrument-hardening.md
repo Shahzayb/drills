@@ -453,6 +453,28 @@ widened check 1 to every service below `nest_server`; an unguarded `response.jso
 `pnpm arms`; no timeout on the k6 arm fetch; and `client()` reporting absent credentials as pg's
 SASL error, which names nothing.
 
+A review of the finished branch found four more, all of them the same shape the branch is about
+— a number that is wrong while every signal around it says the run was fine:
+
+- `seconds()` in `k6/lib/scenario.js` stripped a trailing `s` and called `Number()`, so
+  `--duration 1m` — valid k6, valid at the runner — made throughput `NaN`. The p50/p95/p99 in
+  the same block were correct, and the `NaN` went into the RESULT row. It now parses the whole
+  k6 grammar (`1m`, `2m30s`, `1h30m`, `500ms`) and resolves at init, so a duration it cannot
+  read fails the run instead of the summary.
+- `knobNumber` and `knobList` in `db/lib/run.mjs` cast with a bare `Number()`. `--rows 100_000`
+  — the underscore spelling the callers use in their own source — gave `NaN` while `header()`
+  printed `BENCH_ROWS  100_000  (env)`. The provenance line existed to say the value arrived,
+  and it was saying so above a run that measured nothing. Both now stop the run and name the
+  value.
+- `scripts/load.mjs` resolved knobs with `??` where `db/lib/run.mjs` documents `||`. An empty
+  string from the shell beat the catalog default and dropped out, naming the report directory
+  `-orgundefined-` while the container measured org 1.
+- Check 3's default-agreement test looked each name up once in the whole of `scripts/load.mjs`.
+  `PAGE_SIZE` is declared under both scripts, so a divergence in the second declaration passed
+  green — verified. It is now driven from the catalog's declarations rather than the script's
+  reads, so every declaration is compared. Check 2 avoids the same trap by slicing per block in
+  `catalogFor()`; check 3 had not.
+
 There is no A/B to run and no number to defend. The `/info` fetch and the file write sit outside
 every timed region, which is a requirement on the implementation rather than a result to
 measure.

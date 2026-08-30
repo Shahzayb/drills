@@ -36,13 +36,37 @@ export function knob(name, fallback) {
   return value;
 }
 
+/**
+ * A knob that has to be a number, or the run stops.
+ *
+ * `Number()` alone returns NaN for `100_000` — the spelling this file's own
+ * callers use in their source — and for `50k` and every typo. The header would
+ * then print `BENCH_ROWS  100_000  (env)`, which is the line that exists to say
+ * the value arrived, above a run that measured nothing. A knob that reports
+ * itself as delivered and is not is the whole subject of this module.
+ */
+function number(label, raw) {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    console.error(`${label} is not a number`);
+    process.exit(1);
+  }
+  return value;
+}
+
 /** `knob`, cast. The recorded value stays the string that arrived. */
-export const knobNumber = (name, fallback) =>
-  Number(knob(name, String(fallback)));
+export const knobNumber = (name, fallback) => {
+  const raw = knob(name, String(fallback));
+  return number(`${name}=${raw}`, raw);
+};
 
 /** `knob`, split on commas. For the depth and selectivity ladders. */
-export const knobList = (name, fallback) =>
-  knob(name, fallback).split(',').map(Number);
+export const knobList = (name, fallback) => {
+  const raw = knob(name, fallback);
+  return raw
+    .split(',')
+    .map((part) => number(`${name}=${raw}: '${part.trim()}'`, part.trim()));
+};
 
 /**
  * The one Postgres client, built from the five variables env_file supplies.
