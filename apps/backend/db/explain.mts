@@ -21,19 +21,24 @@
 //    always gets a *custom* plan (generic plans need a named prepared statement
 //    executed five times), so this is faithful and not a rehearsal.
 //
+// `.mts` and not `.ts`: apps/backend/package.json has no `type` field, so a
+// `.ts` here would be CommonJS — and this file's top-level `await` would be a
+// syntax error. See plans/2026-08-30_instrument-typescript.md.
+//
 // Full reasoning and the captured output: plans/2026-08-25_drill-09-index-selectivity.md.
 
+import type { ExplainResult, PlanNode } from './lib/run.mts';
 import {
   client as pgClient,
   header,
   knob,
   knobList,
   record,
-} from './lib/run.mjs';
+} from './lib/run.mts';
 
 const subcommand = process.argv[2];
 const USAGE =
-  'usage: node db/explain.mjs <plans|sweep|experiments|stats|keyset>';
+  'usage: node db/explain.mts <plans|sweep|experiments|stats|keyset>';
 
 if (
   !['plans', 'sweep', 'experiments', 'stats', 'keyset'].includes(subcommand)
@@ -88,7 +93,7 @@ const PAGE_SIZE = 50;
  * joins included. Measuring a simplified version of the query would measure a
  * query nobody runs.
  */
-const listQuery = (sortColumn) => `
+const listQuery = (sortColumn: string) => `
   SELECT c.id, c.status, c.assignee_id, u.name AS assignee_name,
          c.created_at, c.updated_at
     FROM conversations c
@@ -113,7 +118,7 @@ const unfilteredQuery = `
 // ------------------------------------------------------------------ helpers
 
 /** The scan node on `conversations` — what the whole drill is about. */
-function findScan(node) {
+function findScan(node: PlanNode): PlanNode | null {
   if (node['Relation Name'] === 'conversations') return node;
   for (const child of node.Plans ?? []) {
     const found = findScan(child);
@@ -122,15 +127,18 @@ function findScan(node) {
   return null;
 }
 
-async function explainJson(sql, params) {
+async function explainJson(
+  sql: string,
+  params: unknown[],
+): Promise<ExplainResult> {
   const { rows } = await client.query(
     `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sql}`,
     params,
   );
-  return rows[0]['QUERY PLAN'][0];
+  return rows[0]['QUERY PLAN'][0] as ExplainResult;
 }
 
-async function explainText(label, sql, params) {
+async function explainText(label: string, sql: string, params: unknown[]) {
   const { rows } = await client.query(
     `EXPLAIN (ANALYZE, BUFFERS) ${sql}`,
     params,
@@ -142,7 +150,7 @@ async function explainText(label, sql, params) {
 /** The org's newest updated_at. Every date cutoff is anchored to the data, not
  *  to now(): the seed's clock is fixed at 2026-08-11, so `now() - 7 days`
  *  selects nothing at all and would look like a very selective filter. */
-async function anchor() {
+async function anchor(): Promise<Date> {
   const { rows } = await client.query(
     `SELECT max(updated_at) AS at FROM conversations WHERE org_id = $1`,
     [ORG_ID],
@@ -150,10 +158,10 @@ async function anchor() {
   return rows[0].at;
 }
 
-const daysBefore = (at, days) =>
+const daysBefore = (at: Date, days: number) =>
   new Date(at.getTime() - days * 86_400_000).toISOString();
 
-async function countRows(status, cutoff) {
+async function countRows(status: string, cutoff: string) {
   const { rows } = await client.query(
     `SELECT count(*) AS n FROM conversations
       WHERE org_id = $1 AND status = $2 AND updated_at >= $3::timestamptz`,
@@ -183,7 +191,7 @@ async function openScope() {
  * policy predicate to NULL. Takes ACCESS EXCLUSIVE on conversations for the
  * duration: fine on a laptop, never on production.
  */
-async function withoutIndex(fn) {
+async function withoutIndex(fn: () => Promise<void>) {
   await client.query('SAVEPOINT no_index');
   try {
     // Back to the owner to do the DDL — the app role owns no index and gets
@@ -204,7 +212,11 @@ async function withoutIndex(fn) {
  * dance as above. Plain CREATE INDEX, not CONCURRENTLY: CONCURRENTLY cannot run
  * inside a transaction, which is exactly what makes this trick possible.
  */
-async function withIndex(name, definition, fn) {
+async function withIndex(
+  name: string,
+  definition: string,
+  fn: (size: { size: string; bytes: string }) => Promise<void>,
+) {
   await client.query('SAVEPOINT trial');
   try {
     await client.query('SET LOCAL ROLE NONE');
@@ -381,7 +393,7 @@ async function experiments() {
   const wide = daysBefore(at, 548);
   const recent = daysBefore(at, 7);
 
-  const summarise = async (label, sql, params) => {
+  const summarise = async (label: string, sql: string, params: unknown[]) => {
     const plan = await explainJson(sql, params);
     const scan = findScan(plan.Plan) ?? plan.Plan;
     console.log(
@@ -510,7 +522,7 @@ async function stats() {
  *
  * See plans/2026-08-26_drill-10-keyset-pagination.md.
  */
-const keysetQuery = (sortColumn) => `
+const keysetQuery = (sortColumn: string) => `
   SELECT c.id, c.status, c.assignee_id, u.name AS assignee_name,
          c.created_at, c.updated_at
     FROM conversations c
@@ -522,7 +534,7 @@ const keysetQuery = (sortColumn) => `
 
 /** The hand-expanded OR form the row comparison replaces. Logically identical,
  *  and the whole question is whether the planner treats it that way. */
-const keysetOrQuery = (sortColumn) => `
+const keysetOrQuery = (sortColumn: string) => `
   SELECT c.id, c.status, c.assignee_id, u.name AS assignee_name,
          c.created_at, c.updated_at
     FROM conversations c
@@ -534,7 +546,7 @@ const keysetOrQuery = (sortColumn) => `
    ORDER BY c.${sortColumn} DESC, c.id DESC
    LIMIT ${PAGE_SIZE}`;
 
-const offsetQuery = (sortColumn, offset) => `
+const offsetQuery = (sortColumn: string, offset: number) => `
   SELECT c.id, c.status, c.assignee_id, u.name AS assignee_name,
          c.created_at, c.updated_at
     FROM conversations c
@@ -555,7 +567,7 @@ const offsetQuery = (sortColumn, offset) => `
  * `to_char` and not a JS Date round trip: timestamptz holds microseconds and a
  * JS Date holds milliseconds, and the truncated value names a different row.
  */
-async function cursorAt(sortColumn, depth) {
+async function cursorAt(sortColumn: string, depth: number) {
   const { rows } = await client.query(
     `SELECT to_char(${sortColumn} AT TIME ZONE 'UTC',
                     'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS k, id
@@ -584,8 +596,8 @@ async function keyset() {
   );
 
   /** Actual Rows on the node directly under the Limit — the discarded work. */
-  const belowLimit = (plan) => {
-    const limit = (function find(node) {
+  const belowLimit = (plan: ExplainResult) => {
+    const limit = (function find(node: PlanNode): PlanNode | null {
       if (node['Node Type'] === 'Limit') return node;
       for (const child of node.Plans ?? []) {
         const found = find(child);
@@ -597,7 +609,12 @@ async function keyset() {
     return child['Actual Rows'] * (child['Actual Loops'] ?? 1);
   };
 
-  const row = async (depth, arm, sql, params) => {
+  const row = async (
+    depth: number,
+    arm: string,
+    sql: string,
+    params: unknown[],
+  ) => {
     const plan = await explainJson(sql, params);
     const scan = findScan(plan.Plan) ?? plan.Plan;
     console.log(

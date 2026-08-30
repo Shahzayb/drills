@@ -5,11 +5,16 @@
 // Reasoning and the measured numbers are in
 // plans/2026-08-11_drill-04-bulk-seed.md under "Realistic data".
 //
+// `.mts` and not `.ts`: apps/backend/package.json has no `type` field, so a
+// `.ts` here would be CommonJS. See plans/2026-08-30_instrument-typescript.md.
+//
 // Two rules hold this together:
 //   1. Pool values are sanitised once, at startup. Bodies are then safe for
 //      COPY text format by construction, with no per-row escaping.
 //   2. Everything draws from the caller's seeded rng, so two runs with the same
 //      seed produce the same corpus and the same picks.
+
+import type { Faker } from '@faker-js/faker';
 
 /** Conversation phases, in the order a real thread moves through them. */
 export const PHASE = {
@@ -115,13 +120,13 @@ const WHEN_ATS = [
   'last month',
 ];
 
-const sanitise = (s) =>
+const sanitise = (s: unknown): string =>
   String(s)
     .replace(/[\\\t\n\r]+/g, ' ')
     .trim();
 
-const times = (n, fn) => {
-  const out = new Array(n);
+const times = (n: number, fn: () => string): string[] => {
+  const out: string[] = new Array(n);
   for (let i = 0; i < n; i++) out[i] = sanitise(fn());
   return out;
 };
@@ -129,8 +134,13 @@ const times = (n, fn) => {
 /**
  * Builds the slot pools. ~12k faker calls, once, at startup — the whole point
  * is that this never runs per row.
+ *
+ * Keyed by slot name because that is how a template names one — the
+ * `{feature}` in a template string is a lookup into this object, and the
+ * validation loop below is what makes an unknown slot a startup error rather
+ * than the string `undefined` in 10M message bodies.
  */
-function buildPools(faker) {
+function buildPools(faker: Faker): Record<string, string[]> {
   return {
     feature: FEATURES,
     browser: BROWSERS,
@@ -247,12 +257,20 @@ const TEMPLATES = {
 
 const SLOT_RE = /\{(\w+)\}/g;
 
+/** () => [0,1), seeded. mulberry32 below is the one used here. */
+export type Rng = () => number;
+
+export interface Corpus {
+  /** One message body for a conversation phase, one to three sentences. */
+  body: (phase: string) => string;
+  pools: Record<string, string[]>;
+}
+
 /**
  * @param faker  a seeded faker instance
  * @param rng    () => [0,1), seeded
- * @returns {{ body: (phase: string) => string, pools: object }}
  */
-export function createCorpus(faker, rng) {
+export function createCorpus(faker: Faker, rng: Rng): Corpus {
   const pools = buildPools(faker);
 
   // Validating once at startup is the half of the old pre-compiler worth keeping:
@@ -271,11 +289,11 @@ export function createCorpus(faker, rng) {
     }
   }
 
-  const pick = (arr) => arr[(rng() * arr.length) | 0];
+  const pick = (arr: string[]) => arr[(rng() * arr.length) | 0];
 
   // Left-to-right over the slots, which is the order the old render() drew in too —
   // the RNG sequence is unchanged, so bodies are byte-identical to before.
-  const render = (template) =>
+  const render = (template: string) =>
     template.replace(SLOT_RE, (_, slot) => pick(pools[slot]));
 
   // A slot at the start of a sentence inherits its pool's casing, which gives
@@ -284,14 +302,17 @@ export function createCorpus(faker, rng) {
   // seams where two templates were joined. Cheaper than storing every feature
   // name in two cases — but it is a fix-up, and the plan records the two casing
   // bugs it let through before it covered sentence boundaries too.
-  const capitalise = (s) =>
-    s.replace(/(^|[.!?] )([a-z])/g, (_, lead, c) => lead + c.toUpperCase());
+  const capitalise = (s: string) =>
+    s.replace(
+      /(^|[.!?] )([a-z])/g,
+      (_, lead: string, c: string) => lead + c.toUpperCase(),
+    );
 
   // One template averages ~104 chars, so the sentence count is what sets the
   // mean body length. 40/45/15 across one/two/three gives 1.75 sentences and
   // lands on the ~180 chars the card asks for, with real variance around it
   // rather than every row being the same width.
-  function body(phase) {
+  function body(phase: string): string {
     const list = TEMPLATES[phase];
     const u = rng();
     const sentences = u < 0.4 ? 1 : u < 0.85 ? 2 : 3;
@@ -299,9 +320,9 @@ export function createCorpus(faker, rng) {
     // Distinct templates per body: nothing reads more synthetic than a message
     // that repeats itself verbatim. Retry rather than index arithmetic — with
     // 8-18 templates per phase a collision is rare and the loop exits at once.
-    const used = [(rng() * list.length) | 0];
+    const used: number[] = [(rng() * list.length) | 0];
     for (let i = 1; i < sentences; i++) {
-      let index;
+      let index: number;
       do {
         index = (rng() * list.length) | 0;
       } while (used.includes(index));
@@ -318,7 +339,11 @@ export function createCorpus(faker, rng) {
  * The phase a message is in, given its position in the conversation. Message 0
  * always opens; the last message resolves only if the conversation is closed.
  */
-export function phaseFor(index, total, closed) {
+export function phaseFor(
+  index: number,
+  total: number,
+  closed: boolean,
+): string {
   if (index === 0) return PHASE.OPENING;
   if (index === 1) return PHASE.ACK;
   if (index === total - 1) return closed ? PHASE.RESOLUTION : PHASE.FOLLOWUP;
@@ -331,9 +356,9 @@ export function phaseFor(index, total, closed) {
 }
 
 /** mulberry32 — small, fast, and deterministic from a 32-bit seed. */
-export function mulberry32(seed) {
+export function mulberry32(seed: number): Rng {
   let a = seed >>> 0;
-  return function next() {
+  return function next(): number {
     a = (a + 0x6d2b79f5) >>> 0;
     let t = a;
     t = Math.imul(t ^ (t >>> 15), t | 1);

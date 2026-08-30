@@ -13,12 +13,22 @@
 // the run rather than after it. `pnpm check:arms` catches the same thing
 // statically, and catches it without running anything.
 //
+// `.mts` and not `.ts`: apps/backend/package.json has no `type` field, so a
+// `.ts` here would be CommonJS — no top-level await, no import.meta.url. See
+// plans/2026-08-30_instrument-typescript.md.
+//
 // See plans/2026-08-30_instrument-hardening.md.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import pg from 'pg';
 
-const knobs = new Map();
+/** One resolved knob: what it is, and whether anyone actually set it. */
+export interface ResolvedKnob {
+  value: string;
+  source: 'env' | 'default';
+}
+
+const knobs = new Map<string, ResolvedKnob>();
 
 /**
  * Read one knob and remember where its value came from.
@@ -28,7 +38,7 @@ const knobs = new Map();
  * empty string and every query would run for org ''. Drill 09 measured org 1
  * for a whole card that way.
  */
-export function knob(name, fallback) {
+export function knob(name: string, fallback: string): string {
   const raw = process.env[name];
   const fromEnv = raw !== undefined && raw !== '';
   const value = fromEnv ? raw : fallback;
@@ -45,7 +55,7 @@ export function knob(name, fallback) {
  * the value arrived, above a run that measured nothing. A knob that reports
  * itself as delivered and is not is the whole subject of this module.
  */
-function number(label, raw) {
+function number(label: string, raw: string): number {
   const value = Number(raw);
   if (!Number.isFinite(value)) {
     console.error(`${label} is not a number`);
@@ -55,13 +65,13 @@ function number(label, raw) {
 }
 
 /** `knob`, cast. The recorded value stays the string that arrived. */
-export const knobNumber = (name, fallback) => {
+export const knobNumber = (name: string, fallback: number): number => {
   const raw = knob(name, String(fallback));
   return number(`${name}=${raw}`, raw);
 };
 
 /** `knob`, split on commas. For the depth and selectivity ladders. */
-export const knobList = (name, fallback) => {
+export const knobList = (name: string, fallback: string): number[] => {
   const raw = knob(name, fallback);
   return raw
     .split(',')
@@ -80,7 +90,7 @@ export const knobList = (name, fallback) => {
  * fallback would connect to a real but wrong database and measure it — the
  * exact silent-default failure this file exists to stop.
  */
-export const client = (user = process.env.POSTGRES_USER) => {
+export const client = (user = process.env.POSTGRES_USER): pg.Client => {
   const missing = ['POSTGRES_PASSWORD', 'POSTGRES_DB'].filter(
     (n) => !process.env[n],
   );
@@ -101,8 +111,33 @@ export const client = (user = process.env.POSTGRES_USER) => {
   });
 };
 
+/**
+ * One node of `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`.
+ *
+ * Only the keys the instruments read. Postgres emits dozens more and they are
+ * all spelled with spaces and capitals, which is why naming them once here
+ * beats an index signature at every read site.
+ */
+export interface PlanNode {
+  'Node Type': string;
+  'Relation Name'?: string;
+  'Plan Rows': number;
+  'Actual Rows': number;
+  'Actual Loops'?: number;
+  'Shared Hit Blocks': number;
+  'Shared Read Blocks': number;
+  Plans?: PlanNode[];
+}
+
+/** The single element of the JSON array `EXPLAIN … FORMAT JSON` returns. */
+export interface ExplainResult {
+  Plan: PlanNode;
+  'Execution Time': number;
+  'Planning Time': number;
+}
+
 /** Median, not mean. One GC pause should not own the number. */
-export const median = (values) => {
+export const median = (values: number[]): number => {
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2
@@ -113,15 +148,15 @@ export const median = (values) => {
 // Everything printed is also kept, so the run record carries the output that
 // produced its numbers. console.table formats internally and calls log, so
 // patching log alone catches it.
-const transcript = [];
+const transcript: string[] = [];
 const realLog = console.log;
-console.log = (...args) => {
+console.log = (...args: unknown[]) => {
   transcript.push(args.map(String).join(' '));
   realLog(...args);
 };
 
 /** Print the resolved knobs. Call it before the first measurement. */
-export function header(title) {
+export function header(title: string): void {
   console.log(title);
   for (const [name, k] of knobs) {
     console.log(
@@ -130,6 +165,9 @@ export function header(title) {
   }
   console.log('');
 }
+
+/** The `arms` block of GET /info: which A/B arm each switch resolved to. */
+export type Arms = Record<string, string>;
 
 /**
  * The arm state the server is actually running, read from GET /info.
@@ -140,24 +178,27 @@ export function header(title) {
  * server is unreachable, which is the normal case for the instruments that talk
  * to Postgres directly.
  */
-export async function serverArms(api = process.env.BACKEND_INTERNAL_URL) {
+export async function serverArms(
+  api = process.env.BACKEND_INTERNAL_URL,
+): Promise<Arms | null> {
   if (!api) return null;
   try {
     const response = await fetch(`${api}/info`, {
       signal: AbortSignal.timeout(2000),
     });
     if (!response.ok) return null;
-    return (await response.json()).arms ?? null;
+    const body = (await response.json()) as { arms?: Arms | null };
+    return body.arms ?? null;
   } catch {
     return null;
   }
 }
 
-const pad = (n) => String(n).padStart(2, '0');
+const pad = (n: number) => String(n).padStart(2, '0');
 
 /**
  * Write the run to db/reports/, the same per-run directory scheme
- * k6/run-baseline.mjs already uses.
+ * scripts/load.ts already uses for k6.
  *
  * A plan or a drill then cites a directory instead of retyping a number out of
  * scrollback with its conditions left behind — drill 08's README defect.
@@ -165,7 +206,11 @@ const pad = (n) => String(n).padStart(2, '0');
  * Called after the last measurement. The `/info` fetch and the write must never
  * land inside a timed region.
  */
-export function record(instrument, subcommand, { rows = null, arms = null }) {
+export function record(
+  instrument: string,
+  subcommand: string,
+  { rows = null, arms = null }: { rows?: unknown; arms?: Arms | null },
+): void {
   const d = new Date();
   const stamp =
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +

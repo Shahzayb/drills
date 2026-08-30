@@ -1,5 +1,6 @@
 import { check } from 'k6';
 import http from 'k6/http';
+import type { Options, Scenario, Threshold } from 'k6/options';
 
 /**
  * The measurement method, shared by every script in k6/.
@@ -15,18 +16,20 @@ import http from 'k6/http';
  * exactly one kind of experiment.
  *
  * The knobs below are defaulted HERE and declared again in the catalog in
- * scripts/load.mjs, because a k6 script has to be runnable by hand. Two copies
- * of a default is the exact bug this branch is about, so scripts/check-arms.mjs
+ * scripts/load.ts, because a k6 script has to be runnable by hand. Two copies
+ * of a default is the exact bug that branch was about, so scripts/check-arms.ts
  * fails when the two disagree.
  *
  * See plans/2026-08-13_drill-05-load-test-baseline.md before changing any of
  * them — a change here silently invalidates every recorded run in k6/reports/.
  *
- * Runs in the k6 CONTAINER. See plans/2026-08-30_instrument-hardening.md § 7.
+ * Runs in the k6 CONTAINER. See plans/2026-08-30_instrument-hardening.md § 7,
+ * and plans/2026-08-30_instrument-typescript.md for why the imports above carry
+ * a `.ts` where the importing scripts name this file.
  */
 
 export const BASE_URL = __ENV.BASE_URL || 'http://nest_server:3002';
-// The arm of an A/B this run is, set by scripts/load.mjs (which also puts it in
+// The arm of an A/B this run is, set by scripts/load.ts (which also puts it in
 // the report directory name). Empty by default — it labels the output and
 // changes nothing about the measurement.
 export const NAME = __ENV.NAME || '';
@@ -44,7 +47,7 @@ export const Q = __ENV.Q || 'export';
 // different jobs for the same script.
 const P95_BUDGET_MS = __ENV.P95_BUDGET_MS;
 
-// Set by scripts/load.mjs to the run's own directory. Unset when the script is
+// Set by scripts/load.ts to the run's own directory. Unset when the script is
 // run by hand, and then the summary is printed and not written.
 const SUMMARY_OUT = __ENV.SUMMARY_OUT;
 
@@ -57,22 +60,53 @@ const MEASURED_REQS = 'http_reqs{scenario:measure}';
 const MEASURED_FAILED = 'http_req_failed{scenario:measure}';
 
 /**
+ * What handleSummary is handed. @types/k6 types `Options` but not this, and the
+ * three keys read below are the whole of what summary() needs — a wider type
+ * would be a guess about k6's payload rather than a statement about this file.
+ */
+export interface SummaryData {
+  metrics: Record<string, { values: Record<string, number> }>;
+}
+
+/** What handleSummary returns: stdout, plus a file per path. */
+type SummaryOutput = Record<string, string>;
+
+/**
  * A k6 duration to seconds. '60s', '1m', '2m30s', '1h' all parse.
  *
  * Not `Number(replace('s',''))`: k6 accepts every one of those spellings and
  * `--duration 1m` would have made this NaN, so the summary printed a correct
  * p99 next to `throughput NaN req/s` and put NaN in the RESULT row.
  */
-const UNITS = { h: 3600, m: 60, s: 1, ms: 0.001 };
-function seconds(d) {
+const UNITS: Record<string, number> = { h: 3600, m: 60, s: 1, ms: 0.001 };
+function seconds(d: string): number {
   const parts = [...String(d).matchAll(/(\d+(?:\.\d+)?)(ms|[hms])/g)];
   const total = parts.reduce((sum, [, n, u]) => sum + Number(n) * UNITS[u], 0);
   if (!parts.length || !total) throw new Error(`'${d}' is not a duration`);
   return total;
 }
 
+/**
+ * The measured stage, as this module needs to read it back.
+ *
+ * `Scenario` from k6/options is a union over every executor, and neither
+ * `duration`, `vus` nor `stages` is on all of them — so the two shapes actually
+ * supported here are named rather than narrowed out of the union at each use.
+ */
+type Stage = { duration: string; target: number };
+type MeasureScenario = Scenario & {
+  duration?: string;
+  vus?: number;
+  stages?: Stage[];
+};
+
 /** The default shape: flat concurrency for a fixed window. */
-const flat = () => ({ executor: 'constant-vus', vus: VUS, duration: DURATION });
+const flat = (): MeasureScenario =>
+  ({
+    executor: 'constant-vus',
+    vus: VUS,
+    duration: DURATION,
+  }) as MeasureScenario;
 
 /**
  * What the run will actually do, read off the script's own measured stage
@@ -83,7 +117,7 @@ const flat = () => ({ executor: 'constant-vus', vus: VUS, duration: DURATION });
  * over a run that ramped to 200 for five minutes — a summary that looks right
  * and is not, which is the defect this whole harness exists to prevent.
  */
-function shapeOf(measure) {
+function shapeOf(measure: MeasureScenario) {
   if (measure.stages) {
     const total = measure.stages.reduce((s, st) => s + seconds(st.duration), 0);
     return {
@@ -106,7 +140,7 @@ function shapeOf(measure) {
 }
 
 /** The warm-up mirrors the measured stage, shortened and thrown away. */
-function warmupFor(measure) {
+function warmupFor(measure: MeasureScenario): MeasureScenario {
   // A stages executor has no single duration, so its warm-up is a flat hold at
   // the peak the run will reach — enough to open the pool and warm the JIT.
   if (measure.stages) {
@@ -115,7 +149,7 @@ function warmupFor(measure) {
       vus: Math.max(...measure.stages.map((s) => s.target)),
       duration: WARMUP,
       gracefulStop: '0s',
-    };
+    } as MeasureScenario;
   }
   return { ...measure, duration: WARMUP, gracefulStop: '0s' };
 }
@@ -124,7 +158,7 @@ function warmupFor(measure) {
 // argument, because the alternative is every script passing its shape twice —
 // once to build the options and once to report them — and getting to disagree
 // with itself.
-let SHAPE = null;
+let SHAPE: ReturnType<typeof shapeOf> | null = null;
 
 /**
  * The run's options, wrapped around one script's measured stage.
@@ -145,14 +179,22 @@ let SHAPE = null;
  * two sub-metric declarations, which summary() reads back by name.
  *
  * A script that shapes its own stages stops reading VUS and DURATION. Drop
- * `--vus` and `--duration` from its entry in scripts/load.mjs when that
- * happens, or the catalog advertises knobs that do nothing — the bug this
- * branch exists to make impossible.
+ * `--vus` and `--duration` from its entry in scripts/load.ts when that
+ * happens, or the catalog advertises knobs that do nothing — the bug the
+ * instrument-hardening branch exists to make impossible.
  */
-export function scenario({ measure = flat(), warmup, thresholds } = {}) {
+export function scenario({
+  measure = flat(),
+  warmup,
+  thresholds,
+}: {
+  measure?: MeasureScenario;
+  warmup?: MeasureScenario;
+  thresholds?: Record<string, Threshold[]>;
+} = {}): Options {
   SHAPE = shapeOf(measure);
 
-  const durationThresholds = ['max>=0'];
+  const durationThresholds: Threshold[] = ['max>=0'];
   if (P95_BUDGET_MS) durationThresholds.push(`p(95)<${P95_BUDGET_MS}`);
 
   return {
@@ -186,7 +228,7 @@ export function scenario({ measure = flat(), warmup, thresholds } = {}) {
     thresholds: {
       // Policy, so the script owns it. A run containing errors is not a
       // baseline — and is exactly what a stress test is looking for. A crossed
-      // threshold exits 99 and scripts/load.mjs propagates it, so a stress run
+      // threshold exits 99 and scripts/load.ts propagates it, so a stress run
       // that could not loosen this would report success as a failed command.
       [MEASURED_FAILED]: ['rate<0.01'],
       ...thresholds,
@@ -207,7 +249,7 @@ export function scenario({ measure = flat(), warmup, thresholds } = {}) {
  * request the instant the last returns. That measures saturation throughput and
  * puts queueing delay in the p99, which is what a *baseline* should capture.
  */
-export function request(url) {
+export function request(url: string): void {
   const res = http.get(url, { headers: { 'x-org-id': ORG_ID } });
   check(res, { 'status is 200': (r) => r.status === 200 });
 }
@@ -221,7 +263,10 @@ export function request(url) {
  * different scripts line up as far as they can and the report directory name
  * says which script produced them.
  */
-export function summary(data, { params, columns }) {
+export function summary(
+  data: SummaryData,
+  { params, columns }: { params: string; columns: (string | number)[] },
+): SummaryOutput {
   if (!SHAPE) {
     throw new Error(
       'scenario() must be called at init — summary() reports the window it ' +
@@ -238,7 +283,7 @@ export function summary(data, { params, columns }) {
   // measured phase by 25%. Throughput is per measured second or it is wrong.
   const rps = count / SHAPE.seconds;
 
-  const n = (x) => x.toFixed(2);
+  const n = (x: number) => x.toFixed(2);
 
   const report = [
     '',

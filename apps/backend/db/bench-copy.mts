@@ -10,13 +10,16 @@
 //
 // It writes into a scratch table it creates and drops itself, so it never
 // touches the real schema and can run against a seeded database safely.
+//
+// `.mts` and not `.ts`: apps/backend/package.json has no `type` field, so a
+// `.ts` here would be CommonJS. See plans/2026-08-30_instrument-typescript.md.
 
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { from as copyFrom } from 'pg-copy-streams';
 import { faker } from '@faker-js/faker';
-import { createCorpus, mulberry32, PHASE } from './lib/corpus.mjs';
-import { client as pgClient, header, knobNumber, record } from './lib/run.mjs';
+import { createCorpus, mulberry32, PHASE } from './lib/corpus.mts';
+import { client as pgClient, header, knobNumber, record } from './lib/run.mts';
 
 const ROWS = knobNumber('BENCH_ROWS', 100_000);
 const BATCH_LINES = 10_000;
@@ -41,7 +44,7 @@ const BODY = 'x'.repeat(180);
 const UUID = '018f3a2b-0000-7000-8000-000000000000';
 const STAMP = '2026-01-01 00:00:00+00';
 
-const ms = (ns) => Number(ns) / 1e6;
+const ms = (ns: bigint) => Number(ns) / 1e6;
 
 async function reset() {
   await client.query('DROP TABLE IF EXISTS bench_rows');
@@ -49,7 +52,7 @@ async function reset() {
 }
 
 /** One round trip per row. The thing COPY is supposed to beat. */
-async function insertLoop(rows) {
+async function insertLoop(rows: number): Promise<number> {
   const started = process.hrtime.bigint();
   for (let i = 1; i <= rows; i++) {
     await client.query(
@@ -64,7 +67,7 @@ async function insertLoop(rows) {
  * Same rows, one statement. The generator is a Readable rather than a string so
  * the 100k-row case exercises the same backpressure path the 10M-row case will.
  */
-async function copyStream(rows) {
+async function copyStream(rows: number): Promise<number> {
   const started = process.hrtime.bigint();
   const stream = client.query(
     copyFrom(
@@ -74,7 +77,7 @@ async function copyStream(rows) {
 
   const source = Readable.from(
     (function* () {
-      const batch = [];
+      const batch: string[] = [];
       for (let i = 1; i <= rows; i++) {
         batch.push(`${i}\t${UUID}\t1\t${BODY}\t${STAMP}`);
         if (batch.length === BATCH_LINES) {
@@ -95,8 +98,8 @@ async function copyStream(rows) {
  * realism bar, measured against the rule fixed in the plan: >=150k bodies/sec
  * ships, below that the composition gets simpler until it clears.
  */
-function benchBodies(rows) {
-  const out = { lengths: 0, sample: [] };
+function benchBodies(rows: number) {
+  const out = { lengths: 0, sample: [] as string[] };
 
   faker.seed(SEED);
   const perRowStart = process.hrtime.bigint();
@@ -139,7 +142,7 @@ async function main() {
 
   await client.query('DROP TABLE bench_rows');
 
-  const fmt = (t) =>
+  const fmt = (t: number) =>
     `${(t / 1000).toFixed(2)}s  (${Math.round(ROWS / (t / 1000)).toLocaleString()} rows/s)`;
 
   console.log('== Ingest ==');
@@ -148,7 +151,7 @@ async function main() {
   console.log(`COPY is ${(loopMs / copyMs).toFixed(1)}x faster.\n`);
 
   const b = benchBodies(ROWS);
-  const rate = (t) => Math.round(ROWS / (t / 1000));
+  const rate = (t: number) => Math.round(ROWS / (t / 1000));
   console.log('== Body generation ==');
   console.log(`faker per row : ${fmt(b.perRowMs)}`);
   console.log(`templates     : ${fmt(b.tplMs)}`);

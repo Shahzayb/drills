@@ -19,13 +19,17 @@
 // One flag: --scale=N, a row multiplier for conversations and messages only.
 // Flags that switched each performance lever off individually are gone now the
 // attribution is settled — the A-F table in the plan file is the record.
+//
+// `.mts` and not `.ts`: apps/backend/package.json has no `type` field, so a
+// `.ts` here would be CommonJS. See plans/2026-08-30_instrument-typescript.md.
 
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import pg from 'pg';
 import { from as copyFrom } from 'pg-copy-streams';
 import { faker } from '@faker-js/faker';
-import { createCorpus, mulberry32, phaseFor } from './lib/corpus.mjs';
+import type { Corpus, Rng } from './lib/corpus.mts';
+import { createCorpus, mulberry32, phaseFor } from './lib/corpus.mts';
 
 // ---------------------------------------------------------------- parameters
 
@@ -103,9 +107,13 @@ const COPY_BATCH = 10_000;
 
 // ------------------------------------------------------------------- helpers
 
-const ms = (ns) => Number(ns) / 1e6;
+const ms = (ns: bigint) => Number(ns) / 1e6;
 
-async function phase(name, fn, rows = null) {
+async function phase<T>(
+  name: string,
+  fn: () => T | Promise<T>,
+  rows: number | null = null,
+): Promise<T> {
   const started = process.hrtime.bigint();
   const result = await fn();
   const elapsed = ms(process.hrtime.bigint() - started);
@@ -122,14 +130,14 @@ async function phase(name, fn, rows = null) {
 // there is nothing here to hand-roll. A day cache and a divmod formatter used to
 // live here, worth 3.8s of CPU on a pipeline where the generator already runs 15x
 // ahead of Postgres — see plans/2026-08-12_seed-simplification.md.
-const stamp = (msEpoch) => new Date(Math.floor(msEpoch)).toISOString();
+const stamp = (msEpoch: number) => new Date(Math.floor(msEpoch)).toISOString();
 
 // Second granularity is load-bearing, not cosmetic: with ~80k of org 1's rows inside
 // the last 24h it manufactures the updated_at ties that drill 03's
 // `ORDER BY updated_at DESC, id DESC` tiebreaker exists for. Not redundant with
 // planConversations — its Math.max floor can emit a non-aligned value for
 // conversations younger than the minimum span.
-const stampSecond = (msEpoch) =>
+const stampSecond = (msEpoch: number) =>
   new Date(Math.floor(msEpoch / 1000) * 1000).toISOString();
 
 /**
@@ -139,7 +147,7 @@ const stampSecond = (msEpoch) =>
  * Layout is the spec's: 48-bit big-endian millisecond timestamp, 4-bit version
  * (7), 12 random bits, 2-bit variant (0b10), then 62 more random bits.
  */
-function writeUuid(buf, off, msEpoch, rnd) {
+function writeUuid(buf: Buffer, off: number, msEpoch: number, rnd: Rng): void {
   buf.writeUIntBE(Math.floor(msEpoch), off, 6);
   buf.writeUInt16BE(0x7000 | ((rnd() * 0x1000) | 0), off + 6);
   const hi = (rnd() * 0x100000000) >>> 0;
@@ -148,12 +156,18 @@ function writeUuid(buf, off, msEpoch, rnd) {
   buf.writeUInt32BE((rnd() * 0x100000000) >>> 0, off + 12);
 }
 
-function uuidHex(buf, off) {
+function uuidHex(buf: Buffer, off: number): string {
   const h = buf.toString('hex', off, off + 16);
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
-function shuffle(arr, rnd) {
+/** Anything with a numeric index and a length: a plain array or a typed one. */
+interface Indexed<T> {
+  length: number;
+  [i: number]: T;
+}
+
+function shuffle<T>(arr: Indexed<T>, rnd: Rng): void {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = (rnd() * (i + 1)) | 0;
     const t = arr[i];
@@ -162,14 +176,51 @@ function shuffle(arr, rnd) {
   }
 }
 
-const sanitise = (s) =>
+const sanitise = (s: unknown): string =>
   String(s)
     .replace(/[\\\t\n\r]+/g, ' ')
     .trim();
 
 // ------------------------------------------------------------------ planning
 
-function planStructure() {
+/** Everything that does not scale with --scale, and the id blocks that index it. */
+interface Structure {
+  orgs: { id: number; name: string; plan: string; created: number }[];
+  users: { id: number; name: string; created: number }[];
+  memberships: {
+    id: number;
+    userId: number;
+    orgId: number;
+    role: string;
+    created: number;
+  }[];
+  /** memStart[org] / memCount[org]: the org's contiguous membership id block. */
+  memStart: Int32Array;
+  memCount: Int32Array;
+  tags: { id: number; orgId: number; name: string; created: number }[];
+  tagStart: Int32Array;
+  tagCount: Int32Array;
+}
+
+/**
+ * One typed array per conversation column, all of length CONVERSATIONS and all
+ * indexed by the same `i`. Typed arrays rather than objects because 2.5M small
+ * objects is the difference between a seed that fits in memory and one that
+ * does not.
+ */
+interface ConversationPlan {
+  created: Float64Array;
+  updated: Float64Array;
+  orgOf: Int32Array;
+  msgCount: Uint8Array;
+  closed: Uint8Array;
+  /** Total message rows the plan implies — what the COPY reports rows/s over. */
+  messages: number;
+  numTags: Uint8Array;
+  conversationTags: number;
+}
+
+function planStructure(): Structure {
   faker.seed(SEED);
   const rnd = mulberry32(SEED + 1);
 
@@ -177,7 +228,7 @@ function planStructure() {
   // than its parent.
   const orgBase = NOW - WINDOW_MS - 60 * DAY_MS;
 
-  const orgs = [];
+  const orgs: Structure['orgs'] = [];
   for (let i = 1; i <= ORGS; i++) {
     // Plan correlates with tier: the whale and the mid orgs are the paying ones.
     const plan =
@@ -199,7 +250,7 @@ function planStructure() {
     });
   }
 
-  const users = [];
+  const users: Structure['users'] = [];
   for (let i = 1; i <= USERS; i++) {
     users.push({
       id: i,
@@ -212,7 +263,7 @@ function planStructure() {
   // assignee for a conversation is a range index rather than a lookup.
   const memStart = new Int32Array(ORGS + 1);
   const memCount = new Int32Array(ORGS + 1);
-  const memberships = [];
+  const memberships: Structure['memberships'] = [];
   let memId = 1;
   for (let org = 1; org <= ORGS; org++) {
     const size = org === 1 ? 45 : org <= 10 ? 22 : 6 + ((rnd() * 5) | 0);
@@ -238,7 +289,7 @@ function planStructure() {
   const tagRnd = mulberry32(SEED + 6);
   const tagStart = new Int32Array(ORGS + 1);
   const tagCount = new Int32Array(ORGS + 1);
-  const tags = [];
+  const tags: Structure['tags'] = [];
   let tagId = 1;
   for (let org = 1; org <= ORGS; org++) {
     const size = org === 1 ? 12 : org <= 10 ? 9 : 4 + ((tagRnd() * 3) | 0);
@@ -268,7 +319,7 @@ function planStructure() {
   };
 }
 
-function planConversations() {
+function planConversations(): ConversationPlan {
   const rnd = mulberry32(SEED + 2);
   const n = CONVERSATIONS;
 
@@ -373,10 +424,15 @@ function planConversations() {
 // micro-optimisation here were measured and reverted; see
 // plans/2026-08-12_seed-simplification.md for what that cost in wall clock (~4s).
 
-function* conversationLines(plan, memStart, memCount, uuidBuf) {
+function* conversationLines(
+  plan: ConversationPlan,
+  memStart: Int32Array,
+  memCount: Int32Array,
+  uuidBuf: Buffer,
+): Generator<string> {
   const rnd = mulberry32(SEED + 3);
   const { created, updated, orgOf, closed } = plan;
-  const batch = [];
+  const batch: string[] = [];
   for (let i = 0; i < CONVERSATIONS; i++) {
     const org = orgOf[i];
     writeUuid(uuidBuf, i * 16, created[i], rnd);
@@ -397,10 +453,14 @@ function* conversationLines(plan, memStart, memCount, uuidBuf) {
   if (batch.length) yield batch.join('\n') + '\n';
 }
 
-function* messageLines(plan, uuidBuf, corpus) {
+function* messageLines(
+  plan: ConversationPlan,
+  uuidBuf: Buffer,
+  corpus: Corpus,
+): Generator<string> {
   const rnd = mulberry32(SEED + 5);
   const { created, updated, orgOf, msgCount, closed } = plan;
-  const batch = [];
+  const batch: string[] = [];
   let id = 1;
   for (let i = 0; i < CONVERSATIONS; i++) {
     const count = msgCount[i];
@@ -439,11 +499,15 @@ function* messageLines(plan, uuidBuf, corpus) {
  * conversationLines' assignee pick (SEED + 3) is separate from orgOf's own
  * stream (SEED + 2).
  */
-function* conversationTagLines(plan, structure, uuidBuf) {
+function* conversationTagLines(
+  plan: ConversationPlan,
+  structure: Structure,
+  uuidBuf: Buffer,
+): Generator<string> {
   const rnd = mulberry32(SEED + 9);
   const { orgOf, numTags, created } = plan;
   const { tagStart, tagCount } = structure;
-  const batch = [];
+  const batch: string[] = [];
   // Reused across iterations, not reallocated: `need` is at most 3, so a
   // fixed-size scratch array costs nothing per row.
   const picked = new Int32Array(3);
@@ -496,11 +560,11 @@ const client = new pg.Client({
   database: process.env.POSTGRES_DB ?? 'postgres',
 });
 
-async function copyInto(sql, iterator) {
+async function copyInto(sql: string, iterator: Iterable<string>) {
   await pipeline(Readable.from(iterator), client.query(copyFrom(sql)));
 }
 
-const SECONDARY_INDEXES = [
+const SECONDARY_INDEXES: [name: string, sql: string][] = [
   [
     'conversations_org_id_idx',
     'CREATE INDEX conversations_org_id_idx ON conversations (org_id)',
@@ -589,40 +653,52 @@ async function main() {
   );
 
   // Small enough to build as one string each — no batching, no streaming.
-  for (const [name, rows, columns, format] of [
+  //
+  // Typed as a tuple per table rather than one array type: each `format`
+  // closes over its own row shape, and a common element type would widen every
+  // one of them to the union and lose that.
+  const small: [
+    name: string,
+    rows: { length: number },
+    columns: string,
+    format: (row: never) => string,
+  ][] = [
     [
       'organizations',
       structure.orgs,
       '(id, name, plan, created_at, updated_at)',
-      (o) =>
+      (o: Structure['orgs'][number]) =>
         `${o.id}\t${o.name}\t${o.plan}\t${stamp(o.created)}\t${stamp(o.created)}`,
     ],
     [
       'users',
       structure.users,
       '(id, name, created_at, updated_at)',
-      (u) => `${u.id}\t${u.name}\t${stamp(u.created)}\t${stamp(u.created)}`,
+      (u: Structure['users'][number]) =>
+        `${u.id}\t${u.name}\t${stamp(u.created)}\t${stamp(u.created)}`,
     ],
     [
       'memberships',
       structure.memberships,
       '(id, user_id, org_id, role, created_at, updated_at)',
-      (m) =>
+      (m: Structure['memberships'][number]) =>
         `${m.id}\t${m.userId}\t${m.orgId}\t${m.role}\t${stamp(m.created)}\t${stamp(m.created)}`,
     ],
     [
       'tags',
       structure.tags,
       '(id, org_id, name, created_at, updated_at)',
-      (t) =>
+      (t: Structure['tags'][number]) =>
         `${t.id}\t${t.orgId}\t${t.name}\t${stamp(t.created)}\t${stamp(t.created)}`,
     ],
-  ]) {
+  ];
+
+  for (const [name, rows, columns, format] of small) {
     await phase(
       `copy ${name}`,
       () =>
         copyInto(`COPY ${name} ${columns} FROM STDIN`, [
-          rows.map(format).join('\n') + '\n',
+          (rows as never[]).map(format).join('\n') + '\n',
         ]),
       rows.length,
     );

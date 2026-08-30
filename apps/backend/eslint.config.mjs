@@ -6,7 +6,14 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['migrations/*.js', 'dist/**/*.js', '**.mjs', '**/*.mjs'],
+    ignores: [
+      'migrations/*.js',
+      'dist/**/*.js',
+      '**.mjs',
+      '**/*.mjs',
+      // db/ instruments — outside this config's tsconfig, same as .mjs was.
+      '**/*.mts',
+    ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

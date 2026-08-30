@@ -6,6 +6,10 @@
 // The ESLint rule in apps/backend/eslint.config.mjs is the other half: it fires
 // on the code, this fires on the schema, and neither is sufficient alone.
 //
+// `.mts` and not `.ts`: apps/backend/package.json has no `type` field, so a
+// `.ts` here would be CommonJS — and this file's top-level `await` would be a
+// syntax error. See plans/2026-08-30_instrument-typescript.md.
+//
 // Honest about what it is: this needs a live, migrated database, so it is an
 // integration check rather than a static one. That is the right trade — the
 // question "is conversations protected" is a fact about the running database,
@@ -27,7 +31,7 @@ const client = new pg.Client({
 
 const APP_USER = process.env.POSTGRES_APP_USER;
 
-const failures = [];
+const failures: string[] = [];
 
 await client.connect();
 

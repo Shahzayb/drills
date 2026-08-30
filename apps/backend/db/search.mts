@@ -23,6 +23,10 @@
 // SEARCH_TERM, not TERM: every interactive shell exports TERM as the terminal
 // type, so `-e TERM` would forward 'xterm-256color' in as the search term.
 //
+// `.mts` and not `.ts`: apps/backend/package.json has no `type` field, so a
+// `.ts` here would be CommonJS — and this file's top-level `await` would be a
+// syntax error. See plans/2026-08-30_instrument-typescript.md.
+//
 // Full reasoning and the captured output:
 // plans/2026-08-29_drill-11-full-text-search.md.
 
@@ -30,20 +34,21 @@ import { faker } from '@faker-js/faker';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { from as copyFrom } from 'pg-copy-streams';
-import { createCorpus, mulberry32, phaseFor } from './lib/corpus.mjs';
+import { createCorpus, mulberry32, phaseFor } from './lib/corpus.mts';
+import type { ExplainResult, PlanNode } from './lib/run.mts';
 import {
   client as pgClient,
   header,
   knob,
   knobNumber,
   record,
-} from './lib/run.mjs';
+} from './lib/run.mts';
 
 const MODES = ['plans', 'indexes', 'gaps', 'writes'];
 const mode = process.argv[2];
 
 if (!MODES.includes(mode)) {
-  console.error(`usage: node db/search.mjs <${MODES.join('|')}>`);
+  console.error(`usage: node db/search.mts <${MODES.join('|')}>`);
   process.exit(1);
 }
 
@@ -65,6 +70,13 @@ const ONLY = knob('ONLY', '');
 const ROWS = knobNumber('ROWS', 50000);
 const INSERTS = knobNumber('INSERTS', 2000);
 const INDEX_NAME = 'messages_org_tsv_idx';
+
+// Every mode reports a median over ROUNDS samples, and the median of none is
+// NaN — a table of NaNs under a header that says the knob arrived.
+if (ROUNDS < 1) {
+  console.error('ROUNDS must be at least 1');
+  process.exit(1);
+}
 
 // A selectivity ladder, not one term. `export` is 4.1% of the whale org and
 // `ERR_2452` is 0.045%, and the two answer the question "is FTS fast?"
@@ -98,7 +110,7 @@ const ftsQuery = `
 
 // ------------------------------------------------------------------ reporting
 
-const median = (values) => {
+const median = (values: number[]) => {
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2
@@ -108,7 +120,7 @@ const median = (values) => {
 
 /** Log-scaled for the same reason paging.mjs is: 0.5ms and 4,000ms on one
  *  linear axis is one bar and one invisible line. */
-function bars(rows) {
+function bars(rows: { label: string; ms: number }[]) {
   const max = Math.max(...rows.map((r) => Math.log10(Math.max(r.ms, 0.01))));
   const min = Math.log10(0.1);
   console.log('\n  log10 scale — each block is roughly a factor of 1.3\n');
@@ -122,13 +134,13 @@ function bars(rows) {
   }
 }
 
-const rule = (label) =>
+const rule = (label: string) =>
   console.log(`\n--- ${label} ${'-'.repeat(Math.max(0, 68 - label.length))}`);
 
 // -------------------------------------------------------------------- helpers
 
 /** The scan node on `messages` — the thing the whole card is about. */
-function findScan(node) {
+function findScan(node: PlanNode): PlanNode | null {
   if (node['Relation Name'] === 'messages') return node;
   for (const child of node.Plans ?? []) {
     const found = findScan(child);
@@ -137,15 +149,18 @@ function findScan(node) {
   return null;
 }
 
-async function explainJson(sql, params) {
+async function explainJson(
+  sql: string,
+  params: unknown[],
+): Promise<ExplainResult> {
   const { rows } = await client.query(
     `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sql}`,
     params,
   );
-  return rows[0]['QUERY PLAN'][0];
+  return rows[0]['QUERY PLAN'][0] as ExplainResult;
 }
 
-async function explainText(label, sql, params) {
+async function explainText(label: string, sql: string, params?: unknown[]) {
   const { rows } = await client.query(
     `EXPLAIN (ANALYZE, BUFFERS) ${sql}`,
     params,
@@ -156,8 +171,8 @@ async function explainText(label, sql, params) {
 
 /** Median wall-clock over ROUNDS runs, first discarded — the first run pays for
  *  whatever is not in shared_buffers and is not the number you serve. */
-async function timed(sql, params) {
-  const samples = [];
+async function timed(sql: string, params: unknown[]) {
+  const samples: number[] = [];
   for (let k = 0; k <= ROUNDS; k++) {
     const started = process.hrtime.bigint();
     await client.query(sql, params);
@@ -167,7 +182,9 @@ async function timed(sql, params) {
   return median(samples);
 }
 
-async function scalar(sql, params) {
+/** The one value of a one-column, one-row query. Postgres's own type is
+ *  whatever the column is, so the caller narrows it — usually with Number(). */
+async function scalar(sql: string, params?: unknown[]): Promise<unknown> {
   const { rows } = await client.query(sql, params);
   return Object.values(rows[0])[0];
 }
@@ -183,7 +200,7 @@ async function openScope() {
 
 /** DDL runs as the owner, measurement runs as the app role. Every savepoint
  *  helper below hops between the two for that reason. */
-async function asOwner(fn) {
+async function asOwner<T>(fn: () => Promise<T>): Promise<T> {
   await client.query('SET LOCAL ROLE NONE');
   try {
     return await fn();
@@ -203,7 +220,7 @@ async function asOwner(fn) {
  * a contended run fail here with a plain error instead of blocking the app and
  * charging the wait to whatever else was being measured at the time.
  */
-async function withoutIndex(fn) {
+async function withoutIndex(fn: () => Promise<unknown>) {
   await client.query('SAVEPOINT no_index');
   try {
     await asOwner(async () => {
@@ -222,7 +239,7 @@ async function withoutIndex(fn) {
  * the state a fresh Postgres is in: under RLS the planner cannot promote a
  * non-leakproof qual into an index condition, so no index path exists at all.
  */
-async function notLeakproof(fn) {
+async function notLeakproof(fn: () => Promise<unknown>) {
   await client.query('SAVEPOINT leaky');
   try {
     await asOwner(() =>
@@ -242,7 +259,18 @@ async function notLeakproof(fn) {
  * migration. Plain CREATE INDEX, not CONCURRENTLY: CONCURRENTLY cannot run
  * inside a transaction, which is exactly what makes this possible.
  */
-async function withIndex(name, definition, fn) {
+/** Build time in ms, on-disk size in bytes, and pg_size_pretty's rendering. */
+interface TrialIndex {
+  buildMs: number;
+  bytes: number;
+  pretty: string;
+}
+
+async function withIndex(
+  name: string,
+  definition: string,
+  fn: (index: TrialIndex) => Promise<void>,
+) {
   await client.query('SAVEPOINT trial');
   try {
     const started = process.hrtime.bigint();
@@ -253,9 +281,10 @@ async function withIndex(name, definition, fn) {
     const bytes = Number(
       await scalar(`SELECT pg_relation_size($1::regclass)`, [name]),
     );
-    const pretty = await scalar(
-      `SELECT pg_size_pretty(pg_relation_size($1::regclass))`,
-      [name],
+    const pretty = String(
+      await scalar(`SELECT pg_size_pretty(pg_relation_size($1::regclass))`, [
+        name,
+      ]),
     );
     await fn({ buildMs, bytes, pretty });
   } finally {
@@ -284,13 +313,13 @@ async function plans() {
       'matches    median ms   hit/read',
   );
 
-  const chart = [];
+  const chart: { label: string; ms: number }[] = [];
 
   for (const term of TERMS) {
     // One count per predicate, not one per term. The two arms do not match the
     // same rows — that disagreement is the whole of `gaps` mode — so printing
     // the ILIKE count beside an FTS row reports the wrong query's answer.
-    const counted = (predicate) =>
+    const counted = (predicate: string) =>
       scalar(
         `SELECT count(*) FROM messages WHERE org_id = $1 AND ${predicate}`,
         [ORG_ID, term],
@@ -306,7 +335,7 @@ async function plans() {
      *  `Execution Time` is a single cold run and excludes planning and the
      *  round-trip, so mixing the two under one `median ms` header would compare
      *  a cold server-side number against a warm end-to-end one. */
-    const print = async (arm, sql, matches) => {
+    const print = async (arm: string, sql: string, matches: number) => {
       const plan = await explainJson(sql, [ORG_ID, term]);
       const scan = findScan(plan.Plan) ?? plan.Plan;
       const ms = await timed(sql, [ORG_ID, term]);
@@ -318,7 +347,7 @@ async function plans() {
       return ms;
     };
 
-    const row = async (arm, sql) => {
+    const row = async (arm: 'like' | 'fts', sql: string) => {
       const ms = await print(arm, sql, matched[arm]);
       chart.push({ label: `${term} ${arm}`, ms });
     };
@@ -329,7 +358,7 @@ async function plans() {
     // The two controls. Without them "FTS is fast" is a claim about tsvector
     // rather than about the index, and the reason the index nearly went unused
     // stays invisible.
-    const control = (arm) => print(arm, ftsQuery, matched.fts);
+    const control = (arm: string) => print(arm, ftsQuery, matched.fts);
 
     // The index is present and valid the whole time this runs. It is the
     // security qual from drill 07's RLS policy that puts it out of reach.
@@ -392,7 +421,12 @@ async function indexes() {
   await client.query('ROLLBACK');
 
   const term = TERMS[0];
-  const candidates = [
+  const candidates: [
+    label: string,
+    name: string,
+    definition: string,
+    probe: string,
+  ][] = [
     ['gin (org_id, tsv)', 'trial_gin_org_tsv', 'USING gin (org_id, tsv)', ftsQuery], // prettier-ignore
     ['gin (tsv)', 'trial_gin_tsv', 'USING gin (tsv)', ftsQuery],
     ['btree (message)', 'trial_btree_msg', '(message)', likeQuery],
@@ -470,7 +504,7 @@ async function indexes() {
       // count(*), not LIMIT 20. With a LIMIT and no ORDER BY a sequential scan
       // stops at the twentieth match, so a common term "beats" an index scan by
       // never finishing. Counting makes both arms do all of their work.
-      const counted = (pattern) =>
+      const counted = (pattern: string) =>
         `SELECT count(*) FROM messages WHERE org_id = $1 AND message LIKE ${pattern}`;
 
       // A prefix that exists. 83,571 messages in org 1 open with "Thanks", and
@@ -710,14 +744,14 @@ async function writes() {
   // INSERT. Un-interleaved single runs of this are not a measurement: the arm
   // that goes first pays for the cold state, and the rolled-back rows of one
   // round change the next.
-  const samples = {
+  const samples: Record<string, number[]> = {
     copyWith: [],
     copyWithout: [],
     insWith: [],
     insWithout: [],
   };
   let grewWith = 0;
-  let cleaned = null;
+  let cleaned: { pages: number; ms: number } | null = null;
 
   for (let round = 0; round < ROUNDS; round++) {
     await client.query('SAVEPOINT arm');
@@ -747,7 +781,7 @@ async function writes() {
     await client.query('ROLLBACK TO SAVEPOINT arm');
   }
 
-  const row = (label, values) =>
+  const row = (label: string, values: number[]) =>
     console.log(
       `  ${label.padEnd(24)} ${median(values).toFixed(0).padStart(8)} rows/s   ` +
         `(${values.map((v) => v.toFixed(0)).join(', ')})`,
@@ -758,7 +792,8 @@ async function writes() {
   row('INSERT, gin present', samples.insWith);
   row('INSERT, gin dropped', samples.insWithout);
 
-  const ratio = (a, b) => (median(b) / median(a)).toFixed(2);
+  const ratio = (a: number[], b: number[]) =>
+    (median(b) / median(a)).toFixed(2);
   console.log(
     `\n  COPY   ${ratio(samples.copyWith, samples.copyWithout)}x faster without the GIN index` +
       `   (index grew ${(grewWith / 1024 ** 2).toFixed(1)} MB per ${ROWS.toLocaleString()} rows)`,
@@ -781,10 +816,14 @@ async function writes() {
       `${(Number(process.hrtime.bigint() - tsStarted) / 1e6).toFixed(0)} ms ` +
       `— paid by BOTH arms, because the column is generated`,
   );
-  console.log(
-    `  gin_clean_pending_list: ${cleaned.pages.toLocaleString()} pages in ` +
-      `${cleaned.ms.toFixed(0)} ms — work one COPY deferred`,
-  );
+  // Assigned in the first round, and ROUNDS < 1 is rejected at the top of the
+  // file — so this always prints. The guard is what says so to the reader.
+  if (cleaned) {
+    console.log(
+      `  gin_clean_pending_list: ${cleaned.pages.toLocaleString()} pages in ` +
+        `${cleaned.ms.toFixed(0)} ms — work one COPY deferred`,
+    );
+  }
 
   // Nothing above this line survives.
   await client.query('ROLLBACK');

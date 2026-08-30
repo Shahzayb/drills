@@ -21,6 +21,10 @@
 //   * Median of ROUNDS, not mean. One GC pause should not own the number.
 //   * Nothing under ~15% is a result.
 //
+// `.mts` and not `.ts`: apps/backend/package.json has no `type` field, so a
+// `.ts` here would be CommonJS — and this file's top-level `await` would be a
+// syntax error. See plans/2026-08-30_instrument-typescript.md.
+//
 // Full reasoning and the captured output:
 // plans/2026-08-26_drill-10-keyset-pagination.md.
 
@@ -33,10 +37,10 @@ import {
   median,
   record,
   serverArms,
-} from './lib/run.mjs';
+} from './lib/run.mts';
 
 const subcommand = process.argv[2];
-const USAGE = 'usage: node db/paging.mjs <depths|walk|concurrent>';
+const USAGE = 'usage: node db/paging.mts <depths|walk|concurrent>';
 
 if (!['depths', 'walk', 'concurrent'].includes(subcommand)) {
   console.error(USAGE);
@@ -58,8 +62,15 @@ const MAX_PAGES = knobNumber('MAX_PAGES', 400);
 
 // ------------------------------------------------------------------ requests
 
+/** One page of GET /conversations, as far as this instrument reads it. */
+interface Page {
+  items: { id: string }[];
+  nextCursor?: string | null;
+  hasMore?: boolean;
+}
+
 /** One request, timed the way a client experiences it: connect-to-parsed. */
-async function get(params) {
+async function get(params: Record<string, string>) {
   const url = `${API}/conversations?${new URLSearchParams({
     pageSize: String(PAGE_SIZE),
     ...params,
@@ -67,7 +78,7 @@ async function get(params) {
 
   const startedAt = performance.now();
   const response = await fetch(url, { headers: { 'x-org-id': ORG_ID } });
-  const body = await response.json();
+  const body = (await response.json()) as Page;
   const ms = performance.now() - startedAt;
 
   if (!response.ok) {
@@ -76,9 +87,12 @@ async function get(params) {
   return { body, ms };
 }
 
-const offsetPage = (page, extra = {}) => get({ page: String(page), ...extra });
+type Extra = Record<string, string>;
 
-const keysetPage = (cursor, extra = {}) =>
+const offsetPage = (page: number, extra: Extra = {}) =>
+  get({ page: String(page), ...extra });
+
+const keysetPage = (cursor: string | null, extra: Extra = {}) =>
   get({ paging: 'keyset', ...(cursor ? { cursor } : {}), ...extra });
 
 /**
@@ -93,12 +107,12 @@ const keysetPage = (cursor, extra = {}) =>
  * instead of one request, which is the number that actually matters for an
  * export.
  */
-async function keysetAtDepth(depth, extra = {}) {
-  let cursor = null;
-  let last = null;
+async function keysetAtDepth(depth: number, extra: Extra = {}) {
+  let cursor: string | null = null;
+  let last: Awaited<ReturnType<typeof get>> | null = null;
   for (let page = 1; page <= depth; page++) {
     last = await keysetPage(cursor, extra);
-    cursor = last.body.nextCursor;
+    cursor = last.body.nextCursor ?? null;
     if (!cursor && page < depth) return null; // the org is shorter than that
   }
   return last;
@@ -109,7 +123,7 @@ async function keysetAtDepth(depth, extra = {}) {
 /** Log-scaled, because a linear bar chart of 0.3ms next to 900ms is one bar
  *  and one invisible line. The linear version is the one in the plan file —
  *  there the flatness IS the picture; here you want to read both numbers. */
-function bars(rows) {
+function bars(rows: { label: string; ms: number }[]) {
   const max = Math.max(...rows.map((r) => Math.log10(Math.max(r.ms, 0.01))));
   const min = Math.log10(0.1);
   console.log('\n  log10 scale — each block is roughly a factor of 1.3\n');
@@ -126,7 +140,7 @@ function bars(rows) {
 // --------------------------------------------------------------------- depths
 
 async function depths() {
-  const results = new Map();
+  const results = new Map<number, { offset: number[]; keyset: number[] }>();
   for (const depth of DEPTHS) results.set(depth, { offset: [], keyset: [] });
 
   // Interleaved: both arms of a depth in the same few seconds, then the next
@@ -134,7 +148,7 @@ async function depths() {
   // the arm that happened to run during it.
   for (let round = 1; round <= ROUNDS; round++) {
     for (const depth of DEPTHS) {
-      const cell = results.get(depth);
+      const cell = results.get(depth)!;
 
       const offset = await offsetPage(depth).catch(() => null);
       if (offset) cell.offset.push(offset.ms);
@@ -148,10 +162,10 @@ async function depths() {
 
   console.log('  depth      row       offset ms    keyset ms   offset/keyset');
   const csv = ['depth,rows_skipped,offset_ms,keyset_ms'];
-  const chart = [];
+  const chart: { label: string; ms: number }[] = [];
   const table = [];
   for (const depth of DEPTHS) {
-    const cell = results.get(depth);
+    const cell = results.get(depth)!;
     if (!cell.offset.length || !cell.keyset.length) {
       console.log(
         `  ${String(depth).padStart(5)}      (past the end of the org)`,
@@ -184,7 +198,7 @@ async function depths() {
  * the whole list take", which is the cost nobody is watching.
  */
 async function walk() {
-  const arms = {};
+  const arms: Record<string, { ms: number; pages: number; rows: number }> = {};
 
   {
     const startedAt = performance.now();
@@ -201,12 +215,12 @@ async function walk() {
   {
     const startedAt = performance.now();
     let rows = 0;
-    let cursor = null;
+    let cursor: string | null = null;
     let page = 1;
     for (; page <= MAX_PAGES; page++) {
       const { body } = await keysetPage(cursor);
       rows += body.items.length;
-      cursor = body.nextCursor;
+      cursor = body.nextCursor ?? null;
       if (!body.hasMore) break;
     }
     arms.keyset = { ms: performance.now() - startedAt, pages: page, rows };
@@ -286,23 +300,29 @@ async function concurrent() {
   );
 
   const previousOrg = process.env.ORG_ID;
-  process.env.ORG_ID = org;
-  const short = (id) => id.slice(-6);
+  process.env.ORG_ID = String(org);
+  const short = (id: string) => id.slice(-6);
 
   try {
     const headers = { 'x-org-id': String(org) };
-    const call = async (params) => {
+    const call = async (params: Record<string, string>): Promise<Page> => {
       const url = `${API}/conversations?${new URLSearchParams({
         pageSize: '3',
         ...params,
       })}`;
       const response = await fetch(url, { headers });
-      return response.json();
+      return response.json() as Promise<Page>;
     };
 
     const offset1 = await call({ page: '1' });
     const keyset1 = await call({ paging: 'keyset' });
     const cursor = keyset1.nextCursor;
+    // Not a non-null assertion: an empty page 1 means the nine scratch rows
+    // never landed, and every line printed below it would then be describing
+    // an empty org rather than the anomaly it claims to show.
+    if (!cursor) {
+      throw new Error(`scratch org ${org} returned no cursor on page 1`);
+    }
 
     console.log(`scratch org ${org}, 9 conversations, pageSize=3\n`);
     console.log(`  page 1 (both arms agree)  ${offset1.items.map((i) => short(i.id)).join(' ')}`); // prettier-ignore
@@ -319,7 +339,7 @@ async function concurrent() {
     const keyset2 = await call({ paging: 'keyset', cursor });
 
     const seen = new Set(offset1.items.map((i) => i.id));
-    const mark = (items) =>
+    const mark = (items: Page['items']) =>
       items
         .map((i) =>
           seen.has(i.id) ? `${short(i.id)} <-- SEEN AGAIN` : short(i.id),
@@ -344,12 +364,12 @@ async function concurrent() {
     );
     console.log(`\n  --- a row still UNREAD (${short(below)}) is updated, jumping above the cursor\n`); // prettier-ignore
 
-    const rest = [];
-    let next = cursor;
+    const rest: string[] = [];
+    let next: string | null = cursor;
     for (let page = 0; page < 6 && next; page++) {
       const body = await call({ paging: 'keyset', cursor: next });
       rest.push(...body.items.map((i) => i.id));
-      next = body.nextCursor;
+      next = body.nextCursor ?? null;
     }
     console.log(
       `  keyset pages 2..n now return ${rest.length} rows; ` +
@@ -381,7 +401,7 @@ header(`paging ${subcommand}  api ${API}`);
 if (armState) console.log(`  server arms  ${JSON.stringify(armState)}\n`);
 
 await client.connect();
-let rows = null;
+let rows: unknown = null;
 try {
   if (subcommand === 'depths') rows = await depths();
   else if (subcommand === 'walk') rows = await walk();
