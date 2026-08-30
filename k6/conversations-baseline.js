@@ -2,8 +2,8 @@ import {
   BASE_URL,
   PAGE,
   PAGE_SIZE,
-  options,
   request,
+  scenario,
   summary,
 } from './lib/scenario.js';
 
@@ -26,7 +26,7 @@ import {
 
 const url = `${BASE_URL}/conversations?page=${PAGE}&pageSize=${PAGE_SIZE}`;
 
-export { options };
+export const options = scenario();
 
 export default function () {
   request(url);

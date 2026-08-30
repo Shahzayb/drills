@@ -325,6 +325,39 @@ Note the asymmetry with `db/lib/`, which check 2 skips: `db/lib/run.mjs`'s knobs
 instruments that import it, one of which may not. `k6/lib/scenario.js` is imported by every k6
 script, so its knobs are charged to it directly.
 
+#### 7.4 The load shape is the script's, the method is not
+
+7.1 froze `options` into a finished object. That was one decision too many. It welded together two
+things that are not the same:
+
+- **The method** — the discarded warm-up, the tagged sub-metric declarations, `summaryTrendStats`
+  for p99, the error assertion, throughput per measured second. This is what lets tonight's number
+  be compared to one from eight weeks ago, so it is not the script's to change.
+- **The load shape** — executor, VUs, duration, stages. A baseline wants `constant-vus`, a soak
+  wants `ramping-vus`, an open-model test wants `constant-arrival-rate`. Freezing this made the
+  module serve exactly one kind of experiment.
+
+`scenario({ measure, warmup, thresholds })` takes the shape and wraps the method around it.
+`scenario()` with no argument returns the flat baseline byte for byte, so the two existing scripts
+changed by two lines each and every recorded run in `k6/reports/` stays comparable.
+
+The part that needed care is the branch's own bug. A script declaring its own stages stops reading
+`VUS` and `DURATION`, and labelling the summary from those knobs anyway would print
+`vus=10 measured=60s` over a run that ramped to 200 for five minutes — correct percentiles under a
+false header. So `shapeOf()` reads the measured window, the VU count and the throughput divisor off
+the stage the script declared: stages sum their durations and report their peak target. Verified by
+running a ramping script under `--vus 999 --duration 60s` and getting `vus=12 measured=8s` with
+`42041 / 8 = 5255.13 req/s`.
+
+Two things stay closed. `summaryTrendStats` and the two sub-metric names are the contract
+`summary()` reads back by name, so a script cannot change them and silently break its own report;
+script thresholds merge *under* the fixed three rather than over them.
+
+Stated gap: the catalog still advertises `--vus` and `--duration` to every script. A script that
+hard-codes its stages must drop them from its entry in `scripts/load.mjs`, or the help text
+promises knobs that do nothing. Nothing checks this, because no script hits it yet — it is written
+into `scenario()`'s own docstring where the next author will be standing.
+
 ## What does not change
 
 - No benchmark framework, no adapter layer, no configuration DSL. The instruments measure

@@ -2,8 +2,8 @@ import {
   BASE_URL,
   PAGE_SIZE,
   Q,
-  options,
   request,
+  scenario,
   summary,
 } from './lib/scenario.js';
 
@@ -33,7 +33,7 @@ import {
 // scripts and the report directory name keeps meaning what it says.
 const url = `${BASE_URL}/messages/search?q=${encodeURIComponent(Q)}&limit=${PAGE_SIZE}`;
 
-export { options };
+export const options = scenario();
 
 export default function () {
   request(url);
