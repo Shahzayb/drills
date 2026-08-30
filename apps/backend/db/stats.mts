@@ -11,17 +11,20 @@
 //   pnpm db:stats
 //   pnpm db:stats:reset
 //
+// `.mts` and not `.ts`: apps/backend/package.json has no `type` field, so a
+// `.ts` here would be CommonJS. See plans/2026-08-30_instrument-typescript.md.
+//
 // One script, one subcommand, not three files — the psql-in-package.json
 // pattern (db:log:*) breaks down once a query needs two orderings and a
 // dealloc read; that is what killed drill 07's rls:status. See
 // plans/2026-08-15_drill-07-tenant-isolation.md.
 
-import { client as pgClient } from './lib/run.mjs';
+import { client as pgClient } from './lib/run.mts';
 
 const client = pgClient();
 
 const subcommand = process.argv[2];
-const USAGE = 'usage: node db/stats.mjs <on|report|reset>';
+const USAGE = 'usage: node db/stats.mts <on|report|reset>';
 
 if (!['on', 'report', 'reset'].includes(subcommand)) {
   console.error(USAGE);
@@ -35,9 +38,13 @@ async function on() {
     // The one failure worth a legible message: the extension's SQL objects
     // need the C library preloaded first, and that error message is a stock
     // one-liner that does not say what to do about it.
+    //
+    // `catch` binds `unknown`, and pg's SQLSTATE arrives as a `code` property
+    // rather than on a typed error class — so it is read off a narrowed shape.
+    const failed = error as { code?: string; message?: string };
     if (
-      error.code === '55000' ||
-      /shared_preload_libraries/i.test(String(error.message))
+      failed.code === '55000' ||
+      /shared_preload_libraries/i.test(String(failed.message))
     ) {
       console.error(
         'pg_stat_statements is not preloaded.\n\n' +

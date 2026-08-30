@@ -1,0 +1,24 @@
+{
+  // The k6 scripts. k6 2.1.0 transpiles TypeScript itself (esbuild, since 0.57),
+  // so nothing here is built — this config only checks.
+  //
+  // Separate from the root config because the runtime is: no `process`, no
+  // `node:` builtins, and __ENV/`open()` from @types/k6 instead.
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "ES2023",
+    "types": ["k6"],
+    "strict": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    // k6 will not resolve './lib/scenario.js' or './lib/scenario' — only the
+    // real filename. Measured against grafana/k6:2.1.0.
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["reports"]
+}

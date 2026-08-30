@@ -5,13 +5,14 @@ import {
   request,
   scenario,
   summary,
-} from './lib/scenario.js';
+  type SummaryData,
+} from './lib/scenario.ts';
 
 /**
  * Drill 11 — GET /messages/search under load.
  *
- * Same method as conversations-baseline.js, and now literally so: both import
- * lib/scenario.js. The only reason this is a separate file rather than a knob
+ * Same method as conversations-baseline.ts, and now literally so: both import
+ * lib/scenario.ts. The only reason this is a separate file rather than a knob
  * on the baseline is that the baseline's recorded runs must keep measuring the
  * same URL. See plans/2026-08-13_drill-05-load-test-baseline.md.
  *
@@ -35,11 +36,11 @@ const url = `${BASE_URL}/messages/search?q=${encodeURIComponent(Q)}&limit=${PAGE
 
 export const options = scenario();
 
-export default function () {
+export default function (): void {
   request(url);
 }
 
-export function handleSummary(data) {
+export function handleSummary(data: SummaryData) {
   return summary(data, {
     params: `q=${Q} limit=${PAGE_SIZE}`,
     columns: [Q, PAGE_SIZE],

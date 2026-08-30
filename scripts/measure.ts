@@ -8,26 +8,48 @@
 // of package.json, by being a runner. This is that, for db/.
 //
 // The catalog below is the single declaration of every knob. It generates the
-// -e flags, so the class of bug scripts/check-arms.mjs was written to catch —
+// -e flags, so the class of bug scripts/check-arms.ts was written to catch —
 // a knob set in the shell that never reaches the code reading it — cannot be
 // introduced by forgetting a flag any more. check-arms now checks this catalog
 // against the instrument source instead.
+//
+// The catalog's literal shape is load-bearing twice over: check-arms parses it
+// as TEXT for `file: '…'` and `env: '…', def: '…'`, so the types below annotate
+// the surrounding const and never move a key inside the object literals. See
+// plans/2026-08-30_instrument-typescript.md.
 //
 // Runs on the HOST. See plans/2026-08-30_instrument-hardening.md section 6.
 
 import { spawnSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
 
-// Written by db/lib/run.mjs rather than by any instrument, so every instrument
+interface Knob {
+  /** The `--flag` spelling. */
+  flag: string;
+  /** The environment variable `docker compose exec -e` forwards it as. */
+  env: string;
+  /** Shown in --help. Not sent: the default lives in the container, in knob(). */
+  def?: string;
+  help: string;
+}
+
+interface Instrument {
+  file: string;
+  blurb: string;
+  subcommands: Record<string, string> | null;
+  knobs: Knob[];
+}
+
+// Written by db/lib/run.mts rather than by any instrument, so every instrument
 // gets them. GIT_SHA is computed here because .git is not mounted into the
 // container.
-const COMMON = [
+const COMMON: Knob[] = [
   { flag: 'name', env: 'NAME', help: 'labels the report directory' },
 ];
 
-const INSTRUMENTS = {
+const INSTRUMENTS: Record<string, Instrument> = {
   explain: {
-    file: 'db/explain.mjs',
+    file: 'db/explain.mts',
     blurb: 'query plans, index selectivity, and the offset/keyset EXPLAIN',
     subcommands: {
       plans: 'the shipped list query, one plan per filter combination',
@@ -66,7 +88,7 @@ const INSTRUMENTS = {
   },
 
   paging: {
-    file: 'db/paging.mjs',
+    file: 'db/paging.mts',
     blurb: 'offset vs keyset pagination, measured over HTTP',
     subcommands: {
       depths: 'both arms at each depth, N rounds, median',
@@ -98,7 +120,7 @@ const INSTRUMENTS = {
   },
 
   search: {
-    file: 'db/search.mjs',
+    file: 'db/search.mts',
     blurb: 'full-text search: plans, index candidates, and write cost',
     subcommands: {
       plans: 'ILIKE vs FTS plans across a selectivity ladder',
@@ -144,7 +166,7 @@ const INSTRUMENTS = {
   },
 
   bench: {
-    file: 'db/bench-copy.mjs',
+    file: 'db/bench-copy.mts',
     blurb: 'INSERT vs multi-row INSERT vs COPY, on a scratch table',
     subcommands: null,
     knobs: [
@@ -153,12 +175,14 @@ const INSTRUMENTS = {
   },
 };
 
-const die = (message) => {
+// Annotated on the const, not on the arrow: TypeScript only lets a `never`
+// return narrow the code after the call when the *variable* carries the type.
+const die: (message: string) => never = (message) => {
   console.error(message);
   process.exit(1);
 };
 
-function help(name, instrument) {
+function help(name: string, instrument: Instrument): string {
   const lines = [`${name} — ${instrument.blurb}`, ''];
 
   if (instrument.subcommands) {
@@ -186,11 +210,11 @@ function help(name, instrument) {
 // ------------------------------------------------------------------- dispatch
 
 const [name, ...rest] = process.argv.slice(2);
-const instrument = INSTRUMENTS[name];
+const instrument = name ? INSTRUMENTS[name] : undefined;
 
 if (!instrument) {
   die(
-    `usage: node scripts/measure.mjs <${Object.keys(INSTRUMENTS).join('|')}> [subcommand] [--flags]`,
+    `usage: node scripts/measure.ts <${Object.keys(INSTRUMENTS).join('|')}> [subcommand] [--flags]`,
   );
 }
 
@@ -198,24 +222,29 @@ const knobs = [...instrument.knobs, ...COMMON];
 
 // No defaults in this config on purpose. parseArgs returns a configured default
 // as though the operator had supplied it, which would forward every knob and
-// make db/lib/run.mjs report `(env)` for values nobody set — destroying the
+// make db/lib/run.mts report `(env)` for values nobody set — destroying the
 // provenance the header exists to print. Defaults stay in knob(), in the
 // container.
-const options = { help: { type: 'boolean', short: 'h' } };
+const options: Record<string, { type: 'string' | 'boolean'; short?: string }> =
+  {
+    help: { type: 'boolean', short: 'h' },
+  };
 for (const k of knobs) options[k.flag] = { type: 'string' };
 
-let values, positionals;
-try {
-  ({ values, positionals } = parseArgs({
-    args: rest,
-    options,
-    allowPositionals: true,
-  }));
-} catch (error) {
-  // parseArgs' own message trails into advice about `--` and positional
-  // arguments, which is not the reader's problem. The knob list is.
-  die(`${error.message.split('. ')[0]}\n\n${help(name, instrument)}`);
-}
+// An arrow on a const, not a function declaration: a hoisted declaration does
+// not see that the `if` above already narrowed instrument away from null.
+const parse = (args: string[]) => {
+  try {
+    return parseArgs({ args, options, allowPositionals: true });
+  } catch (error) {
+    // parseArgs' own message trails into advice about `--` and positional
+    // arguments, which is not the reader's problem. The knob list is.
+    const message = error instanceof Error ? error.message : String(error);
+    die(`${message.split('. ')[0]}\n\n${help(name, instrument)}`);
+  }
+};
+
+const { values, positionals } = parse(rest);
 
 const [subcommand] = positionals;
 
@@ -232,10 +261,10 @@ if (instrument.subcommands && !instrument.subcommands[subcommand]) {
 
 // A flag beats the environment; an unset knob is forwarded as nothing at all,
 // so the instrument sees it as absent rather than as the empty string.
-const env = [];
+const env: string[] = [];
 for (const k of knobs) {
   const value = values[k.flag] ?? process.env[k.env];
-  if (value) env.push('-e', `${k.env}=${value}`);
+  if (value) env.push('-e', `${k.env}=${String(value)}`);
 }
 
 const gitSha = spawnSync('git', ['rev-parse', '--short', 'HEAD'], {

@@ -5,7 +5,8 @@ import {
   request,
   scenario,
   summary,
-} from './lib/scenario.js';
+  type SummaryData,
+} from './lib/scenario.ts';
 
 /**
  * Drill 05 baseline — GET /conversations, one page, fixed concurrency.
@@ -20,7 +21,7 @@ import {
  * gitignored; the summary is the part that gets committed.
  *
  * The filename is load-bearing: ~60 recorded run directories carry it, and the
- * plans cite them by name. It stays `conversations-baseline.js` for that reason
+ * plans cite them by name. It stays `conversations-baseline.ts` for that reason
  * alone. `pnpm load list` is the short way to run it.
  */
 
@@ -28,11 +29,11 @@ const url = `${BASE_URL}/conversations?page=${PAGE}&pageSize=${PAGE_SIZE}`;
 
 export const options = scenario();
 
-export default function () {
+export default function (): void {
   request(url);
 }
 
-export function handleSummary(data) {
+export function handleSummary(data: SummaryData) {
   return summary(data, {
     params: `page=${PAGE} pageSize=${PAGE_SIZE}`,
     columns: [PAGE, PAGE_SIZE],

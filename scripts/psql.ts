@@ -15,7 +15,16 @@
 
 import { spawnSync } from 'node:child_process';
 
-const COMMANDS = {
+interface Command {
+  blurb: string;
+  sql: string[];
+  /** psql's `-v ON_ERROR_STOP=1` — for the ones where statement 2 depends on 1. */
+  stopOnError?: boolean;
+  /** Keeps the TTY, so `\d` and friends work. */
+  interactive?: boolean;
+}
+
+const COMMANDS: Record<string, Command> = {
   'migrate:status': {
     blurb: 'which migrations have run',
     sql: ['table pgmigrations order by id'],
@@ -74,11 +83,11 @@ const COMMANDS = {
 };
 
 const name = process.argv[2];
-const command = COMMANDS[name];
+const command = name ? COMMANDS[name] : undefined;
 
 if (!command) {
   const width = Math.max(...Object.keys(COMMANDS).map((k) => k.length));
-  console.error('usage: node scripts/psql.mjs <command>\n');
+  console.error('usage: node scripts/psql.ts <command>\n');
   for (const [key, { blurb }] of Object.entries(COMMANDS)) {
     console.error(`  ${key.padEnd(width + 2)} ${blurb}`);
   }
