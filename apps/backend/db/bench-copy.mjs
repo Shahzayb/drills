@@ -13,12 +13,12 @@
 
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
-import pg from 'pg';
 import { from as copyFrom } from 'pg-copy-streams';
 import { faker } from '@faker-js/faker';
 import { createCorpus, mulberry32, PHASE } from './lib/corpus.mjs';
+import { client as pgClient, header, knobNumber, record } from './lib/run.mjs';
 
-const ROWS = Number(process.env.BENCH_ROWS ?? 100_000);
+const ROWS = knobNumber('BENCH_ROWS', 100_000);
 const BATCH_LINES = 10_000;
 const SEED = 20260811;
 
@@ -35,13 +35,7 @@ const SCRATCH = `
   );
 `;
 
-const client = new pg.Client({
-  host: process.env.POSTGRES_HOST ?? 'localhost',
-  port: Number(process.env.POSTGRES_PORT ?? 5432),
-  user: process.env.POSTGRES_USER ?? 'postgres',
-  password: process.env.POSTGRES_PASSWORD ?? 'postgres',
-  database: process.env.POSTGRES_DB ?? 'postgres',
-});
+const client = pgClient();
 
 const BODY = 'x'.repeat(180);
 const UUID = '018f3a2b-0000-7000-8000-000000000000';
@@ -172,7 +166,10 @@ async function main() {
   for (const s of b.sample.slice(1)) console.log(`  - ${s}`);
 
   await client.end();
+  record('bench-copy', 'copy', {});
 }
+
+header('bench-copy');
 
 main().catch((error) => {
   console.error(error);

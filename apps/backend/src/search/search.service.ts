@@ -38,7 +38,7 @@ export interface MessageSearchResult {
  */
 export type SearchStrategy = 'like' | 'fts';
 
-const SEARCH_STRATEGY: SearchStrategy =
+export const SEARCH_STRATEGY: SearchStrategy =
   process.env.SEARCH_STRATEGY === 'like' ? 'like' : 'fts';
 
 /**

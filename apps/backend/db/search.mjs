@@ -26,12 +26,18 @@
 // Full reasoning and the captured output:
 // plans/2026-08-29_drill-11-full-text-search.md.
 
-import pg from 'pg';
 import { faker } from '@faker-js/faker';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { from as copyFrom } from 'pg-copy-streams';
 import { createCorpus, mulberry32, phaseFor } from './lib/corpus.mjs';
+import {
+  client as pgClient,
+  header,
+  knob,
+  knobNumber,
+  record,
+} from './lib/run.mjs';
 
 const MODES = ['plans', 'indexes', 'gaps', 'writes'];
 const mode = process.argv[2];
@@ -48,12 +54,16 @@ if (!APP_USER) {
   process.exit(1);
 }
 
-// `||` rather than `??`: `docker compose exec -e ORG_ID` delivers an unset host
-// variable as the empty string, not as absent. Drill 09's ORG_ID knob measured
-// org 1 for a whole card because of it.
-const ORG_ID = process.env.ORG_ID || '1';
-const ROUNDS = Number(process.env.ROUNDS || 5);
-const LIMIT = Number(process.env.LIMIT || 20);
+// Every knob at the top, so the header prints the full set before the first
+// query. The `||` rule they are read under, and why the empty string counts as
+// absent, live in db/lib/run.mjs.
+const ORG_ID = knob('ORG_ID', '1');
+const ROUNDS = knobNumber('ROUNDS', 5);
+const LIMIT = knobNumber('LIMIT', 20);
+const MWM = knob('MAINTENANCE_WORK_MEM', '512MB');
+const ONLY = knob('ONLY', '');
+const ROWS = knobNumber('ROWS', 50000);
+const INSERTS = knobNumber('INSERTS', 2000);
 const INDEX_NAME = 'messages_org_tsv_idx';
 
 // A selectivity ladder, not one term. `export` is 4.1% of the whale org and
@@ -61,17 +71,10 @@ const INDEX_NAME = 'messages_org_tsv_idx';
 // differently enough that reporting only one of them would be a lie by
 // selection. Counted with
 //   select count(*) from messages where org_id = 1 and message ilike '%export%';
-const TERMS = process.env.SEARCH_TERM
-  ? [process.env.SEARCH_TERM]
-  : ['export', 'ERR_2452'];
+const SEARCH_TERM = knob('SEARCH_TERM', '');
+const TERMS = SEARCH_TERM ? [SEARCH_TERM] : ['export', 'ERR_2452'];
 
-const client = new pg.Client({
-  host: process.env.POSTGRES_HOST ?? 'localhost',
-  port: Number(process.env.POSTGRES_PORT ?? 5432),
-  user: process.env.POSTGRES_USER,
-  password: process.env.POSTGRES_PASSWORD,
-  database: process.env.POSTGRES_DB,
-});
+const client = pgClient();
 
 // ---------------------------------------------------------------- the queries
 
@@ -366,7 +369,6 @@ async function indexes() {
   // Session-level and stated, because a build time without its
   // maintenance_work_mem is not a number. The shipped index's real build time
   // is measured separately, by the migration, at the server default of 64MB.
-  const MWM = process.env.MAINTENANCE_WORK_MEM || '512MB';
   const setMwm = () =>
     asOwner(() => client.query(`SET LOCAL maintenance_work_mem = '${MWM}'`));
   await setMwm();
@@ -401,7 +403,6 @@ async function indexes() {
   // A substring filter over the labels, so the two GIN variants can be
   // re-priced against the tail org without rebuilding two 1,959 MB btrees and a
   // trigram index to get there: ONLY=gin ORG_ID=150 pnpm db:search indexes
-  const ONLY = process.env.ONLY || '';
 
   console.log(
     '  candidate                          build s      size   ' +
@@ -636,9 +637,6 @@ async function gaps() {
  * before and after for exactly that reason.
  */
 async function writes() {
-  const ROWS = Number(process.env.ROWS || 50000);
-  const INSERTS = Number(process.env.INSERTS || 2000);
-
   await client.query('BEGIN');
 
   const { rows: convs } = await client.query(
@@ -794,6 +792,8 @@ async function writes() {
 
 // ----------------------------------------------------------------------- main
 
+header(`search ${mode}`);
+
 await client.connect();
 try {
   if (mode === 'plans') await plans();
@@ -803,3 +803,5 @@ try {
 } finally {
   await client.end();
 }
+
+record('search', mode, {});

@@ -16,15 +16,9 @@
 // dealloc read; that is what killed drill 07's rls:status. See
 // plans/2026-08-15_drill-07-tenant-isolation.md.
 
-import pg from 'pg';
+import { client as pgClient } from './lib/run.mjs';
 
-const client = new pg.Client({
-  host: process.env.POSTGRES_HOST ?? 'localhost',
-  port: Number(process.env.POSTGRES_PORT ?? 5432),
-  user: process.env.POSTGRES_USER ?? 'postgres',
-  password: process.env.POSTGRES_PASSWORD ?? 'postgres',
-  database: process.env.POSTGRES_DB ?? 'postgres',
-});
+const client = pgClient();
 
 const subcommand = process.argv[2];
 const USAGE = 'usage: node db/stats.mjs <on|report|reset>';

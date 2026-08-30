@@ -42,7 +42,7 @@ has a built-in `setup` command that shadows the script.
 pnpm docker:up          # start        (docker:down, docker:logs)
 pnpm db:reset           # migrate + seed from scratch (db:migrate, db:seed, db:psql)
 pnpm db:test            # backend e2e suite, inside the container
-pnpm load:baseline      # k6 baseline run
+pnpm load list          # k6 baseline run (load search, load <script> --help)
 pnpm trace:on           # spans + collector + Jaeger on :16686 (trace:off)
 pnpm logs:trace <id>    # one request across all services
 pnpm check:tenancy      # RLS coverage + the serving role cannot bypass it

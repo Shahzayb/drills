@@ -213,7 +213,7 @@ const toMessage = (row: MessageRow): MessageListItem => ({
  * plans/2026-08-17_drill-08-n-plus-one.md.
  */
 type ListStrategy = 'naive' | 'batched';
-const LIST_STRATEGY: ListStrategy =
+export const LIST_STRATEGY: ListStrategy =
   process.env.LIST_STRATEGY === 'naive' ? 'naive' : 'batched';
 
 /**
@@ -227,7 +227,7 @@ const LIST_STRATEGY: ListStrategy =
  * This exists so `pnpm db:test:notiebreak` can go red on purpose. A correctness
  * argument nobody has watched fail is a claim, not a proof.
  */
-const KEYSET_TIEBREAK: 'on' | 'off' =
+export const KEYSET_TIEBREAK: 'on' | 'off' =
   process.env.KEYSET_TIEBREAK === 'off' ? 'off' : 'on';
 
 @Injectable()

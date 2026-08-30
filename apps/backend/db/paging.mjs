@@ -24,7 +24,16 @@
 // Full reasoning and the captured output:
 // plans/2026-08-26_drill-10-keyset-pagination.md.
 
-import pg from 'pg';
+import {
+  client as pgClient,
+  header,
+  knob,
+  knobList,
+  knobNumber,
+  median,
+  record,
+  serverArms,
+} from './lib/run.mjs';
 
 const subcommand = process.argv[2];
 const USAGE = 'usage: node db/paging.mjs <depths|walk|concurrent>';
@@ -38,16 +47,14 @@ if (!['depths', 'walk', 'concurrent'].includes(subcommand)) {
 // `docker compose exec -e ORG_ID`, and an unset host variable arrives as the
 // empty string, not as absent.
 const API = process.env.BACKEND_INTERNAL_URL || 'http://nest_server:3002';
-const ORG_ID = process.env.ORG_ID || '1';
-const PAGE_SIZE = Number(process.env.PAGE_SIZE || 50);
-const ROUNDS = Number(process.env.ROUNDS || 3);
+const ORG_ID = knob('ORG_ID', '1');
+const PAGE_SIZE = knobNumber('PAGE_SIZE', 50);
+const ROUNDS = knobNumber('ROUNDS', 3);
 // The card's five. Overridable so a slow box can stop at 1000.
-const DEPTHS = (process.env.DEPTHS || '1,10,100,1000,5000')
-  .split(',')
-  .map(Number);
+const DEPTHS = knobList('DEPTHS', '1,10,100,1000,5000');
 // How far `walk` goes before extrapolating. 400 is the card's own example, and
 // on the whale the offset arm alone takes minutes past it.
-const MAX_PAGES = Number(process.env.MAX_PAGES || 400);
+const MAX_PAGES = knobNumber('MAX_PAGES', 400);
 
 // ------------------------------------------------------------------ requests
 
@@ -99,14 +106,6 @@ async function keysetAtDepth(depth, extra = {}) {
 
 // ------------------------------------------------------------------ reporting
 
-const median = (values) => {
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2
-    ? sorted[middle]
-    : (sorted[middle - 1] + sorted[middle]) / 2;
-};
-
 /** Log-scaled, because a linear bar chart of 0.3ms next to 900ms is one bar
  *  and one invisible line. The linear version is the one in the plan file —
  *  there the flatness IS the picture; here you want to read both numbers. */
@@ -127,10 +126,6 @@ function bars(rows) {
 // --------------------------------------------------------------------- depths
 
 async function depths() {
-  console.log(
-    `org ${ORG_ID}  pageSize=${PAGE_SIZE}  rounds=${ROUNDS}  ` + `api ${API}\n`,
-  );
-
   const results = new Map();
   for (const depth of DEPTHS) results.set(depth, { offset: [], keyset: [] });
 
@@ -154,6 +149,7 @@ async function depths() {
   console.log('  depth      row       offset ms    keyset ms   offset/keyset');
   const csv = ['depth,rows_skipped,offset_ms,keyset_ms'];
   const chart = [];
+  const table = [];
   for (const depth of DEPTHS) {
     const cell = results.get(depth);
     if (!cell.offset.length || !cell.keyset.length) {
@@ -171,12 +167,14 @@ async function depths() {
         `${(o / k).toFixed(1).padStart(8)}x`,
     );
     csv.push(`${depth},${skipped},${o.toFixed(2)},${k.toFixed(2)}`);
+    table.push({ depth, rowsSkipped: skipped, offsetMs: o, keysetMs: k });
     chart.push({ label: `offset p${depth}`, ms: o });
     chart.push({ label: `keyset p${depth}`, ms: k });
   }
 
   bars(chart);
   console.log('\n' + csv.join('\n'));
+  return table;
 }
 
 // ----------------------------------------------------------------------- walk
@@ -186,10 +184,6 @@ async function depths() {
  * the whole list take", which is the cost nobody is watching.
  */
 async function walk() {
-  console.log(
-    `org ${ORG_ID}  pageSize=${PAGE_SIZE}  max ${MAX_PAGES} pages per arm\n`,
-  );
-
   const arms = {};
 
   {
@@ -249,6 +243,8 @@ async function walk() {
         `close to exact for keyset)`,
     );
   }
+
+  return arms;
 }
 
 // ----------------------------------------------------------------- concurrent
@@ -375,19 +371,23 @@ async function concurrent() {
 
 // --------------------------------------------------------------------- main
 
-const client = new pg.Client({
-  host: process.env.POSTGRES_HOST || 'localhost',
-  port: Number(process.env.POSTGRES_PORT || 5432),
-  user: process.env.POSTGRES_USER,
-  password: process.env.POSTGRES_PASSWORD,
-  database: process.env.POSTGRES_DB,
-});
+const client = pgClient();
+
+// Before the first measurement, so a stale container is visible up front, and
+// outside every timed region.
+const armState = await serverArms(API);
+
+header(`paging ${subcommand}  api ${API}`);
+if (armState) console.log(`  server arms  ${JSON.stringify(armState)}\n`);
 
 await client.connect();
+let rows = null;
 try {
-  if (subcommand === 'depths') await depths();
-  else if (subcommand === 'walk') await walk();
+  if (subcommand === 'depths') rows = await depths();
+  else if (subcommand === 'walk') rows = await walk();
   else await concurrent();
 } finally {
   await client.end();
 }
+
+record('paging', subcommand, { rows, arms: armState });
