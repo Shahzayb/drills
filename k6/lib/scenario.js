@@ -54,6 +54,7 @@ const SUMMARY_OUT = __ENV.SUMMARY_OUT;
 // and the warm-up cannot be excluded at all.
 const MEASURED_DURATION = 'http_req_duration{scenario:measure}';
 const MEASURED_REQS = 'http_reqs{scenario:measure}';
+const MEASURED_FAILED = 'http_req_failed{scenario:measure}';
 
 /**
  * A k6 duration to seconds. '60s', '1m', '2m30s', '1h' all parse.
@@ -138,10 +139,10 @@ let SHAPE = null;
  *     ] },
  *   });
  *
- * `warmup` defaults to the measured stage shortened to WARMUP, and `thresholds`
- * are merged UNDER the fixed three: the two sub-metric declarations and the
- * error rate are the contract summary() reads back, not preference. A script
- * may add thresholds of its own and may not remove those.
+ * `warmup` defaults to the measured stage shortened to WARMUP. `thresholds`
+ * may replace the error rate — a stress test is looking for the errors a
+ * baseline refuses — and may add to the duration budget, but cannot remove the
+ * two sub-metric declarations, which summary() reads back by name.
  *
  * A script that shapes its own stages stops reading VUS and DURATION. Drop
  * `--vus` and `--duration` from its entry in scripts/load.mjs when that
@@ -183,11 +184,20 @@ export function scenario({ measure = flat(), warmup, thresholds } = {}) {
     ],
 
     thresholds: {
+      // Policy, so the script owns it. A run containing errors is not a
+      // baseline — and is exactly what a stress test is looking for. A crossed
+      // threshold exits 99 and scripts/load.mjs propagates it, so a stress run
+      // that could not loosen this would report success as a failed command.
+      [MEASURED_FAILED]: ['rate<0.01'],
       ...thresholds,
-      [MEASURED_DURATION]: durationThresholds,
+      // Declarations, not assertions: k6 does not compute a tagged sub-metric
+      // unless a threshold names it, and summary() reads both back by name. A
+      // script may ADD to the duration budget and may not remove either entry.
+      [MEASURED_DURATION]: [
+        ...durationThresholds,
+        ...(thresholds?.[MEASURED_DURATION] ?? []),
+      ],
       [MEASURED_REQS]: ['count>0'],
-      // This one is a real assertion. A run containing errors is not a baseline.
-      'http_req_failed{scenario:measure}': ['rate<0.01'],
     },
   };
 }

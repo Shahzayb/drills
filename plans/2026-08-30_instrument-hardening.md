@@ -574,6 +574,22 @@ PR and fixing the exception in the next would have made the rule read as advisor
   `search.mjs indexes()` at 178 lines, and `rows` in `run.json` populated for `db:paging` alone.
   Instruments returning rows to one shared renderer is a real change, and folding it into 6 would
   make that phase unreviewable. Deferred, not dropped.
+- **Stress, spike, soak and breakpoint shapes.** 7.4 opens the door — the executor is the
+  script's and `ramping-vus` is verified working — but three things in the *reporting* layer are
+  still shaped for a steady-state baseline, and each should be fixed when the first such script
+  lands rather than speculatively now:
+  1. **One aggregate row per run.** `summary()` emits a single p50/p95/p99 over the measured
+     window. For a ramp that blends the healthy region with the broken one, and the answer is the
+     time series, not a better aggregate — the web dashboard already exported to every report
+     directory is the right artifact, and `--out json` is there for the rest. A stress script
+     should skip the RESULT row rather than print a meaningless one.
+  2. **The report directory name embeds `vus` and `duration`.** `scripts/load.mjs` builds it from
+     the knobs, which a stages script does not read, so a ramp to 200 over seven minutes would be
+     filed as `-vus10-…-60s`. The same false-label bug 7.4 fixed inside the summary, still live in
+     the filename — and filenames are how runs are cited. The fix is a `shape` marker in the
+     catalog so the runner omits those two segments for non-flat runs.
+  3. **Which knobs a shape actually reads.** A script hard-coding its stages ignores `--vus` and
+     `--duration`, and the catalog still advertises them.
 - **Renaming the k6 scripts.** `conversations-baseline.js` and `messages-search.js` are long and
   the catalog aliases them to `list` and `search`, but ~60 recorded report directories embed the
   filename and four plans cite it. Renaming would split the record in two for a cosmetic gain.
