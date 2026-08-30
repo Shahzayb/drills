@@ -1,6 +1,6 @@
 # Instrument hardening — make a knob that does nothing fail loudly
 
-**Status:** implemented (both phases)
+**Status:** implemented (all three phases)
 
 ## Context
 
@@ -175,6 +175,11 @@ by path. Its `root` constant goes from `../../../` to `../`, and its `.env` path
 and `k6/reports/`, and splitting it from them to satisfy a directory rule would cost more than
 the rule is worth.
 
+> **Superseded by 7.2.** The exemption was wrong. Stating an invariant and keeping one file
+> outside it makes the invariant advisory, and the exemption's argument — cohesion with
+> `k6/*.js` — is the argument for the *scripts*, not for the host-side runner that launches
+> them. `k6/run-baseline.mjs` is now `scripts/load.mjs`.
+
 #### 6.2 `scripts/measure.mjs`
 
 It owns a catalog — instrument, its subcommands, and its knobs with flag name, environment name,
@@ -260,10 +265,70 @@ rather than reading it. The check matches the run-record knobs by name anywhere 
 the same crude test check 3 uses on the k6 runner, and it is stated here for the same reason: it
 catches a rename that half-lands, not a name mentioned and unused.
 
+### 7. The k6 side, on the same two arguments (phase 3)
+
+Phase 2 left `k6/` exactly as it found it, which meant the branch shipped a layout invariant that
+`k6/run-baseline.mjs` broke: a 186-line HOST script living in the directory reserved for what runs
+in the container. The two k6 scripts had the other half of the problem — `messages-search.js` was
+90% a copy of `conversations-baseline.js`, and said so in its own header.
+
+#### 7.1 `k6/lib/scenario.js` — the method, once
+
+`conversations-baseline.js` (148 lines) and `messages-search.js` (126) differed in the URL, one
+knob, the summary's parameter line and two columns of the RESULT row. Everything else — the
+warm-up/measure scenario split, the tagged sub-metric declarations, the thresholds, the
+`summaryTrendStats` list, the p99 arithmetic, the SUMMARY_OUT dance — was duplicated verbatim.
+
+That duplication is not the same as `db/`'s. The `db/` instruments have genuinely different timing
+loops, which is why a shared *measurement* harness stays rejected there. These two scripts are the
+same experiment against two URLs, stated as such in prose and enforced by nothing. Extracting the
+method makes the claim true by construction. Each script is now a URL, a `params` string, and two
+`columns`: 40 and 47 lines.
+
+**Filenames do not change.** ~60 recorded report directories are named after them and four plans
+cite those names. `pnpm load list` and `pnpm load search` are the short way in.
+
+#### 7.2 `scripts/load.mjs`
+
+`k6/run-baseline.mjs` moves to `scripts/`, where host scripts live, and takes the shape of
+`scripts/measure.mjs`: a knob catalog, `parseArgs`, generated `-e` flags, `--help` per script.
+What it loses is the hand-rolled env plumbing — nine `const X = process.env.X || '…'` lines and a
+literal object built from them.
+
+One deliberate difference from `measure.mjs`. There, a catalog default is **not** forwarded, so an
+unset knob stays `(default)` in the header. Here it **is**: the report directory name is built from
+`ORG_ID`/`VUS`/`PAGE`/`PAGE_SIZE`/`DURATION`, so the runner has to resolve them, and a k6 summary
+prints values rather than provenance, so nothing is lost by sending them. The directory name format
+is byte-identical to before, including the `page1` a search run carries.
+
+Anything after `--` goes to `k6 run`, replacing the old trailing-args behaviour that `parseArgs`
+would otherwise reject. A `.js` name not in the catalog still runs, with the common knobs only, so
+a scratch script needs no entry.
+
+`pnpm load:baseline` stays as an alias for `pnpm load list`: `README.md`, three plans and
+`techContext.md` cite it. Same reasoning as the `db:*` names in 6.
+
+#### 7.3 The default that is written twice, and the check for it
+
+`lib/scenario.js` keeps its own `__ENV.VUS || '10'` defaults, because a k6 script has to be
+runnable by hand, and `scripts/load.mjs` declares the same values in its catalog, because it builds
+the directory name. Two copies of a default is precisely the bug class this branch exists to
+close, so `check:arms` gained a third direction: it pairs `__ENV.X || 'v'` in `k6/` against
+`env: 'X', def: 'v'` in the catalog and fails when they disagree, naming both values.
+
+Check 3 also had to follow the knobs. It read `k6/*.js` at the top level only; every `__ENV` read
+now lives in `k6/lib/scenario.js`, so it would have gone green while checking nothing — the same
+failure the plan already records against `envReads`. It walks `k6/` now, skipping `reports/`, and
+`envReads` gained `__ENV.X` as a third spelling so one scanner serves all three checks.
+
+Note the asymmetry with `db/lib/`, which check 2 skips: `db/lib/run.mjs`'s knobs belong to the
+instruments that import it, one of which may not. `k6/lib/scenario.js` is imported by every k6
+script, so its knobs are charged to it directly.
+
 ## What does not change
 
 - No benchmark framework, no adapter layer, no configuration DSL. The instruments measure
-  different things and the long comment headers on `paging.mjs` and `run-baseline.mjs` are part
+  different things and the long comment headers on `paging.mjs` and `k6/lib/scenario.js` are part
   of what the drills teach.
 - No change to what any instrument measures. Every recorded number stays comparable, and this
   plan produces no new measurement of its own.
@@ -297,6 +362,17 @@ Phase 2:
 | `scripts/check-arms.mjs` | moved from `apps/backend/db/`; check 2 retargets | ~ +20 / −45 |
 | `package.json` | 11 scripts collapse; 3,780 chars → ~2,360 | ~ −1,420 chars |
 | `apps/backend/package.json` | drop four passthrough scripts | −4 |
+
+Phase 3:
+
+| File | Change | Est. |
+|---|---|---|
+| `k6/lib/scenario.js` | new — the measurement method, once | +160 |
+| `k6/conversations-baseline.js` | URL + summary line only | 148 → 40 |
+| `k6/messages-search.js` | same | 126 → 47 |
+| `scripts/load.mjs` | moved from `k6/run-baseline.mjs`; catalog, `parseArgs`, help | 186 → 265 |
+| `scripts/check-arms.mjs` | check 3 walks `k6/`; `__ENV` spelling; default agreement | ~ +35 / −20 |
+| `package.json` | `pnpm load`, `load:baseline` becomes an alias | +1 |
 
 ## Verification
 
@@ -342,6 +418,34 @@ instrument reads is named a flag that does nothing, and a knob removed from the 
 unreachable. `pnpm db:log:on` / `:status` / `:off` round-trips −1 → 0 → −1. `pnpm db:test` 85/85,
 `db:test:naive` still exactly 2 failed / 83 passed.
 
+Phase 3, same red-then-green rule:
+
+14. A knob added to `k6/lib/scenario.js` that `scripts/load.mjs` does not forward makes
+    `pnpm check:arms` fail and name it. This is the check that would have silently stopped
+    working when the `__ENV` reads moved into `lib/`.
+15. Changing one k6 default so it disagrees with the catalog makes `check:arms` fail and print
+    both values.
+16. A knob named `TERM` in a k6 file fails on the reserved name, same as in `db/`.
+17. `pnpm load list` and `pnpm load search` run end to end and write `run.json`, `summary.txt`
+    and `dashboard.html` into a directory named exactly as before.
+18. `pnpm load search --help` prints its knobs; `--orgg 150` fails naming the unknown flag.
+19. `ORG_ID=1 VUS=2 … pnpm load:baseline` and the equivalent `--flag` form write identical
+    `knobs` blocks.
+20. `docker compose --profile test run --rm k6 run /scripts/conversations-baseline.js` still
+    works with no runner at all, on the script's own defaults.
+
+Results. The two k6 scripts went from 274 lines to 87, with the 160-line method extracted to
+`k6/lib/scenario.js`. All three new `check:arms` directions go red on demand: an unforwarded
+`__ENV.WARMUP_XYZ`, a `VUS` default of `'25'` against the catalog's `'10'`, and a `TERM` read.
+`pnpm load list --name smoke-list --warmup 2s --duration 3s --vus 2` wrote
+`k6/reports/2026-08-30-192344-smoke-list-conversations-baseline-org1-vus2-page1-size20-3s/`,
+the same name shape as the 60 directories recorded before it, with `arms` and `gitSha` in
+`run.json`. `pnpm load search` printed `q=ERR_2452 limit=20` and the RESULT row in the same
+column order as before. The env-var and `--flag` forms produced byte-identical `knobs` blocks.
+A hand-run through `docker compose run` produced `org=1 vus=2 page=1 pageSize=20`, matching the
+catalog. `--quiet` after `--` reached `k6 run` and suppressed its progress bar. `pnpm format`
+and `pnpm lint` green.
+
 A review of phase 1 found five defects, fixed in `f0a17be`: `BACKEND_PORT` read on the host
 without loading `.env`, which recorded `arms: null` in every k6 `run.json` without a word; the
 compose slice keyed on the literal `next_app:` service name, so renaming that service would have
@@ -374,6 +478,13 @@ measure.
 - **Run records accumulate.** `k6/reports/` already holds 60-plus directories and was pruned by
   hand once. `db/reports/` will need the same treatment. Automatic pruning is not proposed,
   because a deleted record is a deleted measurement.
+- **The k6 default agreement check is textual.** It pairs a literal `__ENV.X || 'v'` against a
+  literal `env: 'X', def: 'v'`. A default written as a computed expression, or a knob read
+  somewhere other than `k6/lib/scenario.js`, is invisible to it. The convention is written down
+  because the checker depends on it, same as the gap above.
+- **Two copies of every k6 default still exist.** 7.3 makes disagreement fail loudly; it does not
+  make one copy. The honest alternative — deleting the script-side defaults — costs the
+  hand-runnability the k6 scripts are documented as having, and that trade was not worth making.
 - **Nothing here catches drill 11's third and fourth defects.** One arm's count printed on the
   other arm's rows, and two rows timed by different methods under one header, are both errors
   inside an instrument's own reporting. No wiring check can see them. Review and a second pair
@@ -393,6 +504,11 @@ follow-up would have left PR #8 shipping a `-e` forwarding check whose entire su
 hand-maintained `-e` lists — the next PR deletes. The two are one argument, so they are one
 branch.
 
+Phase 3 landed on the same branch for the same reason. Phase 2 stated a layout invariant —
+`scripts/` runs on your machine, the container directories run in the container — and
+`k6/run-baseline.mjs` was a standing exception to it. Shipping the rule and its exception in one
+PR and fixing the exception in the next would have made the rule read as advisory.
+
 ## Out of scope
 
 - A shared **measurement** harness is still rejected: the timing loops differ, and forcing them
@@ -403,6 +519,9 @@ branch.
   `search.mjs indexes()` at 178 lines, and `rows` in `run.json` populated for `db:paging` alone.
   Instruments returning rows to one shared renderer is a real change, and folding it into 6 would
   make that phase unreviewable. Deferred, not dropped.
+- **Renaming the k6 scripts.** `conversations-baseline.js` and `messages-search.js` are long and
+  the catalog aliases them to `list` and `search`, but ~60 recorded report directories embed the
+  filename and four plans cite it. Renaming would split the record in two for a cosmetic gain.
 - **The other 37 scripts.** Turbo, docker lifecycle, trace, and the four `db:test:*` arms. The
   test arms stay verbatim on purpose: `-e LIST_STRATEGY=naive` visible in the string is what makes
   the A/B legible at a glance.

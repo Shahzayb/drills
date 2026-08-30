@@ -15,10 +15,10 @@
 // exports TERM as the terminal type, so `-e TERM` forwards 'xterm-256color'
 // into the instrument (drill 11).
 //
-// Lives in scripts/ because it runs on the HOST: it reads docker-compose.yml
-// and scripts/measure.mjs, neither of which is mounted into the container.
-// That is the split — scripts/ runs on your machine, apps/backend/db/ runs in
-// the container, and db/check-tenancy.mjs is the container-side counterpart.
+// Lives in scripts/ because it runs on the HOST: it reads docker-compose.yml,
+// scripts/measure.mjs and scripts/load.mjs, none of which is mounted into the
+// container. That is the split — scripts/ runs on your machine, and
+// apps/backend/db/ and k6/ run in a container.
 //
 // This does not go in check-tenancy.mjs. That script answers whether the schema
 // is protected, this one answers whether the harness is wired, and one checker
@@ -124,7 +124,8 @@ const failures = [];
 /**
  * Every knob a file reads, deduplicated.
  *
- * Both spellings, and the second one is not optional: converting the
+ * Three spellings — `process.env.X` on the host, `__ENV.X` in k6, and the db
+ * instruments' `knob('X', …)`. The last is not optional: converting the
  * instruments to `knob('ORG_ID', '1')` made every db knob invisible to a
  * scanner that only knew `process.env.X`, and this check went green while
  * checking nothing. The red runs in the plan's verification section are what
@@ -134,7 +135,7 @@ const failures = [];
 function envReads(source) {
   const names = new Set();
   const pattern =
-    /(?:process\.env\.|\bknob(?:Number|List)?\(\s*')([A-Z][A-Z0-9_]*)/g;
+    /(?:process\.env\.|__ENV\.|\bknob(?:Number|List)?\(\s*')([A-Z][A-Z0-9_]*)/g;
   for (const m of source.matchAll(pattern)) names.add(m[1]);
   return [...names];
 }
@@ -272,30 +273,52 @@ for (const path of walk('apps/backend/db', '.mjs')) {
 
 // ------------------------------------------------------ 3. the k6 scripts
 
-// k6 reads its knobs from __ENV, and k6/run-baseline.mjs decides which ones
-// cross into the container. A script reading a name the runner does not forward
-// gets the script's own default, silently, exactly like the two cases above.
+// k6 reads its knobs from __ENV, and scripts/load.mjs decides which ones cross
+// into the container. A script reading a name the runner does not forward gets
+// the script's own default, silently, exactly like the two cases above.
 //
 // Crude on purpose: it asks whether the name appears anywhere in the runner,
 // not whether it reaches the env object. A rename that half-lands is the case
 // it catches, and that is the case that has happened.
-const runner = read('k6/run-baseline.mjs');
+const loader = read('scripts/load.mjs');
 
-for (const file of readdirSync(join(root, 'k6')).filter((f) =>
-  f.endsWith('.js'),
-)) {
-  const source = read(join('k6', file));
-  const names = new Set(
-    [...source.matchAll(/__ENV\.([A-Z][A-Z0-9_]*)/g)].map((m) => m[1]),
-  );
+// k6/lib/scenario.js is where every knob is actually read since the two scripts
+// were reduced to a URL and a summary line, so lib/ is scanned rather than
+// skipped — the opposite of db/lib/, whose knobs belong to their importers.
+// reports/ is skipped because it is ~60 directories of recorded output.
+for (const path of walk('k6', '.js').filter((f) => !f.includes('/reports/'))) {
+  const source = read(path);
 
-  for (const name of names) {
+  for (const name of envReads(source)) {
     // Set by the runner itself rather than by the operator.
     if (name === 'SUMMARY_OUT') continue;
-    if (!new RegExp(`\\b${name}\\b`).test(runner)) {
+    if (RESERVED.has(name)) {
+      failures.push(`${path} reads ${name}, which the shell already owns`);
+      continue;
+    }
+    if (!new RegExp(`\\b${name}\\b`).test(loader)) {
       failures.push(
-        `k6/${file} reads __ENV.${name}, which k6/run-baseline.mjs does not ` +
+        `${path} reads __ENV.${name}, which scripts/load.mjs does not ` +
           `forward — setting it in the shell does nothing`,
+      );
+    }
+  }
+
+  // The one place a default is written twice on purpose: the catalog has to
+  // know it to build the report directory name, and the script has to know it
+  // to be runnable by hand. Two copies that disagree means a hand-run and a
+  // `pnpm load` run measure different things and both look right.
+  for (const [, name, scriptDefault] of source.matchAll(
+    /__ENV\.([A-Z][A-Z0-9_]*)\s*\|\|\s*'([^']*)'/g,
+  )) {
+    const declared = loader.match(
+      new RegExp(`env: '${name}',\\s*def: '([^']*)'`),
+    );
+    if (declared && declared[1] !== scriptDefault) {
+      failures.push(
+        `${path} defaults ${name} to '${scriptDefault}' but scripts/load.mjs ` +
+          `declares '${declared[1]}' — a hand-run and \`pnpm load\` would ` +
+          `measure different things`,
       );
     }
   }
