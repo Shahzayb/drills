@@ -158,35 +158,75 @@ the code that reads it.
 
 ## Verification
 
+All of the below ran, against the existing seeded volume (`drills_drills_pgdata`,
+2.5M conversations / 10M messages) with the stack up.
+
 Static:
 
+| Check | Result |
+|---|---|
+| `pnpm typecheck` | clean, both configs |
+| `pnpm format` | reformatted `scripts/load.ts` and `scripts/measure.ts` only |
+| `pnpm lint` | 2 packages green |
+| `pnpm build` | green, and `apps/backend/dist/` has **no** `db/` — the exclude works |
+| `pnpm check:arms` | green |
+
+`check:arms` was then made to fail on purpose, twice, because a check that goes
+green after its inputs were renamed proves nothing on its own:
+
 ```bash
-pnpm typecheck
-pnpm format && pnpm lint
-pnpm build
+# rename a knob the instrument reads
+sed -i '' "s/knobNumber('MAX_PAGES', 400)/knobNumber('MAX_PAGEZ', 400)/" apps/backend/db/paging.mts
 pnpm check:arms
+#   ✗ db/paging.mts reads MAX_PAGEZ, which scripts/measure.ts does not declare
+#   ✗ scripts/measure.ts declares MAX_PAGES for db/paging.mts, which does not read it
+
+# drift a k6 default away from the catalog's
+sed -i '' "s/__ENV.VUS || '10'/__ENV.VUS || '20'/" k6/lib/scenario.ts
+pnpm check:arms
+#   ✗ k6/lib/scenario.ts defaults VUS to '20' but scripts/load.ts declares '10'
 ```
 
-Live, against the existing seeded volume (`drills_drills_pgdata`):
+Both went red, both directions, across all three renamed directories. Reverted.
 
-```bash
-pnpm docker:up
-pnpm arms
-pnpm db:migrate:status
-pnpm db:log:status
-pnpm check:tenancy
-pnpm db:stats
-pnpm db:explain stats
-pnpm db:paging depths --depths 1,10 --rounds 1
-pnpm load list --org 150 --warmup 5s --duration 10s --name ts-smoke
-```
+Live:
+
+| Command | What it proves |
+|---|---|
+| `pnpm arms` | host `.ts` reaching the API; six arms reported |
+| `pnpm db:migrate:status`, `pnpm db:log:status` | `scripts/psql.ts` |
+| `pnpm check:tenancy` | `.mts` runs under the container's Node 22.23.2; 5 tables, passed |
+| `pnpm db:explain stats` | `run.json` written with the same shape and knob provenance |
+| `pnpm db:paging depths --org 150 --depths 1,10 --rounds 1` | HTTP arm, `ORG_ID (env)` vs `PAGE_SIZE (default)`, chart, CSV, `rows` in the record |
+| `pnpm db:search gaps --org 150` | the corpus import chain and the 8-case table |
+| `pnpm db:bench --rows 5000` | `pg-copy-streams` typing — COPY streams end to end |
+| `node db/seed.mts --scale=0` | seed's whole module graph loads; the guard fires before any DB work |
+| `pnpm load list --org 150 --warmup 5s --duration 10s --name ts-smoke` | k6 transpiles `.ts`, 22,633 measured requests |
 
 The k6 run is the one that proves the rename did not move the report directory
-name. Its output directory must still read `…-ts-smoke-conversations-baseline-org150-vus10-page1-size20-10s`.
+name:
 
-`pnpm db:seed` is **not** re-run: it is ~213s and would rewrite the volume every
-instrument above is measuring against. `db/seed.mts` is covered by `pnpm typecheck`
-and by `node --check`-equivalent module load, not by a full seed.
+```
+k6/reports/2026-08-30-203937-ts-smoke-conversations-baseline-org150-vus10-page1-size20-10s
+```
+
+`conversations-baseline` is still the middle segment, which is what ~60 recorded
+directories and the plans citing them depend on.
+
+`pnpm db:stats` needed `pg_stat_statements` preloaded to reach its report path —
+`PG_PRELOAD=pg_stat_statements docker compose up -d postgres_db nest_server next_app`,
+then a plain `docker compose up -d` to put it back. Both orderings printed.
+
+Two things were deliberately **not** run:
+
+- **`pnpm db:seed`.** ~213s, and it rewrites the volume every instrument above
+  measured against. `db/seed.mts` is covered by `pnpm typecheck`, by the
+  `--scale=0` module load, and by `db:bench` exercising the same COPY stream.
+- **Keeping any of these run records.** Every run above was made against cold
+  containers with round counts cut to one; the `paging depths` numbers in
+  particular (48ms for a tail-org page 1, against ~2-3ms recorded) are
+  cold-start noise. They were deleted rather than committed, because a record in
+  `db/reports/` is something a later plan is entitled to cite.
 
 ## Honest gaps
 
