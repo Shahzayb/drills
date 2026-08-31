@@ -5,7 +5,7 @@ Card 12. The drill is not "add a unique constraint" — it is that idempotency i
 one which looks like the obvious answer (`ON CONFLICT DO NOTHING`) does not answer the concurrent
 case at all.
 
-**Status:** planned
+**Status:** shipped
 
 ---
 
@@ -254,4 +254,155 @@ Recorded before the runs. Three of six were wrong, and the wrong ones are the dr
 
 ## Results
 
-*(filled in after the runs)*
+Postgres 18, `shared_buffers=128MB`, whale org 1 (2.5M conversations, 10M messages), pool `max: 10`,
+`VACUUM (ANALYZE)` before the sweep. `pnpm db:storm fire`: 10,000 deliveries of 3,000 events at
+concurrency 50, peak in flight 50 on every run. Arms interleaved, medians of the rounds. Reports in
+`apps/backend/db/reports/`.
+
+### The card's DONE WHEN
+
+**Both approaches yield exactly 3,000 conversations and 3,000 messages from 10,000 concurrent
+requests.** So does `both`, and so does `ON_CONFLICT=nothing`. `pnpm db:test:constraint` and
+`pnpm db:test:redis` are the same claim as a test.
+
+### `SHAPE=adjacent` — every copy of an event in flight at once
+
+| arm | conv | 201 | 200 | 202 | 5xx | updates (HOT) | dead | p50 | p95 | p99 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `both` | 3,000 | 3,000 | 7,000 | 0 | 0 | 6,790 (6,766) | +290 | 26.38 | 43.03 | 55.70 |
+| `constraint` | 3,000 | 3,000 | 7,000 | 0 | 0 | 6,544 (6,531) | +335 | 23.42 | 42.71 | 52.26 |
+| `nothing` | 3,000 | 3,000 | 7,000 | 0 | 0 | 0 | +211 | 22.07 | 36.10 | 44.95 |
+| `redis` | 3,000 | 3,000 | **5** | **6,995** | 0 | 0 | 0 | 15.58 | 32.55 | 49.00 |
+| `none` r1 | **1,643** | 1,643 | 179 | 0 | **1,504** | — | — | — | — | — |
+| `none` r2 | 3,000 | 3,000 | 802 | 0 | **6,198** | — | — | 27.13 | 41.19 | 49.72 |
+
+`none` round 1 also had **6,674 transport failures** — the server shed connections and the run never
+finished. Two rounds of the same arm disagreeing by that much is the result: check-then-insert is not
+merely wrong, it is unstable. Its row count in round 2 is *correct*, and every one of those 6,198
+5xx is the unique index catching what the code did not.
+
+**`redis` answers 6,995 of 7,000 duplicates with 202.** It is the fastest arm and it is fast at
+saying "I do not know". The guard holds a placeholder until the write commits, and under simultaneous
+replay every duplicate arrives inside that window.
+
+### `SHAPE=shuffled` — the same 10,000 deliveries, spread out
+
+| arm | 200 | 202 | updates (HOT) | dead | p50 | p95 | p99 |
+|---|---|---|---|---|---|---|---|
+| `both` | 7,000 | 0 | **23 (23)** | **+6** | **15.11** | 39.03 | 49.31 |
+| `constraint` | 7,000 | 0 | 4,896 (4,753) | +266 | 20.40 | 34.54 | 41.62 |
+| `redis` | 6,973 | 27 | 0 | ~0 | 14.36 | 39.02 | 54.88 |
+
+**`both` goes from the slowest arm to the fastest — 26.38ms to 15.11ms p50 — without a line of code
+changing.** Only the delivery order did. The guard can only short-circuit a duplicate that arrives
+*after* the original committed, so its entire value is a question about timing, not about throughput.
+The same shift removes 99.7% of the constraint's updates (6,790 -> 23) and its dead tuples (+290 -> +6).
+
+### The dead-tuple prediction was wrong by 25x, and `n_tup_hot_upd` says why
+
+`ON CONFLICT DO UPDATE SET provider_event_id = EXCLUDED.provider_event_id` assigns a column its own
+value, so **no indexed value changes and the update is HOT-eligible**: 6,531 of 6,544. A HOT tuple is
+pruned on the next access to its page rather than waiting for vacuum, so `n_dead_tup` moved +335
+where "one dead tuple per duplicate" predicted ~7,000.
+
+The noise floor is visible in the same table: `ON_CONFLICT=nothing` performs **zero** updates and
+still shows +211. On a 2.5M-row table, DO UPDATE's bloat cost is below what this metric can resolve.
+That is a property of the *no-op* assignment. Assign something that actually changes an indexed
+column and the updates stop being HOT.
+
+### `pnpm db:storm race` — what each mechanism is protecting against
+
+```
+1. check-then-insert, no unique constraint
+   200 events x 3 copies -> 600 rows (expected 200)
+   400 duplicate rows, 0 errors, every delivery a 201.
+
+2. two sessions, same event, one committing while the other waits
+   shape       isolation         B insert    blocked   B follow-up SELECT
+   DO NOTHING  READ COMMITTED    0 row(s)     158ms   1 row
+   DO UPDATE   READ COMMITTED    1 row(s)     153ms   1 row
+   DO NOTHING  REPEATABLE READ   ERROR 40001  156ms   -
+   DO UPDATE   REPEATABLE READ   ERROR 40001  157ms   -
+```
+
+Both shapes block for the same ~155ms. At READ COMMITTED the follow-up SELECT finds the row. The
+predicted 202 does not happen; the extra round trip does.
+
+### What happens if Redis restarts mid-storm
+
+`pnpm db:storm redis-restart` wipes the guard half way through.
+
+| arm | shape | 200 | 202 | **5xx** | conversations |
+|---|---|---|---|---|---|
+| `redis` | adjacent | 3 | 6,996 | **1** | 3,000 |
+| `redis` | shuffled | 2,995 | 41 | **3,964** | 3,000 |
+| `both` | adjacent | 7,000 | 0 | **0** | 3,000 |
+| `both` | shuffled | 7,000 | 0 | **0** | 3,000 |
+
+**On `redis` alone, wiping the guard costs 3,964 failed deliveries out of 10,000.** On `both` it
+costs nothing measurable. The row count survives on every arm only because the unique index is DDL
+rather than an arm — experiment 1 above is what the same failure looks like with nothing underneath.
+
+`FLUSHDB` simulates the *effect* of a restart, not the connection error. The exposure window is the
+set of events whose copies straddle the wipe, which is why the adjacent shape shows 1 and the
+shuffled shape shows 3,964.
+
+### k6, sustained — `pnpm load ingest`, 10 VUs, 20s warm-up discarded, 60s measured
+
+| arm | p50 | p95 | p99 | throughput |
+|---|---|---|---|---|
+| `constraint` r1/r2 | 3.35 / 3.20 | 4.85 / 4.78 | 6.51 / 6.36 | 2,850 / 2,960 req/s |
+| `both` r1/r2 | **2.20 / 2.18** | **3.47 / 3.46** | **4.79 / 4.70** | **4,246 / 4,282 req/s** |
+
+**`both` is 34% faster at p50 and 44% higher throughput**, within-arm spread ~4%. k6 cycles 10 VUs
+through a 3,000-event ring for 60 seconds, so after the first second every request is a duplicate of
+a long-committed event — the steady-state retry regime, where the guard wins. It agrees with the
+shuffled storm and disagrees with the adjacent one, and that disagreement is the finding rather than
+a discrepancy to reconcile.
+
+Absolute latencies are not comparable to the storm's: k6 runs 10 VUs, the storm runs 50 in flight.
+
+### Suite
+
+83 tests -> **100**, all green on the default arm. Four new expected-arm runs:
+
+| command | arm | result |
+|---|---|---|
+| `pnpm db:test:constraint` | `IDEMPOTENCY=constraint` | **green** — DONE WHEN, half 1 |
+| `pnpm db:test:redis` | `IDEMPOTENCY=redis` | **red x1** — DONE WHEN half 2 passes, the 202 fails |
+| `pnpm db:test:noidem` | `IDEMPOTENCY=none` | **red x3** |
+| `pnpm db:test:donothing` | `constraint` + `ON_CONFLICT=nothing` | **green** |
+
+`db:test:redis` failing is the deliverable, not a defect: it is the card's "failure mode the
+constraint version doesn't have", written as an assertion instead of as prose.
+
+---
+
+## The card's write-up questions
+
+**What happens to the Redis version if Redis restarts mid-storm?** Measured above: on the pure guard,
+3,964 of 10,000 deliveries fail. The rows survive here only because the unique index exists anyway;
+strip it and they become duplicate rows with a 201 each, which is `db:storm race` experiment 1. The
+deeper version of the same answer is that the guard and the commit are in two systems and cannot be
+made atomic — a process dying between the SETNX and its compensating DEL loses the event until the
+TTL expires, and no code in the service can close that.
+
+**What is the guard TTL based on?** 86,400s. On the pure `redis` arm it is a correctness parameter and
+must cover the provider's documented maximum retry horizon — the number belongs to the provider, not
+to taste. On `both` the guard is a cache of the constraint's answer, so the TTL is only a cost
+parameter, and the cost is measurable rather than guessable:
+`redis-cli MEMORY USAGE <key>` for one, `redis-cli INFO memory` across a run.
+
+**Which would you ship, and what does the other one buy you?** Ship the constraint. It is the only one
+that cannot lose an event, because the uniqueness decision and the write are the same transaction.
+Redis buys latency, and only for duplicates that arrive after the original committed — 34% p50 and
+44% throughput in the steady state, nothing at all under simultaneous replay, where it costs 13%.
+It also removes 99.7% of the constraint's HOT updates. So: `both`, with the guard understood as a
+cache and never as the mechanism. That is the default.
+
+**Stretch, analysed and not built.** Once ingest triggers a side effect, the insert and the effect are
+no longer one atomic unit, and `ON CONFLICT` stops being sufficient: a retry that finds the row
+already there returns 200 and the effect never happens. The retry now has to guarantee that the
+effect ran, which needs either an idempotent effect keyed by the same event id, or a durable record
+of whether it ran that commits in the same transaction as the row — the outbox pattern, with a
+separate dispatcher. Card 26 is the full answer.

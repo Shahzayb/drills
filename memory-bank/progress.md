@@ -9,7 +9,7 @@ None.
 
 ## Next step
 
-Drill 12
+Drill 13, or card 26 (the outbox) — drill 12 named the partial-failure problem and did not build it.
 
 ## Active plan
 
@@ -20,11 +20,19 @@ None open — every plan file in `plans/` is shipped. `history.md` lists them wi
 `pnpm docker:up`, then `pnpm db:migrate` and `pnpm db:seed` — or `pnpm db:reset` for both.
 Every instrument and toggle is listed in `techContext.md` under Commands.
 
-`pnpm db:test` runs the e2e suite inside the container (83 tests). Three suites are *expected* to
+`pnpm db:test` runs the e2e suite inside the container (100 tests). Four suites are *expected* to
 fail, and a green run of any of them means the switch stopped switching: `pnpm db:test:naive`
 (`LIST_STRATEGY=naive`) fails **two** query-budget assertions, `pnpm db:test:notiebreak`
 (`KEYSET_TIEBREAK=off`) fails **one** — the tie-block walk, which returns 9 of 12 rows with no error
-— and `pnpm db:test:like` (`SEARCH_STRATEGY=like`) fails **one**, the stemming assertion.
+— `pnpm db:test:like` (`SEARCH_STRATEGY=like`) fails **one**, the stemming assertion, and
+`pnpm db:test:noidem` (`IDEMPOTENCY=none`) fails **three**. `pnpm db:test:redis` fails **one** for a
+different reason: not a broken switch, but the Redis arm's real failure mode — a concurrent duplicate
+gets a 202 instead of a conversation id. `db:test:constraint` and `db:test:donothing` are expected
+green; they are drill 12's DONE WHEN as a test.
+
+`pnpm db:storm fire` writes 3,000 rows into whichever org it measures and cleans them up itself, but
+a k6 `pnpm load ingest` run does **not** — k6 has no database connection. Delete rows with a
+`k6-` prefix on `provider_event_id` before running any drill 05/09/10 baseline.
 
 Baseline numbers and query plans for drill 03 are in its plan file — the `before` column cards 09
 and 10 were compared against; drill 04's plan records the same queries at 2.5M rows.
@@ -60,7 +68,14 @@ or after a `VACUUM`.
 8. **Interior-substring search is not supported and that is a recorded decision.** `xport` finds
    nothing while `LIKE '%xport%'` finds 164,508 rows. The trigram index that would answer it is
    priced (2,159 MB, 123s) and rejected in drill 11's plan.
-9. **Logging is now a cost to watch, not an absence.** `LOG_LEVEL=debug` in anything resembling
+9. **`POST /ingest` authenticates with one uncached query per request**, including the ~70% of a
+   duplicate storm that is about to be discarded. The Redis guard removes the *write* from the
+   duplicate path, not the read. Caching the key lookup is the obvious next move and belongs to a
+   caching drill; the cost is visible in `db:storm`'s numbers rather than hidden.
+10. **The ingest partial-failure case is named and not built.** Once a side effect exists, the row
+   and the effect are no longer one atomic unit and `ON CONFLICT` stops being sufficient — a retry
+   that finds the row returns 200 and the effect never runs. Needs an outbox. Card 26.
+11. **Logging is now a cost to watch, not an absence.** `LOG_LEVEL=debug` in anything resembling
    production would be expensive, and `url` is logged with its query string in full — safe for
    today's parameters, not for a token or an email.
 

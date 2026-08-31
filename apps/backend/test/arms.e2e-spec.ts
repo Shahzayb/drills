@@ -16,8 +16,13 @@ import { InfoResponse } from '../src/info/info.controller';
  * container started before the variable changed — so the assertion is written
  * against the arm the suite is actually running under, not against a literal.
  *
- * Two arms exercise it for free: `pnpm db:test` runs the defaults and
- * `pnpm db:test:naive` sets LIST_STRATEGY=naive.
+ * The exact-object `toEqual` is the load-bearing part, not the individual
+ * values: a new arm added to the controller and forgotten here fails this
+ * assertion immediately. Drill 12 added three and this is where it found out.
+ *
+ * Several arms exercise it for free: `pnpm db:test` runs the defaults, and
+ * `db:test:naive`, `db:test:constraint`, `db:test:redis`, `db:test:noidem` and
+ * `db:test:donothing` each set one.
  *
  * See plans/2026-08-30_instrument-hardening.md.
  */
@@ -47,6 +52,13 @@ describe('GET /info arms (e2e)', () => {
       listStrategy: process.env.LIST_STRATEGY === 'naive' ? 'naive' : 'batched',
       keysetTiebreak: process.env.KEYSET_TIEBREAK === 'off' ? 'off' : 'on',
       searchStrategy: process.env.SEARCH_STRATEGY === 'like' ? 'like' : 'fts',
+      idempotency: ['none', 'constraint', 'redis', 'both'].includes(
+        process.env.IDEMPOTENCY ?? '',
+      )
+        ? process.env.IDEMPOTENCY
+        : 'both',
+      onConflict: process.env.ON_CONFLICT === 'nothing' ? 'nothing' : 'update',
+      idempotencyTtlSeconds: process.env.IDEMPOTENCY_TTL_SECONDS || '86400',
       queryCounter:
         process.env.QUERY_COUNTER === 'off' ||
         process.env.QUERY_COUNTER === 'header'
