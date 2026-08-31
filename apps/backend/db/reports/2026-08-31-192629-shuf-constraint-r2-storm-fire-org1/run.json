@@ -1,0 +1,65 @@
+{
+  "instrument": "storm",
+  "subcommand": "fire",
+  "name": "shuf-constraint-r2",
+  "at": "2026-08-31T19:26:29.433Z",
+  "gitSha": "25e1757",
+  "knobs": {
+    "ORG_ID": {
+      "value": "1",
+      "source": "default"
+    },
+    "REQUESTS": {
+      "value": "10000",
+      "source": "default"
+    },
+    "UNIQUE": {
+      "value": "3000",
+      "source": "default"
+    },
+    "CONCURRENCY": {
+      "value": "50",
+      "source": "default"
+    },
+    "SHAPE": {
+      "value": "shuffled",
+      "source": "env"
+    },
+    "FLUSH_AT": {
+      "value": "50",
+      "source": "default"
+    }
+  },
+  "arms": {
+    "listStrategy": "batched",
+    "keysetTiebreak": "on",
+    "searchStrategy": "fts",
+    "idempotency": "constraint",
+    "onConflict": "update",
+    "idempotencyTtlSeconds": "86400",
+    "queryCounter": "on",
+    "logLevel": "info",
+    "tracing": "off"
+  },
+  "rows": {
+    "requests": 10000,
+    "unique": 3000,
+    "shape": "shuffled",
+    "peakInFlight": 50,
+    "wallMs": 4057.1,
+    "created": 3000,
+    "duplicate": 7000,
+    "pending": 0,
+    "serverErrors": 0,
+    "transportErrors": 0,
+    "conversations": 3000,
+    "messages": 3000,
+    "deadTuples": 303,
+    "updates": 4765,
+    "hotUpdates": 4615,
+    "p50": 18.35,
+    "p95": 31.74,
+    "p99": 37.64,
+    "flushedGuardAt": null
+  }
+}

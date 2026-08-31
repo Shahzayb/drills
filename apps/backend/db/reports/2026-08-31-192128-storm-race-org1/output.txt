@@ -1,0 +1,30 @@
+storm race  api http://nest_server:3002
+  ORG_ID               1                            (default)
+  REQUESTS             10000                        (default)
+  UNIQUE               3000                         (default)
+  CONCURRENCY          50                           (default)
+  SHAPE                adjacent                     (default)
+  FLUSH_AT             50                           (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","searchStrategy":"fts","idempotency":"both","onConflict":"update","idempotencyTtlSeconds":"86400","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  1. check-then-insert, no unique constraint
+
+     200 events x 3 copies -> 600 rows (expected 200)
+     400 duplicate rows, 0 errors, every delivery a 201.
+     Nothing anywhere reports a problem. This is the bug the card is about.
+
+  2. two sessions, same event, one committing while the other waits
+
+     shape       isolation         B insert    blocked   B follow-up SELECT
+     DO NOTHING  READ COMMITTED    0 row(s)     158ms   1 row
+     DO UPDATE   READ COMMITTED    1 row(s)     153ms   1 row
+     DO NOTHING  REPEATABLE READ   ERROR 40001  156ms   -
+     DO UPDATE   REPEATABLE READ   ERROR 40001  159ms   -
+
+     Both shapes BLOCK — DO NOTHING does not skip the wait.
+     At READ COMMITTED the follow-up SELECT finds the row, because every
+     statement takes a fresh snapshot and A has committed by then. So the
+     two shapes differ in round trips and dead tuples, NOT in correctness.
+     Raise the isolation level and both fail with 40001 instead — a
+     different problem, whose fix is retrying the transaction.

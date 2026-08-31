@@ -1,0 +1,30 @@
+storm fire  api http://nest_server:3002
+  ORG_ID               1                            (default)
+  REQUESTS             10000                        (default)
+  UNIQUE               3000                         (default)
+  CONCURRENCY          50                           (default)
+  SHAPE                adjacent                     (env)
+  FLUSH_AT             50                           (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","searchStrategy":"fts","idempotency":"constraint","onConflict":"update","idempotencyTtlSeconds":"86400","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  prefix storm-mthmqqan  (cleanup key, if this run dies)
+
+  requests            10,000 (3,000 unique, shape adjacent)
+  concurrency         50 requested, 50 peak in flight
+  wall clock          5.38s  1858 req/s
+
+  201 created         3,000
+  200 duplicate       7,000
+  202 pending         0
+  5xx                 0
+  transport failures  0
+
+  conversations       3,000 (expected 3,000)
+  messages            3,000 (expected 3,000)
+  updates             6,544 of which 6,531 HOT
+  dead tuples         +516  (62,601 -> 63,117)
+
+  p50 / p95 / p99     24.07 / 44.52 / 56.09 ms
+
+  cleaned up          3,000 conversations
