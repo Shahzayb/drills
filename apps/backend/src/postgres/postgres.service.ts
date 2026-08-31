@@ -8,37 +8,17 @@ import {
 } from '../observability/request-context';
 import { TRACING_ENABLED } from '../observability/trace';
 
-// Every number here is chosen, not inherited. Reasoning lives in
-// plans/2026-08-06_drill-01-health-endpoint.md under "Numbers we chose".
-//
 const POOL_MAX = 10;
-// Long enough to survive a GC pause, short enough that /health answers inside
-// its own 2s probe budget instead of hanging.
 const CONNECTION_TIMEOUT_MS = 2000;
-// pg defaults this to 10s. 30s keeps connections warm between the sparse
-// requests a dev stack sees, without holding them open indefinitely.
 const IDLE_TIMEOUT_MS = 30_000;
-// Not a limit, just the line above which a query gets noticed.
 const SLOW_QUERY_MS = 200;
-// Long enough to tell two queries apart, short enough that a log line stays one
-// line. The full text is recoverable from the source; this is for recognising.
 const SQL_LOG_MAX = 200;
 
-/** One line, no runs of whitespace, bounded. */
 const summarise = (text: string): string => {
   const flat = text.replace(/\s+/g, ' ').trim();
   return flat.length > SQL_LOG_MAX ? `${flat.slice(0, SQL_LOG_MAX)}…` : flat;
 };
 
-/**
- * What `withClient` lends out. Deliberately not a `PoolClient`: handing the real
- * thing out would let a caller `release()` it twice, keep it past the callback,
- * or run a statement that never reaches the logging below.
- *
- * `control` exists so the transaction plumbing (`BEGIN`, `set_config`, `COMMIT`)
- * can be issued without producing three `db_query` lines per request. See
- * tenancy/tenant-db.service.ts.
- */
 export interface ClientHandle {
   query<T extends QueryResultRow = QueryResultRow>(
     text: string,
@@ -47,26 +27,12 @@ export interface ClientHandle {
   control(text: string, params?: unknown[]): Promise<void>;
 }
 
-/**
- * Owns the connection pool. Every read goes through `query()` — that is the
- * point of this class, not an accident of style. Handing out the raw `Pool`
- * would mean later drills (timing, tracing, pool saturation) have nowhere
- * central to hook into.
- */
 @Injectable()
 export class PostgresService implements OnApplicationShutdown {
   private readonly pool: Pool;
-  // Imported, not injected — see observability/logger.ts. Keeping this out of
-  // the constructor is what lets schema.e2e-spec.ts boot PostgresModule alone.
   private readonly logger = logger;
 
   constructor() {
-    // The serving role, and it has no default. POSTGRES_USER is the owner: it
-    // runs the migrations and drill 04's COPY seed, and row-level security
-    // exempts the table owner and every superuser. Falling back to it would
-    // leave the policies in place, visible in the schema, enforcing nothing —
-    // and every test would still pass. That is the exact failure drill 07
-    // exists to remove, so this throws instead.
     const user = process.env.POSTGRES_APP_USER;
     const password = process.env.POSTGRES_APP_PASSWORD;
 
@@ -89,20 +55,11 @@ export class PostgresService implements OnApplicationShutdown {
       idleTimeoutMillis: IDLE_TIMEOUT_MS,
     });
 
-    // A pool emits 'error' for *idle* clients that die out from under it, which
-    // is what happens the moment Postgres restarts. Node exits on an unhandled
-    // 'error' event, so without this the process dies whenever the database
-    // bounces instead of reporting itself unhealthy.
     this.pool.on('error', (error: Error) => {
       this.logger.warn({ err: error.message }, 'pool_idle_client_error');
     });
   }
 
-  /**
-   * One statement on whatever connection the pool hands out. Unchanged
-   * behaviour — it now shares its body with the pinned-client path below rather
-   * than having a second copy of the instrumentation.
-   */
   async query<T extends QueryResultRow = QueryResultRow>(
     text: string,
     params?: unknown[],
@@ -110,22 +67,12 @@ export class PostgresService implements OnApplicationShutdown {
     return this.runOn(this.pool, text, params);
   }
 
-  /**
-   * Lends one pooled client for the duration of `fn`, then always releases it.
-   *
-   * This is what makes a transaction possible without the `Pool` leaving this
-   * class — `pool.query()` acquires and releases per call, so `BEGIN` on one
-   * connection and the statement after it on another is not a transaction, it
-   * is two. The caller gets a ClientHandle, not the client.
-   */
   async withClient<T>(fn: (client: ClientHandle) => Promise<T>): Promise<T> {
     const client: PoolClient = await this.pool.connect();
 
     const handle: ClientHandle = {
       query: (text, params) => this.runOn(client, text, params),
       control: async (text, params) => {
-        // A real round trip (BEGIN / set_config / COMMIT / ROLLBACK), but not
-        // a "query" in card 08's sense — see request-context.ts.
         recordRoundTrip();
         await client.query(text, params as unknown[]);
       },
@@ -134,8 +81,6 @@ export class PostgresService implements OnApplicationShutdown {
     try {
       return await fn(handle);
     } finally {
-      // Always, including when fn threw. A client that is not released is a
-      // permanent -1 on a pool of 10, and the tenth one hangs the process.
       client.release();
     }
   }
@@ -146,27 +91,8 @@ export class PostgresService implements OnApplicationShutdown {
     params?: unknown[],
   ): Promise<QueryResult<T>> {
     const rid = getRequestId();
-    // Counted at call time, not on completion — a query that errors still
-    // made the round trip, and this is meant to answer "how many did I make",
-    // not "how many succeeded".
     recordQuery();
 
-    // The id rides inside the statement — the only channel that reaches
-    // Postgres's own log and pg_stat_activity without pinning a connection.
-    // Interpolating into SQL is safe *only* because deriveRequestId allowlists
-    // the character set. See the plan file.
-    //
-    // Skipped when tracing is on, because the two mechanisms cancel: the
-    // sqlcommenter spec forbids adding a comment to a statement that has one,
-    // so this line silently disables instrumentation-pg's traceparent — which
-    // identifies the *span*, not just the request. The standard wins where they
-    // overlap; `trace_id` on every log line is how one grep still reaches
-    // Postgres.
-    //
-    // Trailing, not leading: instrumentation-pg names its span from the first
-    // whitespace-delimited token, so a leading comment renamed every query span
-    // to `pg.query:/*`. Assumes `text` does not end in `;` — none here do.
-    // Both found by reading spans; see the plan file's "Revised while shipping".
     const sql = rid && !TRACING_ENABLED ? `${text} /* rid=${rid} */` : text;
 
     const startedAt = performance.now();
@@ -176,9 +102,6 @@ export class PostgresService implements OnApplicationShutdown {
       this.record(rid, startedAt, text, result.rowCount, null);
       return result;
     } catch (error) {
-      // A failed query gets its own event. Reporting it as a db_query with
-      // rows: null would read as an empty result set on exactly the request
-      // worth reconstructing.
       this.record(rid, startedAt, text, null, error);
       throw error;
     }
@@ -206,21 +129,14 @@ export class PostgresService implements OnApplicationShutdown {
       return;
     }
 
-    // Guarded, not just called: a logger call below the active level still
-    // evaluates its arguments, so summarise() would run a regex over every
-    // statement only to have the line discarded. Worth ~5-6% of tail-org
-    // throughput — measured in the plan file.
     if (this.logger.isLevelEnabled('debug')) {
       this.logger.debug({ rid, durMs, rows, sql: summarise(text) }, 'db_query');
     }
     if (durMs >= SLOW_QUERY_MS) {
-      // Stays at warn so it survives the default level, which is the whole
-      // reason a threshold exists.
       this.logger.warn({ rid, durMs, sql: summarise(text) }, 'slow_query');
     }
   }
 
-  /** Pool saturation is the thing later drills will want to watch. */
   stats(): { total: number; idle: number; waiting: number; max: number } {
     return {
       total: this.pool.totalCount,

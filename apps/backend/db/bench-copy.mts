@@ -1,19 +1,3 @@
-// The card's warm-up: get one COPY of 100k rows working before building the real
-// seeder, and measure it against the insert loop it replaces. See
-// plans/2026-08-11_drill-04-bulk-seed.md.
-//
-// Kept in the repo rather than thrown away because it is the evidence behind the
-// plan's "COPY is N times faster" claim, and because it is the smallest thing
-// that still demonstrates the mechanism.
-//
-// Run: docker compose exec nest_server pnpm --filter=backend run bench:copy
-//
-// It writes into a scratch table it creates and drops itself, so it never
-// touches the real schema and can run against a seeded database safely.
-//
-// `.mts` and not `.ts`: apps/backend/package.json has no `type` field, so a
-// `.ts` here would be CommonJS. See plans/2026-08-30_instrument-typescript.md.
-
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { from as copyFrom } from 'pg-copy-streams';
@@ -25,9 +9,6 @@ const ROWS = knobNumber('BENCH_ROWS', 100_000);
 const BATCH_LINES = 10_000;
 const SEED = 20260811;
 
-// Shaped like `messages`: a uuid, a bigint, a ~180 char body, two timestamps.
-// Benchmarking a narrow two-column table would flatter COPY by removing exactly
-// the serialisation cost the real seed has to pay.
 const SCRATCH = `
   CREATE UNLOGGED TABLE bench_rows (
     id              bigint      PRIMARY KEY,
@@ -51,7 +32,6 @@ async function reset() {
   await client.query(SCRATCH);
 }
 
-/** One round trip per row. The thing COPY is supposed to beat. */
 async function insertLoop(rows: number): Promise<number> {
   const started = process.hrtime.bigint();
   for (let i = 1; i <= rows; i++) {
@@ -63,10 +43,6 @@ async function insertLoop(rows: number): Promise<number> {
   return ms(process.hrtime.bigint() - started);
 }
 
-/**
- * Same rows, one statement. The generator is a Readable rather than a string so
- * the 100k-row case exercises the same backpressure path the 10M-row case will.
- */
 async function copyStream(rows: number): Promise<number> {
   const started = process.hrtime.bigint();
   const stream = client.query(
@@ -93,18 +69,12 @@ async function copyStream(rows: number): Promise<number> {
   return ms(process.hrtime.bigint() - started);
 }
 
-/**
- * Body generation, the other half of the budget. Two ways to reach the same
- * realism bar, measured against the rule fixed in the plan: >=150k bodies/sec
- * ships, below that the composition gets simpler until it clears.
- */
 function benchBodies(rows: number) {
   const out = { lengths: 0, sample: [] as string[] };
 
   faker.seed(SEED);
   const perRowStart = process.hrtime.bigint();
   for (let i = 0; i < rows; i++) {
-    // The naive realistic option: ask faker for every part, every row.
     const s = `${faker.hacker.phrase()} ${faker.company.name()} ${faker.person.fullName()}`;
     if (i === 0) out.sample.push(s);
   }

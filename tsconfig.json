@@ -1,27 +1,12 @@
 {
-  // The measurement instruments that run on Node: `scripts/` on the host and
-  // `apps/backend/db/` in the container. Neither is compiled — Node strips the
-  // types itself — so this config exists to CHECK them and emits nothing.
-  //
-  // k6 has its own config: a k6 script has __ENV and no `process`, and a host
-  // script has `process` and no __ENV, so one `types` list cannot serve both.
-  //
-  // See plans/2026-08-30_instrument-typescript.md.
   "compilerOptions": {
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "target": "ES2023",
     "types": ["node"],
     "strict": true,
-    // Node's type stripping deletes annotations and rewrites nothing else, so
-    // an enum, a namespace or a constructor parameter property would be a
-    // runtime SyntaxError. This makes it a compile error instead.
     "erasableSyntaxOnly": true,
-    // Same reason, one level up: an unmarked type-only import survives the
-    // strip and fails at runtime resolving a value that does not exist.
     "verbatimModuleSyntax": true,
-    // Both runtimes resolve the specifier as written and neither maps .js back
-    // to .ts, so imports carry the real on-disk extension.
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "skipLibCheck": true,

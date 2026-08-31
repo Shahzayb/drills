@@ -3,12 +3,8 @@ import { getRequestId } from './request-context';
 import { REQUEST_ID_HEADER } from './request-id';
 import { injectTraceContext } from './trace';
 
-// The API is reached by Compose service name, not localhost. This only works
-// from the Next *server* — a client component would have to use the published
-// host port instead, because the browser is not on the Compose network.
 const API_URL = process.env.BACKEND_INTERNAL_URL ?? 'http://localhost:3002';
 
-/** A failed hop still happened and still took time. */
 class UpstreamError extends Error {
   constructor(
     readonly cause: unknown,
@@ -18,13 +14,6 @@ class UpstreamError extends Error {
   }
 }
 
-/**
- * The Next -> Nest hop, timed, with the id attached.
- *
- * The hop with no ambient context to lean on: within one process an
- * AsyncLocalStorage carries the id for free, but across a process boundary the
- * wire is the only channel. Everything downstream hangs off this header.
- */
 async function callApi(
   url: string,
   requestId: string,
@@ -38,16 +27,8 @@ async function callApi(
     return durMs;
   };
 
-  // Headers, not a spread: RequestInit.headers may legitimately be a Headers
-  // instance or an array of pairs, and spreading either silently yields {} —
-  // dropping every header without a word.
   const headers = new Headers(init?.headers);
   headers.set(REQUEST_ID_HEADER, requestId);
-  // The standard's version of the line above, and the two are not redundant.
-  // x-request-id is ours and carries a flat, human-readable id. `traceparent`
-  // is W3C and carries trace id *plus this span's id*, which is what makes the
-  // API's spans children of this render instead of a second, unrelated trace.
-  // Nothing on the Nest side reads it explicitly — instrumentation-http does.
   injectTraceContext(headers);
 
   try {
@@ -70,11 +51,6 @@ export type InfoResult = (
   { ok: true; info: Info } | { ok: false; error: string }
 ) & { source: string; requestId: string; durMs: number };
 
-/**
- * Next 16 does not cache fetch by default, so this runs per request without
- * any `cache: 'no-store'` opt-out. Failure is returned rather than thrown so
- * the page can render the outage instead of collapsing into an error boundary.
- */
 export async function fetchInfo(): Promise<InfoResult> {
   const source = `${API_URL}/info`;
   const requestId = await getRequestId();
@@ -103,8 +79,6 @@ export async function fetchInfo(): Promise<InfoResult> {
       error: error instanceof Error ? error.message : String(error),
       source,
       requestId,
-      // The real duration, not 0. A connect timeout is 2s of upstream time, and
-      // reporting it as zero would charge it to Next's render in the gap table.
       durMs: error instanceof UpstreamError ? error.durMs : 0,
     };
   }
@@ -133,8 +107,6 @@ export interface ConversationPage {
   totalPages: number;
 }
 
-/** Card 10's keyset arm. No `total` and no `totalPages` — the API does not
- *  compute them, deliberately; see the backend service for why. */
 export interface ConversationCursorPage {
   items: Conversation[];
   pageSize: number;
@@ -142,8 +114,6 @@ export interface ConversationCursorPage {
   hasMore: boolean;
 }
 
-/** Which shape came back. `page` in the body is the discriminator the API
- *  already gives us — the offset arm has one, the cursor arm does not. */
 export const isCursorPage = (
   page: ConversationPage | ConversationCursorPage,
 ): page is ConversationCursorPage => !('total' in page);
@@ -153,19 +123,6 @@ export type ConversationsResult = (
   | { ok: false; error: string; status?: number }
 ) & { source: string; requestId: string; durMs: number };
 
-/**
- * Runs on the Next *server* only — `API_URL` is a Compose service name the
- * browser cannot resolve, and the org header is the kind of thing that becomes
- * a session lookup rather than something a client should be choosing.
- *
- * `page` and `sort` are passed through exactly as they arrived in the URL,
- * unvalidated, on purpose. The API is the thing that owns those rules, and a
- * second copy of them here is a second copy to keep in sync. `?page=-1`
- * therefore renders the API's 400 rather than being quietly corrected — which
- * is the honest behaviour, and what
- * plans/2026-08-09_drill-03-conversation-list.md settles under "Where is the
- * page size validated".
- */
 export async function fetchConversations(params: {
   orgId: string;
   page: string;
@@ -174,7 +131,6 @@ export async function fetchConversations(params: {
   status?: string;
   updatedFrom?: string;
   updatedTo?: string;
-  // Card 10. Absent means the offset arm, which is still the API's default.
   paging?: string;
   cursor?: string;
 }): Promise<ConversationsResult> {
@@ -184,14 +140,6 @@ export async function fetchConversations(params: {
     sort: params.sort,
   });
 
-  // Appended only when set, and an empty string counts as unset — an empty
-  // <input type="date"> submits `updatedFrom=`, and forwarding that would turn
-  // "I cleared the filter" into a 400 from @IsISO8601. Absent and empty mean
-  // the same thing to a reader, so they have to mean the same thing here.
-  //
-  // `cursor` is in the same list for the same reason, and one more: the API
-  // rejects a cursor sent to the offset arm outright, so forwarding an empty
-  // one would 400 every unpaged request.
   for (const key of [
     'status',
     'updatedFrom',
@@ -212,8 +160,6 @@ export async function fetchConversations(params: {
     });
 
     if (!response.ok) {
-      // The API's 400 body carries which field was wrong. Worth surfacing:
-      // "API responded 400" alone would make the page useless for the drill.
       const detail = await response.text();
       return {
         ok: false,
@@ -239,8 +185,6 @@ export async function fetchConversations(params: {
       error: error instanceof Error ? error.message : String(error),
       source,
       requestId,
-      // The real duration, not 0. A connect timeout is 2s of upstream time, and
-      // reporting it as zero would charge it to Next's render in the gap table.
       durMs: error instanceof UpstreamError ? error.durMs : 0,
     };
   }
@@ -263,15 +207,6 @@ export type MessageSearchResult = (
   | { ok: false; error: string; status?: number }
 ) & { source: string; requestId: string; durMs: number };
 
-/**
- * Card 11's search endpoint, through the same single hop as everything else —
- * a bare `fetch` here would drop the org header, the request id and the
- * traceparent without saying so.
- *
- * `q` is passed through unvalidated, same rule as `page` and `sort` above: the
- * API owns the length bounds, and a second copy of them here is a second copy
- * to keep in sync. A one-character `q` therefore renders the API's 400.
- */
 export async function searchMessages(params: {
   orgId: string;
   q: string;

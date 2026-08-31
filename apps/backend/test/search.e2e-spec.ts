@@ -6,21 +6,6 @@ import { AppModule } from '../src/app.module';
 import { PostgresService } from '../src/postgres/postgres.service';
 import { TenantDb } from '../src/tenancy/tenant-db.service';
 
-/**
- * Card 11's integration test for `GET /messages/search`: real HTTP through the
- * real module graph, against a real Postgres. Nothing is mocked, for the same
- * reason as conversations.e2e-spec.ts — a mocked pool cannot tell you that the
- * English stemmer collapses "refunded" and "refunds" onto one lexeme, which is
- * most of what this endpoint is for.
- *
- * One assertion here is *expected to fail* under `pnpm db:test:like`
- * (`SEARCH_STRATEGY=like`): the stemming test. That red run is the deliverable,
- * not the spec on its own — it is what proves the two arms are actually
- * different rather than two names for the same query. Same shape as
- * `db:test:naive` and `db:test:notiebreak`.
- *
- * See plans/2026-08-29_drill-11-full-text-search.md.
- */
 describe('GET /messages/search (e2e)', () => {
   let app: INestApplication<App>;
   let db: PostgresService;
@@ -31,12 +16,6 @@ describe('GET /messages/search (e2e)', () => {
   let orgId: string;
   let otherOrgId: string;
 
-  // The fixture bodies. Every distinctive token is nonsense on purpose
-  // ("zqmarmalade") so an assertion can never pass on a row the seed happened
-  // to leave in the same org.
-  //
-  // `refunded` is the load-bearing one: searching "refunds" finds it through
-  // the stemmer and does not find it through ILIKE '%refunds%'.
   const BODIES = [
     'The zqmarmalade export refunded twice last Tuesday.',
     'Nobody can sign in from zqmarmalade after the update.',
@@ -81,9 +60,6 @@ describe('GET /messages/search (e2e)', () => {
            RETURNING id`,
           [id],
         );
-        // created_at ascending with the array index, so "newest first" has
-        // something to order. `WITH ORDINALITY` rather than a loop: one
-        // statement, and the offsets are computed by Postgres.
         await tx.query(
           `INSERT INTO messages (conversation_id, org_id, message, created_at, updated_at)
            SELECT $1::uuid, $2::bigint, body,
@@ -98,9 +74,6 @@ describe('GET /messages/search (e2e)', () => {
 
   afterAll(async () => {
     if (orgId) {
-      // One scope per org: a policy filters per row against a single current
-      // tenant, so a combined `WHERE org_id = ANY(...)` would clean up one org
-      // and silently leave the other's rows behind.
       for (const id of [orgId, otherOrgId]) {
         await tenants.withOrg(id, async (tx) => {
           await tx.query(`DELETE FROM messages WHERE org_id = $1::bigint`, [
@@ -150,9 +123,6 @@ describe('GET /messages/search (e2e)', () => {
       expect((response.body as { items: unknown[] }).items).toHaveLength(1);
     });
 
-    // The floor as well as the ceiling. The list endpoint's budget of 3 is a
-    // ceiling on its worst arm; this one is exact, so it goes red the moment
-    // anyone adds a count query beside the search.
     it('costs exactly one statement', async () => {
       const response = await request(app.getHttpServer())
         .get('/messages/search')
@@ -165,19 +135,6 @@ describe('GET /messages/search (e2e)', () => {
   });
 
   describe('the arm switch', () => {
-    /**
-     * The red case for `pnpm db:test:like`.
-     *
-     * `to_tsvector('english', 'refunded')` is the lexeme `refund`, and so is
-     * `websearch_to_tsquery('english', 'refunds')` — the two meet in the
-     * middle. `ILIKE '%refunds%'` meets nothing, because the substring
-     * "refunds" does not occur in "refunded" at all.
-     *
-     * This is the assertion that makes the two arms different rather than two
-     * spellings of the same query. It is expected to fail under
-     * SEARCH_STRATEGY=like, and a green run there means the switch stopped
-     * switching.
-     */
     it('finds "refunded" when searching "refunds" (FTS arm only)', async () => {
       const response = await request(app.getHttpServer())
         .get('/messages/search')
@@ -209,7 +166,6 @@ describe('GET /messages/search (e2e)', () => {
 
       expect(theirIds).toHaveLength(1);
       expect(mineIds).toHaveLength(2);
-      // Not just "different lengths" — no id may appear on both sides.
       expect(mineIds.filter((id) => theirIds.includes(id))).toEqual([]);
     });
   });
@@ -222,8 +178,6 @@ describe('GET /messages/search (e2e)', () => {
         .expect(400);
     });
 
-    // An empty box is not "every message in the org". On the LIKE arm that
-    // request is a full scan of ten million rows returning a 200.
     it('400s on an empty or one-character q', async () => {
       for (const q of ['', 'a']) {
         await request(app.getHttpServer())
@@ -242,8 +196,6 @@ describe('GET /messages/search (e2e)', () => {
         .expect(400);
     });
 
-    // forbidNonWhitelisted, from the global pipe in app.module.ts. A typo'd
-    // parameter that quietly returns the default is worse than an error.
     it('400s on an unknown parameter', async () => {
       await request(app.getHttpServer())
         .get('/messages/search')

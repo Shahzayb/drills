@@ -1,32 +1,3 @@
-// Card 09's instrument: EXPLAIN (ANALYZE, BUFFERS) on the list query, and the
-// selectivity sweep that finds where the planner stops using the index.
-//
-//   pnpm db:explain plans     three captures: seq scan, index scan, index ignored
-//   pnpm db:explain sweep     walk the date cutoff, print the chosen scan node
-//   pnpm db:explain experiments  price the two indexes that were NOT shipped
-//   pnpm db:explain stats     pg_stats for the filtered columns + index sizes
-//   pnpm db:explain keyset    card 10: OFFSET at depth vs the cursor's row comparison
-//
-// Two things here are load-bearing and neither is obvious.
-//
-// 1. It connects as POSTGRES_APP_USER inside a `BEGIN` + `set_config` scope —
-//    the same scope TenantDb.withOrg opens. As the owner, row-level security
-//    does not apply and the plan you read is not the plan production runs. It
-//    also means the query carries `org_id = $1` AND the policy's
-//    `org_id = app_current_org()`: two predicates on one column, which is worth
-//    watching in the row estimates.
-//
-// 2. The queries go through bind parameters, not string interpolation, because
-//    that is how the application sends them. A one-shot unnamed statement
-//    always gets a *custom* plan (generic plans need a named prepared statement
-//    executed five times), so this is faithful and not a rehearsal.
-//
-// `.mts` and not `.ts`: apps/backend/package.json has no `type` field, so a
-// `.ts` here would be CommonJS — and this file's top-level `await` would be a
-// syntax error. See plans/2026-08-30_instrument-typescript.md.
-//
-// Full reasoning and the captured output: plans/2026-08-25_drill-09-index-selectivity.md.
-
 import type { ExplainResult, PlanNode } from './lib/run.mts';
 import {
   client as pgClient,
@@ -47,20 +18,6 @@ if (
   process.exit(1);
 }
 
-// Connects as the OWNER and then drops into the app role per transaction with
-// `SET LOCAL ROLE`. Both halves are needed and neither is optional:
-//
-//   * the owner, because this script does DDL — building and dropping indexes
-//     to compare them — and the app role owns nothing. It is also the only role
-//     that can see `conversations` in **pg_stats**: that view hides every row
-//     for an RLS-enabled table from non-owners, with no error, just an empty
-//     result. Found the hard way.
-//   * the app role, because RLS does not apply to a table's owner or to a
-//     superuser. Measured as `postgres`, every plan here would be missing the
-//     policy predicate the application actually runs with.
-//
-// `SET LOCAL ROLE` is transactional: it reverts at COMMIT/ROLLBACK, and at
-// ROLLBACK TO SAVEPOINT it reverts to whatever was in effect at the savepoint.
 const APP_USER = process.env.POSTGRES_APP_USER;
 
 if (!APP_USER) {
@@ -70,13 +27,8 @@ if (!APP_USER) {
 
 const client = pgClient();
 
-// The `||` rule these knobs are read under, and the reason the empty string
-// counts as absent, live in db/lib/run.mjs. `ORG_ID=150 pnpm db:explain plans`
-// silently measured org 1 for the whole of drill 09 before the -e flags existed.
 const ORG_ID = knob('ORG_ID', '1');
 const STATUS = knob('STATUS', 'closed');
-// The two subcommands that read SORT want different columns by default, so the
-// default is the subcommand's rather than one shared value.
 const SORT = knob(
   'SORT',
   subcommand === 'keyset' ? 'updated_at' : 'created_at',
@@ -86,13 +38,6 @@ const DEPTHS = knobList('DEPTHS', '1,100,5000');
 const INDEX_NAME = 'conversations_org_updated_idx';
 const PAGE_SIZE = 50;
 
-// ---------------------------------------------------------------- the query
-
-/**
- * The batched list query, verbatim from ConversationsService.listBatched —
- * joins included. Measuring a simplified version of the query would measure a
- * query nobody runs.
- */
 const listQuery = (sortColumn: string) => `
   SELECT c.id, c.status, c.assignee_id, u.name AS assignee_name,
          c.created_at, c.updated_at
@@ -103,8 +48,6 @@ const listQuery = (sortColumn: string) => `
    ORDER BY c.${sortColumn} DESC, c.id DESC
    LIMIT ${PAGE_SIZE} OFFSET 0`;
 
-/** The same page with no status filter — the query that decides whether
- *  org_id or status deserves the leading column. */
 const unfilteredQuery = `
   SELECT c.id, c.status, c.assignee_id, u.name AS assignee_name,
          c.created_at, c.updated_at
@@ -115,9 +58,6 @@ const unfilteredQuery = `
    ORDER BY c.updated_at DESC, c.id DESC
    LIMIT ${PAGE_SIZE} OFFSET 0`;
 
-// ------------------------------------------------------------------ helpers
-
-/** The scan node on `conversations` — what the whole drill is about. */
 function findScan(node: PlanNode): PlanNode | null {
   if (node['Relation Name'] === 'conversations') return node;
   for (const child of node.Plans ?? []) {
@@ -147,9 +87,6 @@ async function explainText(label: string, sql: string, params: unknown[]) {
   for (const row of rows) console.log(row['QUERY PLAN']);
 }
 
-/** The org's newest updated_at. Every date cutoff is anchored to the data, not
- *  to now(): the seed's clock is fixed at 2026-08-11, so `now() - 7 days`
- *  selects nothing at all and would look like a very selective filter. */
 async function anchor(): Promise<Date> {
   const { rows } = await client.query(
     `SELECT max(updated_at) AS at FROM conversations WHERE org_id = $1`,
@@ -170,33 +107,15 @@ async function countRows(status: string, cutoff: string) {
   return Number(rows[0].n);
 }
 
-// ------------------------------------------------------------------- scopes
-
-/** BEGIN + the app role + the transaction-local GUC the policies read.
- *  Everything after this runs as the application does, so every plan includes
- *  the RLS predicate. */
 async function openScope() {
   await client.query('BEGIN');
   await client.query(`SET LOCAL ROLE ${APP_USER}`);
   await client.query('SELECT set_config($1, $2, true)', ['app.org_id', ORG_ID]);
 }
 
-/**
- * Runs `fn` with the composite index dropped, then puts it back by rolling
- * back to a savepoint — DDL is transactional in Postgres, which is what makes
- * the "before" plan reproducible long after the migration landed.
- *
- * The savepoint rather than a plain ROLLBACK is because the enclosing
- * transaction is carrying `app.org_id`, and rolling that away would send every
- * policy predicate to NULL. Takes ACCESS EXCLUSIVE on conversations for the
- * duration: fine on a laptop, never on production.
- */
 async function withoutIndex(fn: () => Promise<void>) {
   await client.query('SAVEPOINT no_index');
   try {
-    // Back to the owner to do the DDL — the app role owns no index and gets
-    // "must be owner of index" — then straight back into the app role so the
-    // plan still carries the policy.
     await client.query('SET LOCAL ROLE NONE');
     await client.query(`DROP INDEX ${INDEX_NAME}`);
     await client.query(`SET LOCAL ROLE ${APP_USER}`);
@@ -206,12 +125,6 @@ async function withoutIndex(fn: () => Promise<void>) {
   }
 }
 
-/**
- * Builds an index, runs `fn` against it, and rolls the whole thing away — the
- * way to price an index *before* committing to a migration. Same savepoint
- * dance as above. Plain CREATE INDEX, not CONCURRENTLY: CONCURRENTLY cannot run
- * inside a transaction, which is exactly what makes this trick possible.
- */
 async function withIndex(
   name: string,
   definition: string,
@@ -233,17 +146,11 @@ async function withIndex(
   }
 }
 
-// ---------------------------------------------------------------- plans
-
 async function plans() {
-  // The scope opens before the first read, not just before the EXPLAINs: this
-  // connects as the app role, so outside a tenant scope `app_current_org()` is
-  // NULL and every policy predicate filters every row away. `max(updated_at)`
-  // came back NULL the first time this ran, which is the mechanism working.
   await openScope();
 
   const at = await anchor();
-  const wide = daysBefore(at, 548); // the whole 18-month seed window
+  const wide = daysBefore(at, 548);
   const recent = daysBefore(at, 7);
 
   const indexed = await hasIndex();
@@ -262,17 +169,12 @@ async function plans() {
   );
 
   const capture = async () => {
-    // B: the index doing its job — equality, equality, range, and the sort all
-    // served by one walk down the btree.
     await explainText(
       'B  index scan  (status=open, last 7 days, sort=updated_at)',
       listQuery('updated_at'),
       [ORG_ID, 'open', recent],
     );
 
-    // C: same endpoint, one query parameter different. The index still answers
-    // the whole WHERE — it cannot answer ORDER BY created_at, which is not in
-    // it — so at this selectivity the planner should refuse it.
     await explainText(
       'C  index ignored?  (status=closed, whole window, sort=created_at)',
       listQuery('created_at'),
@@ -309,19 +211,7 @@ async function hasIndex() {
   return rows.length > 0 && rows[0].indisvalid;
 }
 
-// ----------------------------------------------------------------- sweep
-
-/**
- * Hold the query shape fixed and walk the date cutoff from "everything" down to
- * "the last few hours", printing what the planner chose at each step. The flip
- * point is wherever the Node Type column changes.
- *
- * STATUS and SORT are env vars because the interesting sweep is the one where
- * the index cannot serve the ORDER BY (sort=created_at) — but the same ladder
- * over sort=updated_at is the control that shows why.
- */
 async function sweep() {
-  // Same reason as plans(): the app role sees nothing until the scope is open.
   await openScope();
 
   const status = STATUS;
@@ -345,8 +235,6 @@ async function sweep() {
 
   await openScope();
 
-  // DAYS overrides the ladder, so the flip found by the coarse pass can be
-  // bisected without editing the file: DAYS=90,85,80,75,70 pnpm db:explain sweep
   const ladder = DAYS;
 
   const sql = listQuery(sortColumn);
@@ -373,19 +261,6 @@ async function sweep() {
   await client.query('COMMIT');
 }
 
-// ------------------------------------------------------------ experiments
-
-/**
- * The two indexes that were considered and not shipped, priced rather than
- * argued about. Both are built inside a transaction and rolled away — nothing
- * here reaches a migration.
- *
- *   swap    (status, org_id, ...) instead of (org_id, status, ...)
- *   partial (org_id, updated_at DESC, id DESC) WHERE status = 'open'
- *
- * Each runs with the real composite index dropped, or the planner would simply
- * pick the real one and the comparison would measure nothing.
- */
 async function experiments() {
   await openScope();
 
@@ -416,9 +291,6 @@ async function experiments() {
     console.log('\n  none        (index dropped)');
     await arms();
 
-    // The design reasoned out BEFORE measuring: "equality before range" put the
-    // optional status column second. It wins nothing on the filtered arms and
-    // loses the unfiltered page outright.
     await withIndex(
       'trial_with_status_idx',
       '(org_id, status, updated_at DESC, id DESC)',
@@ -428,7 +300,6 @@ async function experiments() {
       },
     );
 
-    // The card's "what if you swap the first two?".
     await withIndex(
       'trial_swapped_idx',
       '(status, org_id, updated_at DESC, id DESC)',
@@ -438,7 +309,6 @@ async function experiments() {
       },
     );
 
-    // The stretch goal: does a partial index earn its maintenance?
     await withIndex(
       'trial_partial_idx',
       "(org_id, updated_at DESC, id DESC) WHERE status = 'open'",
@@ -452,12 +322,7 @@ async function experiments() {
   await client.query('COMMIT');
 }
 
-// ----------------------------------------------------------------- stats
-
 async function stats() {
-  // n_distinct: positive is a count, NEGATIVE is a ratio of the row count —
-  // -1 means every value is unique. That sign flip is the single most
-  // misread number in pg_stats.
   const { rows: columns } = await client.query(`
     SELECT attname, n_distinct,
            most_common_vals::text AS common_vals,
@@ -509,19 +374,6 @@ async function stats() {
   }
 }
 
-// ---------------------------------------------------------------- keyset
-
-/**
- * Card 10. The same page, reached two ways, at the same depth.
- *
- * The number to read is NOT the milliseconds — it is `Actual Rows` on the node
- * *below* the Limit. OFFSET is a Limit-node parameter: the scan still produces
- * every row up to the offset and the Limit throws them away one at a time. The
- * cursor is a WHERE clause, so the scan starts where the last page stopped and
- * produces `pageSize` rows however deep the page is.
- *
- * See plans/2026-08-26_drill-10-keyset-pagination.md.
- */
 const keysetQuery = (sortColumn: string) => `
   SELECT c.id, c.status, c.assignee_id, u.name AS assignee_name,
          c.created_at, c.updated_at
@@ -532,8 +384,6 @@ const keysetQuery = (sortColumn: string) => `
    ORDER BY c.${sortColumn} DESC, c.id DESC
    LIMIT ${PAGE_SIZE}`;
 
-/** The hand-expanded OR form the row comparison replaces. Logically identical,
- *  and the whole question is whether the planner treats it that way. */
 const keysetOrQuery = (sortColumn: string) => `
   SELECT c.id, c.status, c.assignee_id, u.name AS assignee_name,
          c.created_at, c.updated_at
@@ -556,17 +406,6 @@ const offsetQuery = (sortColumn: string, offset: number) => `
    ORDER BY c.${sortColumn} DESC, c.id DESC
    LIMIT ${PAGE_SIZE} OFFSET ${offset}`;
 
-/**
- * Where page `depth` starts, as the pair a cursor carries.
- *
- * Found with an OFFSET, which is the joke: the only way to *jump* to the
- * cursor for page 5,000 is the mechanism the cursor exists to replace. A real
- * client never does this — it walks. Here it is scaffolding, run outside every
- * EXPLAIN so it costs nothing that gets reported.
- *
- * `to_char` and not a JS Date round trip: timestamptz holds microseconds and a
- * JS Date holds milliseconds, and the truncated value names a different row.
- */
 async function cursorAt(sortColumn: string, depth: number) {
   const { rows } = await client.query(
     `SELECT to_char(${sortColumn} AT TIME ZONE 'UTC',
@@ -595,7 +434,6 @@ async function keyset() {
       'rows below Limit      ms   shared hit/read',
   );
 
-  /** Actual Rows on the node directly under the Limit — the discarded work. */
   const belowLimit = (plan: ExplainResult) => {
     const limit = (function find(node: PlanNode): PlanNode | null {
       if (node['Node Type'] === 'Limit') return node;
@@ -632,8 +470,6 @@ async function keyset() {
     await row(depth, 'keyset OR', keysetOrQuery(sortColumn), [ORG_ID, at.k, at.id]); // prettier-ignore
   }
 
-  // The claim the whole predicate choice rests on, printed rather than argued:
-  // does `(a, b) < (x, y)` reach the index as ONE Index Cond?
   const at = await cursorAt(sortColumn, 100);
   await explainText(
     'row comparison — is it an Index Cond?',
@@ -648,8 +484,6 @@ async function keyset() {
 
   await client.query('COMMIT');
 }
-
-// -------------------------------------------------------------------- main
 
 header(`explain ${subcommand}`);
 

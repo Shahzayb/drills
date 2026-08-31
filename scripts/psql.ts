@@ -1,26 +1,9 @@
-// The psql one-liners that used to live in package.json. `pnpm db:log:on`,
-// `pnpm db:activity`, `pnpm db:psql`.
-//
-// Seven scripts had grown to 1,124 characters, 588 of which was one 84-character
-// prefix — `docker compose exec -T postgres_db sh -c 'psql -U "$POSTGRES_USER"
-// -d "$POSTGRES_DB"` — pasted seven times. CLAUDE.md limits shell in
-// package.json to one-liners, and a 235-character psql call with embedded SQL is
-// not one. The script names did not change, so every `pnpm db:log:on` printed
-// across plans/ and drills/ still works.
-//
-// The other half of the point: SQL in a JSON string cannot carry a comment
-// saying why. Here it can.
-//
-// Runs on the HOST. See plans/2026-08-30_instrument-hardening.md section 6.
-
 import { spawnSync } from 'node:child_process';
 
 interface Command {
   blurb: string;
   sql: string[];
-  /** psql's `-v ON_ERROR_STOP=1` — for the ones where statement 2 depends on 1. */
   stopOnError?: boolean;
-  /** Keeps the TTY, so `\d` and friends work. */
   interactive?: boolean;
 }
 
@@ -43,10 +26,6 @@ const COMMANDS: Record<string, Command> = {
     sql: [],
   },
 
-  // log_min_duration_statement = 0 logs every statement with its duration. ALTER
-  // SYSTEM writes postgresql.auto.conf, so it survives a restart until reset —
-  // hence a matching :off rather than relying on the container being recreated.
-  // pg_reload_conf() applies it without a restart.
   'log:on': {
     blurb: 'log every statement with its duration',
     stopOnError: true,
@@ -70,9 +49,6 @@ const COMMANDS: Record<string, Command> = {
     sql: ['show log_min_duration_statement'],
   },
 
-  // left(query, 140) because a seeded INSERT is thousands of characters and one
-  // row would fill the terminal. pid <> pg_backend_pid() drops this very query,
-  // which otherwise always appears as the one active statement.
   activity: {
     blurb: 'what is running on this database right now',
     sql: [
@@ -94,8 +70,6 @@ if (!command) {
   process.exit(1);
 }
 
-// Each statement is single-quoted into the sh -c string, so a statement
-// containing one would end the quote and change what runs.
 for (const sql of command.sql) {
   if (sql.includes("'")) {
     console.error(
@@ -105,8 +79,6 @@ for (const sql of command.sql) {
   }
 }
 
-// The env vars stay unexpanded here and are resolved by the container's sh,
-// which is where POSTGRES_USER and POSTGRES_DB are actually set.
 const psql = [
   'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"',
   command.stopOnError ? '-v ON_ERROR_STOP=1' : '',
@@ -115,7 +87,6 @@ const psql = [
   .filter(Boolean)
   .join(' ');
 
-// -T everywhere except the interactive prompt, which needs the TTY.
 const { status, error } = spawnSync(
   'docker',
   [

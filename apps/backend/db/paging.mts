@@ -1,33 +1,3 @@
-// Card 10's instrument: what page depth costs, over HTTP, against the endpoint
-// a client actually calls.
-//
-//   pnpm db:paging depths      latency vs page depth, both arms — the chart
-//   pnpm db:paging walk        the export tool: cumulative cost of walking pages
-//   pnpm db:paging concurrent  a row inserted (and moved) mid-pagination
-//
-// Why HTTP and not EXPLAIN. `pnpm db:explain keyset` answers "which plan", and
-// it is the better instrument for that — no HTTP, no JSON, no noise. This one
-// answers "what does the caller feel", which is the question the card asks, and
-// includes the two joins, the tag query, RLS's BEGIN/COMMIT and serialisation.
-// The two disagree by roughly a millisecond of fixed cost, and that gap is
-// itself worth seeing.
-//
-// Method, inherited from drill 05 and not negotiable:
-//   * VACUUM (ANALYZE) first, or the numbers describe a table that has never
-//     been vacuumed rather than the query.
-//   * Arms INTERLEAVED within each depth, in one sitting. This laptop drifts
-//     ~4% slower over 90 minutes; two arms run one after the other are not
-//     comparable, two arms run alternately are.
-//   * Median of ROUNDS, not mean. One GC pause should not own the number.
-//   * Nothing under ~15% is a result.
-//
-// `.mts` and not `.ts`: apps/backend/package.json has no `type` field, so a
-// `.ts` here would be CommonJS — and this file's top-level `await` would be a
-// syntax error. See plans/2026-08-30_instrument-typescript.md.
-//
-// Full reasoning and the captured output:
-// plans/2026-08-26_drill-10-keyset-pagination.md.
-
 import {
   client as pgClient,
   header,
@@ -47,29 +17,19 @@ if (!['depths', 'walk', 'concurrent'].includes(subcommand)) {
   process.exit(1);
 }
 
-// `||` and not `??` throughout: the root script forwards these with
-// `docker compose exec -e ORG_ID`, and an unset host variable arrives as the
-// empty string, not as absent.
 const API = process.env.BACKEND_INTERNAL_URL || 'http://nest_server:3002';
 const ORG_ID = knob('ORG_ID', '1');
 const PAGE_SIZE = knobNumber('PAGE_SIZE', 50);
 const ROUNDS = knobNumber('ROUNDS', 3);
-// The card's five. Overridable so a slow box can stop at 1000.
 const DEPTHS = knobList('DEPTHS', '1,10,100,1000,5000');
-// How far `walk` goes before extrapolating. 400 is the card's own example, and
-// on the whale the offset arm alone takes minutes past it.
 const MAX_PAGES = knobNumber('MAX_PAGES', 400);
 
-// ------------------------------------------------------------------ requests
-
-/** One page of GET /conversations, as far as this instrument reads it. */
 interface Page {
   items: { id: string }[];
   nextCursor?: string | null;
   hasMore?: boolean;
 }
 
-/** One request, timed the way a client experiences it: connect-to-parsed. */
 async function get(params: Record<string, string>) {
   const url = `${API}/conversations?${new URLSearchParams({
     pageSize: String(PAGE_SIZE),
@@ -95,34 +55,17 @@ const offsetPage = (page: number, extra: Extra = {}) =>
 const keysetPage = (cursor: string | null, extra: Extra = {}) =>
   get({ paging: 'keyset', ...(cursor ? { cursor } : {}), ...extra });
 
-/**
- * Walk the cursor forward to page `depth` and time ONLY the last request.
- *
- * The asymmetry this creates has to be said out loud rather than buried: the
- * offset arm reaches page 5,000 in one request, the keyset arm reaches it in
- * 5,000 — and those 4,999 requests warm exactly the pages the timed one reads.
- * The comparison flatters keyset. It is still the honest comparison, because
- * "jump to page 5,000" is not a thing a keyset client can do at all, and the
- * shape a real client has is precisely this walk. `walk` prices the whole thing
- * instead of one request, which is the number that actually matters for an
- * export.
- */
 async function keysetAtDepth(depth: number, extra: Extra = {}) {
   let cursor: string | null = null;
   let last: Awaited<ReturnType<typeof get>> | null = null;
   for (let page = 1; page <= depth; page++) {
     last = await keysetPage(cursor, extra);
     cursor = last.body.nextCursor ?? null;
-    if (!cursor && page < depth) return null; // the org is shorter than that
+    if (!cursor && page < depth) return null;
   }
   return last;
 }
 
-// ------------------------------------------------------------------ reporting
-
-/** Log-scaled, because a linear bar chart of 0.3ms next to 900ms is one bar
- *  and one invisible line. The linear version is the one in the plan file —
- *  there the flatness IS the picture; here you want to read both numbers. */
 function bars(rows: { label: string; ms: number }[]) {
   const max = Math.max(...rows.map((r) => Math.log10(Math.max(r.ms, 0.01))));
   const min = Math.log10(0.1);
@@ -137,15 +80,10 @@ function bars(rows: { label: string; ms: number }[]) {
   }
 }
 
-// --------------------------------------------------------------------- depths
-
 async function depths() {
   const results = new Map<number, { offset: number[]; keyset: number[] }>();
   for (const depth of DEPTHS) results.set(depth, { offset: [], keyset: [] });
 
-  // Interleaved: both arms of a depth in the same few seconds, then the next
-  // depth. Rounds on the outside so a slow minute lands on every cell, not on
-  // the arm that happened to run during it.
   for (let round = 1; round <= ROUNDS; round++) {
     for (const depth of DEPTHS) {
       const cell = results.get(depth)!;
@@ -191,12 +129,6 @@ async function depths() {
   return table;
 }
 
-// ----------------------------------------------------------------------- walk
-
-/**
- * The export tool. Not "how slow is one deep page" but "how long does reading
- * the whole list take", which is the cost nobody is watching.
- */
 async function walk() {
   const arms: Record<string, { ms: number; pages: number; rows: number }> = {};
 
@@ -236,9 +168,6 @@ async function walk() {
     );
   }
 
-  // The extrapolation is labelled as one. Offset's per-page cost grows with
-  // depth, so a linear projection from the first N pages is a LOWER bound —
-  // the real number is worse, and saying so is the point.
   const { rows: total } = await client.query(
     `SELECT count(*) AS n FROM conversations WHERE org_id = $1`,
     [ORG_ID],
@@ -261,25 +190,6 @@ async function walk() {
   return arms;
 }
 
-// ----------------------------------------------------------------- concurrent
-
-/**
- * The card's last question, shown rather than argued.
- *
- * Two mutations, because they break differently:
- *
- *   insert at the top   — every later row shifts down one *position*. OFFSET
- *                         counts positions, so page 2 repeats the last row of
- *                         page 1. The cursor names a row, so it does not.
- *   move a row upward   — a row already read gets a newer updated_at and jumps
- *                         above the cursor. NEITHER arm sees it twice; both
- *                         show it once, at its old place. But a row moved the
- *                         other way — from above the cursor to below it — is
- *                         skipped by keyset, and that is keyset's own anomaly.
- *                         `updated_at` here is bumped by every status change,
- *                         so this is a real failure mode, not a thought
- *                         experiment.
- */
 async function concurrent() {
   const scratch = await client.query(
     `INSERT INTO organizations (name, plan) VALUES ($1, 'free') RETURNING id`,
@@ -287,8 +197,6 @@ async function concurrent() {
   );
   const org = scratch.rows[0].id;
 
-  // Runs as the owner, which RLS does not apply to — the same reason
-  // db/seed.mjs can write across tenants. See migration 003.
   const seed = await client.query(
     `INSERT INTO conversations (org_id, status, created_at, updated_at)
      SELECT $1::bigint, 'open',
@@ -317,9 +225,6 @@ async function concurrent() {
     const offset1 = await call({ page: '1' });
     const keyset1 = await call({ paging: 'keyset' });
     const cursor = keyset1.nextCursor;
-    // Not a non-null assertion: an empty page 1 means the nine scratch rows
-    // never landed, and every line printed below it would then be describing
-    // an empty org rather than the anomaly it claims to show.
     if (!cursor) {
       throw new Error(`scratch org ${org} returned no cursor on page 1`);
     }
@@ -353,9 +258,6 @@ async function concurrent() {
         `keyset repeated ${keyset2.items.filter((i) => seen.has(i.id)).length}.`,
     );
 
-    // Now keyset's own anomaly: a row BELOW the cursor is touched, which moves
-    // it above the cursor. Both arms lose it — offset by shifting, keyset by
-    // the predicate. This is the honest half.
     const below = seed.rows[seed.rows.length - 1].id;
     await client.query(
       `UPDATE conversations SET updated_at = now() + interval '2 hours'
@@ -389,12 +291,8 @@ async function concurrent() {
   }
 }
 
-// --------------------------------------------------------------------- main
-
 const client = pgClient();
 
-// Before the first measurement, so a stale container is visible up front, and
-// outside every timed region.
 const armState = await serverArms(API);
 
 header(`paging ${subcommand}  api ${API}`);

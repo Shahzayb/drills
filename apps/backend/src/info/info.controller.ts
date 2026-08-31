@@ -30,11 +30,6 @@ export interface InfoResponse {
   };
 }
 
-/**
- * The value the web app displays. Deliberately a real read through the pool
- * rather than a constant — if this renders, the whole path is proven:
- * browser -> Next server -> nest_server by service name -> pool -> Postgres.
- */
 @Controller('info')
 export class InfoController {
   constructor(private readonly postgres: PostgresService) {}
@@ -51,12 +46,6 @@ export class InfoController {
         serverTime: rows[0].server_time.toISOString(),
         poolStats: this.postgres.stats(),
       },
-      // Every value here is the resolved module constant the request path
-      // branches on, imported rather than re-read from process.env. A second
-      // read would agree with the shell while the running code disagreed, which
-      // is exactly the failure this reports (drill 10). `pnpm arms` prints it.
-      // Local-only affordance: a real service should not publish its flag state
-      // unauthenticated. See plans/2026-08-30_instrument-hardening.md.
       arms: {
         listStrategy: LIST_STRATEGY,
         keysetTiebreak: KEYSET_TIEBREAK,

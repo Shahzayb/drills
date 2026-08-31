@@ -10,8 +10,6 @@ export class HealthController {
     const report = await this.healthService.check();
 
     if (report.status === 'error') {
-      // Passing an object makes it the entire response body, so the 503 carries
-      // the same shape as the 200 instead of Nest's default error envelope.
       throw new ServiceUnavailableException(report);
     }
 

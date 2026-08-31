@@ -21,31 +21,10 @@ import {
 import { ListConversationsQuery } from './dto/list-conversations.query';
 import { UpdateConversationDto } from './dto/update-conversation.dto';
 
-/**
- * One org's conversations.
- *
- * The controller is thin by design: it says what the route is, where the org
- * comes from, and what shape the query has. Everything it does before calling
- * the service is done by decorators, which is the point of them — the handler
- * body never contains a validation branch.
- *
- * `ParseUUIDPipe` on every `:id` is not tidiness. Without it a non-uuid reaches
- * Postgres, which raises `22P02 invalid input syntax for type uuid`, and the
- * caller gets a 500 that distinguishes malformed from missing. A 400 here and a
- * 404 below are the only two answers this route should ever give.
- */
 @Controller('conversations')
 export class ConversationsController {
   constructor(private readonly conversations: ConversationsService) {}
 
-  // Card 08's budget: list() runs 3 statements in the batched strategy
-  // (list, count, tags) and this is what the metadata has to sit on — see the
-  // note on ConversationsService.list() for why the service method itself is
-  // the wrong place.
-  //
-  // Card 10's keyset arm runs 2 (list, tags) — it has no count. The budget
-  // stays 3: it is a ceiling on the worst arm, and lowering it would make the
-  // offset arm, which is still supported, breach on every request.
   @Get()
   @QueryBudget(3)
   list(
@@ -81,8 +60,6 @@ export class ConversationsController {
   }
 
   @Delete(':id')
-  // 204: the response carries nothing, and a 200 with an empty body invites a
-  // client to parse it.
   @HttpCode(204)
   remove(
     @OrgId() orgId: string,

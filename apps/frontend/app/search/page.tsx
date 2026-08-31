@@ -3,36 +3,18 @@ import { logger, since } from '@/lib/logger';
 import { renderStartedAt } from '@/lib/render-timing';
 import { after } from 'next/server';
 
-// Same as the conversations page: no auth in this repo, so the tenant is a URL
-// parameter with a default. `?org=150` is the tail org every card measures.
 const DEFAULT_ORG_ID = '1';
 const DEFAULT_LIMIT = '20';
 
-/** `?a=1&a=2` gives an array. Take the first and move on. */
 const first = (value: string | string[] | undefined, fallback: string) =>
   (Array.isArray(value) ? value[0] : value) ?? fallback;
 
-/**
- * Server Component, and a GET form — no client component, no Route Handler, no
- * JavaScript. Submitting puts `q` in the URL and the server re-renders, which
- * makes every search shareable and every measurement reproducible from the
- * address bar.
- *
- * That also means there is no type-ahead, and that is deliberate rather than
- * unfinished: a search-as-you-type box against the LIKE arm is one full scan of
- * ten million rows per keystroke, which is the thing card 11 is about. The
- * `:*` prefix support that would make type-ahead answer correctly is described
- * in plans/2026-08-29_drill-11-full-text-search.md and is not built.
- */
 export default async function SearchPage(props: PageProps<'/search'>) {
   const startedAt = renderStartedAt();
   const searchParams = await props.searchParams;
 
   const orgId = first(searchParams.org, DEFAULT_ORG_ID);
   const limit = first(searchParams.limit, DEFAULT_LIMIT);
-  // No default. An empty box is "you have not searched yet", which is a
-  // different thing from "you searched for nothing" — the API 400s on the
-  // second, and this page never sends it.
   const q = first(searchParams.q, '');
 
   const result = q ? await searchMessages({ orgId, q, limit }) : null;

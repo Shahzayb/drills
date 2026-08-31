@@ -4,42 +4,18 @@ services:
     image: postgres:18-alpine
     container_name: drills_postgres
     env_file: .env
-    # Every flag here is applied on *every start*. The previous
-    # POSTGRES_INITDB_ARGS only ran at initdb, so editing it did nothing at all
-    # on an existing drills_pgdata volume — silently, with no warning. That is a
-    # trap, not a configuration mechanism. See
-    # plans/2026-08-11_drill-04-bulk-seed.md.
     command:
       - postgres
-      # Postgres' own default, and *below* the 25%-of-RAM rule on purpose. At
-      # 768MB the conversations heap (~230MB) fits entirely and every later
-      # EXPLAIN (ANALYZE, BUFFERS) reports `shared hit` — the instrument reads
-      # flat. At 128MB conversations is ~1.8x over and messages ~20x over, so
-      # cache misses stay visible for the rest of the drill series.
       - -c
       - shared_buffers=128MB
-      # Lets COPY skip WAL entirely for a table truncated in the same
-      # transaction. This is the single biggest lever in the bulk seed.
-      # COST: no streaming replication and no PITR until this goes back to
-      # `replica` (which needs a restart). Whichever drill wants a read replica
-      # starts by changing this line.
       - -c
       - wal_level=minimal
-      # Required: the server refuses to start on wal_level=minimal without it.
       - -c
       - max_wal_senders=0
-      # Insurance for when the WAL-skip does not engage (any load that is not
-      # truncate-and-COPY in one transaction). Keeps checkpoints from thrashing.
       - -c
       - max_wal_size=2GB
       - -c
       - checkpoint_timeout=30min
-      # Off by default — postmaster-context, so turning it on needs this
-      # container recreated, not just reloaded. Same reasoning as every other
-      # instrument in this repo: an always-on `pg_stat_statements` would
-      # silently change the baseline every later A/B is compared against.
-      # `PG_PRELOAD=pg_stat_statements docker compose up -d postgres_db`, then
-      # `pnpm db:stats:on`. See plans/2026-08-17_drill-08-n-plus-one.md.
       - -c
       - shared_preload_libraries=${PG_PRELOAD:-}
     ports:
@@ -91,45 +67,14 @@ services:
       dockerfile: Dockerfile
     container_name: drills_backend
     env_file: .env
-    # Overrides env_file, and reads from the shell first — which is what makes
-    # `LOG_LEVEL=debug docker compose up -d nest_server` a one-command A/B.
-    # `silent` is a real pino level and is the "before" column of that
-    # measurement. See plans/2026-08-13_drill-06-request-id-propagation.md.
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-info}
-      # Empty by default, which is what switches OpenTelemetry off — see
-      # apps/backend/src/tracing.ts. `pnpm trace:on` sets it and starts the
-      # collector in the same command, because a set endpoint with nothing
-      # listening is a retry loop, not a trace.
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-      # Read by the SDK itself, no code involved. Unset means
-      # parentbased_always_on — every request traced, which is what you want
-      # for one request by hand and what falls over under load. The A/B in the
-      # plan file is a measurement of exactly that difference:
-      # parentbased_traceidratio + 0.05 for 5%.
       - OTEL_TRACES_SAMPLER=${OTEL_TRACES_SAMPLER:-}
       - OTEL_TRACES_SAMPLER_ARG=${OTEL_TRACES_SAMPLER_ARG:-}
-      # Card 08. Empty means ConversationsService's own default (batched).
-      # `LIST_STRATEGY=naive docker compose up -d nest_server` is the one-line
-      # A/B switch — same pattern as LOG_LEVEL above, and for the same reason:
-      # a shell-set var overrides both this default and .env, without editing
-      # either. See plans/2026-08-17_drill-08-n-plus-one.md.
       - LIST_STRATEGY=${LIST_STRATEGY:-}
-      # Card 10, and the same one-line A/B switch as LIST_STRATEGY above:
-      # `KEYSET_TIEBREAK=off docker compose up -d nest_server` drops `id` from
-      # the cursor's row comparison. A variable that is not listed here is not
-      # forwarded at all — setting one in the shell looks like it works and
-      # silently does nothing, which is how drill 09's ORG_ID went unnoticed.
-      # See plans/2026-08-26_drill-10-keyset-pagination.md.
       - KEYSET_TIEBREAK=${KEYSET_TIEBREAK:-}
-      # Card 11, and the same one-line A/B as LIST_STRATEGY above:
-      # `SEARCH_STRATEGY=like docker compose up -d nest_server` puts the search
-      # endpoint back on the ILIKE '%term%' it shipped with. Empty means the
-      # module's own default ('fts'). See
-      # plans/2026-08-29_drill-11-full-text-search.md.
       - SEARCH_STRATEGY=${SEARCH_STRATEGY:-}
-      # off | on | header — see apps/backend/src/observability/query-counter.ts.
-      # Empty forwards through to that module's own default ('on').
       - QUERY_COUNTER=${QUERY_COUNTER:-}
     ports:
       - '${BACKEND_PORT:-3002}:3002'
@@ -149,13 +94,9 @@ services:
           'CMD-SHELL',
           'wget -qO- http://localhost:3002/health >/dev/null || exit 1',
         ]
-      # 5s x 2 retries puts "unhealthy" ~10-15s after a dependency dies. The
-      # drills that follow induce failure and measure the response, so a slower
-      # cadence would just be measuring the health check instead.
       interval: 5s
       timeout: 3s
       retries: 2
-      # Generous: `nest start --watch` compiles before it binds.
       start_period: 40s
     restart: always
     networks:
@@ -199,13 +140,6 @@ services:
       - app-network
     mem_limit: 1g
     mem_reservation: 512m
-  # Load generator. On app-network so scripts can address `nest_server:3002` by
-  # service name, which is also why it never measures real network latency.
-  #
-  # Version is PINNED on purpose. A baseline is only comparable to a re-run of
-  # itself, and `:latest` changes the instrument silently between the `before`
-  # and the `after` — the same failure mode as POSTGRES_INITDB_ARGS in drill 04.
-  # See plans/2026-08-13_drill-05-load-test-baseline.md.
   k6:
     image: grafana/k6:2.1.0
     container_name: drills_k6
@@ -216,21 +150,12 @@ services:
     profiles: ['test']
     entrypoint: ['k6']
 
-  # Tracing, phase 2 of drill 06. Both services are behind `profiles: ['trace']`
-  # so `docker compose up` never starts them: an always-on collector would
-  # change the instrument drill 05 baselined against, and cards 08/09/10 compare
-  # against that baseline. `pnpm trace:on` / `pnpm trace:off`.
-  #
-  # Tags PINNED, same reasoning as k6:2.1.0.
   otel_collector:
     image: otel/opentelemetry-collector-contrib:0.158.0
     container_name: drills_otel_collector
     volumes:
-      # The image's own default config path, so there is no command to override.
       - ./otel/collector.yaml:/etc/otelcol-contrib/config.yaml:ro
     ports:
-      # Published only so a host-side producer could reach it. The two apps use
-      # the Compose service name, like everything else here.
       - '${OTEL_HTTP_PORT:-4318}:4318'
     depends_on:
       - jaeger
@@ -243,9 +168,6 @@ services:
     image: jaegertracing/jaeger:2.20.0
     container_name: drills_jaeger
     ports:
-      # The UI. Traces are received from the collector over the Compose network
-      # on 4317, which is deliberately not published — the collector is the only
-      # thing that should be talking to it.
       - '${JAEGER_UI_PORT:-16686}:16686'
     networks:
       - app-network

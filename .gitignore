@@ -9,6 +9,4 @@ node_modules/
 .pnpm-debug.log
 drills/
 
-# k6's web dashboard — 170KB of self-contained HTML per run. Generated, read
-# locally, never committed. The summary.txt beside it is what stays.
 k6/reports/**/*.html

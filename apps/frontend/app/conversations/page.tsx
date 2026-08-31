@@ -4,36 +4,13 @@ import { renderStartedAt } from '@/lib/render-timing';
 import { after } from 'next/server';
 import { ConversationList } from './conversation-list';
 
-// There is no auth in this repo, so the tenant is a URL parameter with a
-// default. `?org=2` is how tenant isolation gets poked at by hand later.
 const DEFAULT_ORG_ID = '1';
-// Matches the API's own default. Stated here anyway rather than relying on the
-// API's, so the page's URLs are always complete and shareable.
 const DEFAULT_PAGE_SIZE = '50';
 const DEFAULT_SORT = 'updated_at';
 
-/** `?a=1&a=2` gives an array. Take the first and move on. */
 const first = (value: string | string[] | undefined, fallback: string) =>
   (Array.isArray(value) ? value[0] : value) ?? fallback;
 
-/**
- * Server Component. Everything below runs on the Next server, once, per
- * request: the fetch, the JSON parse, the map. The browser receives HTML.
- *
- * Reading `searchParams` opts this route into dynamic rendering — it cannot be
- * prerendered at build time because the page number is not known then. That is
- * correct here and worth knowing rather than discovering.
- *
- * No `loading.tsx` and no <Suspense>: the card wants a blocking server render
- * with no spinner, so the absence is the point.
- *
- * Card 10 gives this page two modes. The default is **keyset**: the first page
- * is fetched here, on the server, and handed to a client component that appends
- * the rest through the cursor. `?mode=offset` is the numbered pager this page
- * has had since drill 03 — kept because "jump to page 40" is the one thing a
- * cursor cannot do, and because it is the other arm of the measurement.
- * See plans/2026-08-26_drill-10-keyset-pagination.md.
- */
 export default async function ConversationsPage(
   props: PageProps<'/conversations'>,
 ) {
@@ -44,14 +21,9 @@ export default async function ConversationsPage(
   const page = first(searchParams.page, '1');
   const pageSize = first(searchParams.pageSize, DEFAULT_PAGE_SIZE);
   const sort = first(searchParams.sort, DEFAULT_SORT);
-  // Card 09's filter. No defaults: an absent status means "both", which is a
-  // different query from either value and the one the composite index is
-  // measured against. See plans/2026-08-25_drill-09-index-selectivity.md.
   const status = first(searchParams.status, '');
   const updatedFrom = first(searchParams.updatedFrom, '');
   const updatedTo = first(searchParams.updatedTo, '');
-  // Anything that is not the literal 'offset' is keyset — a typo'd mode lands
-  // on the default rather than on an error page.
   const mode = first(searchParams.mode, 'keyset') === 'offset' ? 'offset' : 'keyset'; // prettier-ignore
 
   const result = await fetchConversations({
@@ -65,16 +37,6 @@ export default async function ConversationsPage(
     paging: mode === 'keyset' ? 'keyset' : undefined,
   });
 
-  // Timed *inside* the callback on purpose: `after` runs once the response is
-  // finished, and the flush is part of the render. Stopping the clock before
-  // `return` would time the data fetch only and report the rest as zero.
-  //
-  // The id is captured in the closure rather than read inside, because request
-  // APIs like headers() may only be called inside an `after` callback in Route
-  // Handlers and Server Functions — not in a Server Component.
-  //
-  // No `status`: a Server Component cannot know the HTTP status of the response
-  // it is part of. The upstream status is on upstream_fetch.
   after(() => {
     logger.info(
       {
@@ -88,23 +50,15 @@ export default async function ConversationsPage(
     );
   });
 
-  // One link builder for every link on the page, because the bug it prevents is
-  // real and quiet: build the "next page" URL from scratch and the active
-  // filter silently disappears on the second page. Every link starts from the
-  // full current state and overrides only what it changes.
   const linkTo = (overrides: Record<string, string>) => {
     const next = new URLSearchParams({
       org: orgId,
       page,
       pageSize,
       sort,
-      // Carried like every other bit of state: switch the sort while paging by
-      // cursor and the numbered pager should not reappear underneath you.
       ...(mode === 'offset' ? { mode } : {}),
       ...overrides,
     });
-    // Same rule as lib/api.ts: empty means absent, so a cleared filter leaves
-    // the URL rather than sitting in it as `status=`.
     for (const [key, value] of [
       ['status', status],
       ['updatedFrom', updatedFrom],

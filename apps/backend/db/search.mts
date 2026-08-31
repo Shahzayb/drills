@@ -1,35 +1,3 @@
-// Card 11's instrument: LIKE '%term%' against a tsvector + GIN index, and the
-// price of every index that could have served the search box instead.
-//
-//   pnpm db:search plans     EXPLAIN (ANALYZE, BUFFERS) both arms, both terms
-//   pnpm db:search indexes   build time + on-disk size for five candidates
-//   pnpm db:search gaps      the inputs where FTS answers worse than LIKE
-//   pnpm db:search writes    stretch: what the GIN costs on the way in
-//
-// Same two load-bearing choices as db/explain.mjs, for the same reasons: it
-// connects as the owner and drops into the app role inside a transaction, so
-// every plan carries the RLS predicate the application runs with; and every
-// query goes through bind parameters, because that is how the service sends
-// them and a one-shot unnamed statement always gets a custom plan.
-//
-// Knobs (forwarded by the root script with `docker compose exec -e`, without
-// which they silently do nothing):
-//
-//   ORG_ID=150          the tail org — several of these numbers invert there
-//   SEARCH_TERM=refund  a single term instead of the default ladder
-//   ROUNDS=5            timed repetitions per cell, median reported
-//   LIMIT=20            page size
-//
-// SEARCH_TERM, not TERM: every interactive shell exports TERM as the terminal
-// type, so `-e TERM` would forward 'xterm-256color' in as the search term.
-//
-// `.mts` and not `.ts`: apps/backend/package.json has no `type` field, so a
-// `.ts` here would be CommonJS — and this file's top-level `await` would be a
-// syntax error. See plans/2026-08-30_instrument-typescript.md.
-//
-// Full reasoning and the captured output:
-// plans/2026-08-29_drill-11-full-text-search.md.
-
 import { faker } from '@faker-js/faker';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
@@ -59,9 +27,6 @@ if (!APP_USER) {
   process.exit(1);
 }
 
-// Every knob at the top, so the header prints the full set before the first
-// query. The `||` rule they are read under, and why the empty string counts as
-// absent, live in db/lib/run.mjs.
 const ORG_ID = knob('ORG_ID', '1');
 const ROUNDS = knobNumber('ROUNDS', 5);
 const LIMIT = knobNumber('LIMIT', 20);
@@ -71,29 +36,16 @@ const ROWS = knobNumber('ROWS', 50000);
 const INSERTS = knobNumber('INSERTS', 2000);
 const INDEX_NAME = 'messages_org_tsv_idx';
 
-// Every mode reports a median over ROUNDS samples, and the median of none is
-// NaN — a table of NaNs under a header that says the knob arrived.
 if (ROUNDS < 1) {
   console.error('ROUNDS must be at least 1');
   process.exit(1);
 }
 
-// A selectivity ladder, not one term. `export` is 4.1% of the whale org and
-// `ERR_2452` is 0.045%, and the two answer the question "is FTS fast?"
-// differently enough that reporting only one of them would be a lie by
-// selection. Counted with
-//   select count(*) from messages where org_id = 1 and message ilike '%export%';
 const SEARCH_TERM = knob('SEARCH_TERM', '');
 const TERMS = SEARCH_TERM ? [SEARCH_TERM] : ['export', 'ERR_2452'];
 
 const client = pgClient();
 
-// ---------------------------------------------------------------- the queries
-
-// Both arms are verbatim from SearchService — org_id is passed explicitly even
-// though the RLS policy also constrains it, because that is what the service
-// sends and because the explicit predicate is the one that reaches the GIN
-// key's leading column.
 const likeQuery = `
   SELECT m.id, m.conversation_id, m.created_at, m.message
     FROM messages m
@@ -108,8 +60,6 @@ const ftsQuery = `
    ORDER BY m.created_at DESC, m.id DESC
    LIMIT ${LIMIT}`;
 
-// ------------------------------------------------------------------ reporting
-
 const median = (values: number[]) => {
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
@@ -118,8 +68,6 @@ const median = (values: number[]) => {
     : (sorted[middle - 1] + sorted[middle]) / 2;
 };
 
-/** Log-scaled for the same reason paging.mjs is: 0.5ms and 4,000ms on one
- *  linear axis is one bar and one invisible line. */
 function bars(rows: { label: string; ms: number }[]) {
   const max = Math.max(...rows.map((r) => Math.log10(Math.max(r.ms, 0.01))));
   const min = Math.log10(0.1);
@@ -137,9 +85,6 @@ function bars(rows: { label: string; ms: number }[]) {
 const rule = (label: string) =>
   console.log(`\n--- ${label} ${'-'.repeat(Math.max(0, 68 - label.length))}`);
 
-// -------------------------------------------------------------------- helpers
-
-/** The scan node on `messages` — the thing the whole card is about. */
 function findScan(node: PlanNode): PlanNode | null {
   if (node['Relation Name'] === 'messages') return node;
   for (const child of node.Plans ?? []) {
@@ -169,8 +114,6 @@ async function explainText(label: string, sql: string, params?: unknown[]) {
   for (const row of rows) console.log(row['QUERY PLAN']);
 }
 
-/** Median wall-clock over ROUNDS runs, first discarded — the first run pays for
- *  whatever is not in shared_buffers and is not the number you serve. */
 async function timed(sql: string, params: unknown[]) {
   const samples: number[] = [];
   for (let k = 0; k <= ROUNDS; k++) {
@@ -182,24 +125,17 @@ async function timed(sql: string, params: unknown[]) {
   return median(samples);
 }
 
-/** The one value of a one-column, one-row query. Postgres's own type is
- *  whatever the column is, so the caller narrows it — usually with Number(). */
 async function scalar(sql: string, params?: unknown[]): Promise<unknown> {
   const { rows } = await client.query(sql, params);
   return Object.values(rows[0])[0];
 }
 
-// --------------------------------------------------------------------- scopes
-
-/** BEGIN + the app role + the transaction-local GUC the policies read. */
 async function openScope() {
   await client.query('BEGIN');
   await client.query(`SET LOCAL ROLE ${APP_USER}`);
   await client.query('SELECT set_config($1, $2, true)', ['app.org_id', ORG_ID]);
 }
 
-/** DDL runs as the owner, measurement runs as the app role. Every savepoint
- *  helper below hops between the two for that reason. */
 async function asOwner<T>(fn: () => Promise<T>): Promise<T> {
   await client.query('SET LOCAL ROLE NONE');
   try {
@@ -209,17 +145,6 @@ async function asOwner<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/**
- * Runs `fn` with the GIN index dropped and puts it back by rolling back to a
- * savepoint. DDL is transactional in Postgres, which is what makes the "before"
- * plan reproducible after the migration has landed.
- *
- * DROP INDEX takes ACCESS EXCLUSIVE on `messages` and holds it until the
- * savepoint unwinds, so every other session's reads and writes queue behind
- * `fn()` — which in `indexes` mode is a whole CREATE INDEX. lock_timeout makes
- * a contended run fail here with a plain error instead of blocking the app and
- * charging the wait to whatever else was being measured at the time.
- */
 async function withoutIndex(fn: () => Promise<unknown>) {
   await client.query('SAVEPOINT no_index');
   try {
@@ -233,12 +158,6 @@ async function withoutIndex(fn: () => Promise<unknown>) {
   }
 }
 
-/**
- * Runs `fn` with the tsvector match operator put back to NOT LEAKPROOF, then
- * rolls that away. Reproduces the state migration 1787998200000 fixed, which is
- * the state a fresh Postgres is in: under RLS the planner cannot promote a
- * non-leakproof qual into an index condition, so no index path exists at all.
- */
 async function notLeakproof(fn: () => Promise<unknown>) {
   await client.query('SAVEPOINT leaky');
   try {
@@ -253,13 +172,6 @@ async function notLeakproof(fn: () => Promise<unknown>) {
   }
 }
 
-/**
- * Builds a candidate index, times the build, sizes it, runs `fn` against it and
- * rolls the whole thing away — pricing an index before committing to a
- * migration. Plain CREATE INDEX, not CONCURRENTLY: CONCURRENTLY cannot run
- * inside a transaction, which is exactly what makes this possible.
- */
-/** Build time in ms, on-disk size in bytes, and pg_size_pretty's rendering. */
 interface TrialIndex {
   buildMs: number;
   bytes: number;
@@ -292,8 +204,6 @@ async function withIndex(
   }
 }
 
-// ---------------------------------------------------------------------- plans
-
 async function plans() {
   await openScope();
 
@@ -316,9 +226,6 @@ async function plans() {
   const chart: { label: string; ms: number }[] = [];
 
   for (const term of TERMS) {
-    // One count per predicate, not one per term. The two arms do not match the
-    // same rows — that disagreement is the whole of `gaps` mode — so printing
-    // the ILIKE count beside an FTS row reports the wrong query's answer.
     const counted = (predicate: string) =>
       scalar(
         `SELECT count(*) FROM messages WHERE org_id = $1 AND ${predicate}`,
@@ -330,11 +237,6 @@ async function plans() {
       fts: await counted(`tsv @@ websearch_to_tsquery('english', $2)`),
     };
 
-    /** Every row in this table is a median of ROUNDS client round-trips with
-     *  the first discarded — controls included. An EXPLAIN ANALYZE's own
-     *  `Execution Time` is a single cold run and excludes planning and the
-     *  round-trip, so mixing the two under one `median ms` header would compare
-     *  a cold server-side number against a warm end-to-end one. */
     const print = async (arm: string, sql: string, matches: number) => {
       const plan = await explainJson(sql, [ORG_ID, term]);
       const scan = findScan(plan.Plan) ?? plan.Plan;
@@ -355,21 +257,14 @@ async function plans() {
     await row('like', likeQuery);
     await row('fts', ftsQuery);
 
-    // The two controls. Without them "FTS is fast" is a claim about tsvector
-    // rather than about the index, and the reason the index nearly went unused
-    // stays invisible.
     const control = (arm: string) => print(arm, ftsQuery, matched.fts);
 
-    // The index is present and valid the whole time this runs. It is the
-    // security qual from drill 07's RLS policy that puts it out of reach.
     await notLeakproof(() => control('fts, not leakproof'));
     await withoutIndex(() => control('fts, no gin'));
   }
 
   bars(chart);
 
-  // The full plans for the common term, because the interesting part is what
-  // sits ABOVE the scan node: a 164k-row bitmap still has to be sorted.
   await explainText(`like — ${TERMS[0]}`, likeQuery, [ORG_ID, TERMS[0]]);
   await explainText(`fts — ${TERMS[0]}`, ftsQuery, [ORG_ID, TERMS[0]]);
   if (TERMS.length > 1) {
@@ -379,14 +274,6 @@ async function plans() {
   await client.query('COMMIT');
 }
 
-// -------------------------------------------------------------------- indexes
-
-/**
- * Every index that could plausibly have been the answer, priced. The point of
- * the table is not that GIN wins; it is that `btree (message)` — the reflex
- * index — cannot serve `LIKE '%term%'` at any size, and that the tsvector
- * COLUMN costs more disk than the GIN index built on top of it.
- */
 async function indexes() {
   console.log(
     '\n  Takes ACCESS EXCLUSIVE on messages for the length of each build.\n' +
@@ -395,9 +282,6 @@ async function indexes() {
 
   await openScope();
 
-  // Session-level and stated, because a build time without its
-  // maintenance_work_mem is not a number. The shipped index's real build time
-  // is measured separately, by the migration, at the server default of 64MB.
   const setMwm = () =>
     asOwner(() => client.query(`SET LOCAL maintenance_work_mem = '${MWM}'`));
   await setMwm();
@@ -434,25 +318,11 @@ async function indexes() {
     ['gin (message gin_trgm_ops)', 'trial_gin_trgm', 'USING gin (message gin_trgm_ops)', likeQuery], // prettier-ignore
   ];
 
-  // A substring filter over the labels, so the two GIN variants can be
-  // re-priced against the tail org without rebuilding two 1,959 MB btrees and a
-  // trigram index to get there: ONLY=gin ORG_ID=150 pnpm db:search indexes
-
   console.log(
     '  candidate                          build s      size   ' +
       'scan node on messages           median ms',
   );
 
-  // Two rules, both learned by getting them wrong.
-  //
-  // 1. Every candidate is priced with the SHIPPED index dropped. Otherwise the
-  //    planner reaches `messages_org_tsv_idx` while a rival is being measured —
-  //    it picks the better of the two, or BitmapAnds them together — and the
-  //    row reports the shipped index's number under the candidate's name.
-  // 2. Every candidate gets its OWN transaction. Run in sequence inside one,
-  //    `gin (tsv)` on the tail org measured 3.10ms; priced alone it measures
-  //    5,188ms. Whatever an earlier candidate leaves behind, the number stops
-  //    being about the index named in the row.
   for (const [label, name, definition, probe] of candidates) {
     if (ONLY && !label.includes(ONLY)) continue;
 
@@ -477,9 +347,6 @@ async function indexes() {
       }),
     );
 
-    // ROLLBACK, not COMMIT. Nothing a candidate did survives — including
-    // `CREATE EXTENSION pg_trgm`, installed by the mode whose whole purpose is
-    // to argue against installing it.
     await client.query('ROLLBACK');
   }
 
@@ -488,28 +355,11 @@ async function indexes() {
     await setMwm();
   }
 
-  // Why every LIKE-serving candidate above says "Seq Scan": under RLS none of
-  // them is reachable either. The security qual blocks any non-leakproof
-  // operator from becoming an index condition, and all three text matchers are
-  // non-leakproof — only `@@` was fixed, by migration 1787998200000.
-  //
-  //   SELECT proname, proleakproof FROM pg_proc
-  //    WHERE proname IN ('textlike', 'texticlike');   -- f, f
-  //
-  // So the two probes below run as the OWNER, with no policy in the way. That
-  // isolates the structural question the card asks — what a btree can and
-  // cannot serve — from the RLS question, which is a different finding.
   if (!ONLY)
     await withoutIndex(async () => {
-      // count(*), not LIMIT 20. With a LIMIT and no ORDER BY a sequential scan
-      // stops at the twentieth match, so a common term "beats" an index scan by
-      // never finishing. Counting makes both arms do all of their work.
       const counted = (pattern: string) =>
         `SELECT count(*) FROM messages WHERE org_id = $1 AND message LIKE ${pattern}`;
 
-      // A prefix that exists. 83,571 messages in org 1 open with "Thanks", and
-      // nothing at all starts with "export" — the first version of this probe
-      // measured a 0-row scan and read like the index had failed.
       await withIndex(
         'trial_btree_pat',
         '(message text_pattern_ops)',
@@ -532,9 +382,6 @@ async function indexes() {
         },
       );
 
-      // The rejected index, shown doing the one thing the tsvector cannot: an
-      // interior substring. Also as the owner, and for the same reason — shipping
-      // it would mean marking texticlike LEAKPROOF too.
       await asOwner(() =>
         client.query('CREATE EXTENSION IF NOT EXISTS pg_trgm'),
       );
@@ -554,27 +401,12 @@ async function indexes() {
       );
     });
 
-  // ROLLBACK, not COMMIT. Every index above was rolled away by its own
-  // savepoint, but `CREATE EXTENSION pg_trgm` was not — and the decision this
-  // mode exists to support is *not* to ship the trigram index. Measuring it
-  // must not leave the extension installed.
   await client.query('ROLLBACK');
 }
 
-// ----------------------------------------------------------------------- gaps
-
-/**
- * Where the two disagree, with the tsquery the input actually parsed into.
- *
- * The card asks for "at least one query where FTS is worse". There are two, and
- * they are not the two that were predicted: an interior substring is the only
- * thing FTS genuinely cannot answer, and the identifier case that was expected
- * to be a loss turns out to be a win. Both are in the table.
- */
 async function gaps() {
   await openScope();
 
-  // verdict is what MEASURING said, not what the plan predicted.
   const cases = [
     ['ERR_24', 'fragment of an error code', 'closable with :*'],
     ['expor', 'mid-typing, a prefix of a word', 'closable with :*'],
@@ -615,9 +447,6 @@ async function gaps() {
     console.log(`  ${''.padEnd(15)} ${note}`);
   }
 
-  // A prefix names a place in the lexeme btree that sits under every GIN entry;
-  // an interior fragment names nothing, exactly as it names nothing in a btree
-  // on the raw text. Same structural reason, one level down.
   rule(':* closes the prefix gap and does nothing for the interior one');
   for (const input of ['expor', 'ERR_24', 'xport', 'fund']) {
     const rows = Number(
@@ -629,9 +458,6 @@ async function gaps() {
     console.log(`  ${input.padEnd(15)} with :*  ${rows.toLocaleString()} rows`);
   }
 
-  // The prediction that was wrong. LIKE '%GGY%' looks like the case FTS loses;
-  // measured, three quarters of what it returns is the name "Peggy". A lexeme
-  // knows where a word ends and a substring does not.
   rule('why LIKE returns more rows for GGY, and why that is not a win');
   const { rows: ggy } = await client.query(
     `SELECT substring(message from '[A-Za-z]*[Gg][Gg][Yy][A-Za-z0-9-]*') AS matched,
@@ -654,22 +480,6 @@ async function gaps() {
   await client.query('COMMIT');
 }
 
-// --------------------------------------------------------------------- writes
-
-/**
- * The stretch: is search costing you writes? COPY and single-row INSERT into
- * `messages`, with the GIN index present and with it dropped, everything rolled
- * back at the end.
- *
- * Runs as the OWNER rather than the app role. RLS's WITH CHECK would be one
- * more thing between the client and the heap, and this is a measurement of
- * index maintenance, not of the policy.
- *
- * The number to distrust is the fast one. GIN buffers new entries in a pending
- * list (fastupdate is on by default) and pays for them later, so a short burst
- * looks cheap and the bill arrives at cleanup. The pending list is measured
- * before and after for exactly that reason.
- */
 async function writes() {
   await client.query('BEGIN');
 
@@ -693,10 +503,6 @@ async function writes() {
     }
   }
 
-  // to_regclass, not a bare cast. In the dropped-index arm the cast raises
-  // 42P01, and one raised error inside a transaction aborts every statement
-  // after it — including the COPY this was meant to be measuring. A `.catch()`
-  // hides the error and not the abort, which is how that read as a COPY bug.
   const indexBytes = () =>
     scalar(`SELECT coalesce(pg_relation_size(to_regclass($1)), 0)::bigint`, [
       INDEX_NAME,
@@ -738,12 +544,6 @@ async function writes() {
     `  fastupdate             = ${await scalar(`SELECT coalesce((SELECT option_value FROM pg_options_to_table((SELECT reloptions FROM pg_class WHERE relname = $1)) WHERE option_name = 'fastupdate'), 'on (default)')`, [INDEX_NAME])}\n`,
   );
 
-  // Interleaved, and each round starts from the same table — same rule as
-  // paging.mjs. The first version of this ran both arms once, in order, and
-  // reported 1.02x for COPY; the immediate re-run reported 1.36x and 3.31x for
-  // INSERT. Un-interleaved single runs of this are not a measurement: the arm
-  // that goes first pays for the cold state, and the rolled-back rows of one
-  // round change the next.
   const samples: Record<string, number[]> = {
     copyWith: [],
     copyWithout: [],
@@ -759,10 +559,6 @@ async function writes() {
     samples.copyWith.push(withGin.rate);
     grewWith = withGin.grew;
     samples.insWith.push(await inserts());
-    // The deferred bill, measured while the index still holds it. fastupdate
-    // buffers new entries in a pending list and merges them later, so the COPY
-    // rate above is not the whole cost; gin_clean_pending_list() does the merge
-    // on demand and returns how many pages it had to move.
     if (cleaned === null) {
       const started = process.hrtime.bigint();
       const pages = Number(
@@ -802,9 +598,6 @@ async function writes() {
     `  INSERT ${ratio(samples.insWith, samples.insWithout)}x faster without the GIN index`,
   );
 
-  // Why the two arms are closer than they look. Dropping the index does NOT
-  // avoid building the tsvector — `tsv` is a generated column, so both arms
-  // parse and stem every message on the way in.
   const tsStarted = process.hrtime.bigint();
   await client.query(
     `SELECT count(to_tsvector('english', message))
@@ -816,8 +609,6 @@ async function writes() {
       `${(Number(process.hrtime.bigint() - tsStarted) / 1e6).toFixed(0)} ms ` +
       `— paid by BOTH arms, because the column is generated`,
   );
-  // Assigned in the first round, and ROUNDS < 1 is rejected at the top of the
-  // file — so this always prints. The guard is what says so to the reader.
   if (cleaned) {
     console.log(
       `  gin_clean_pending_list: ${cleaned.pages.toLocaleString()} pages in ` +
@@ -825,11 +616,8 @@ async function writes() {
     );
   }
 
-  // Nothing above this line survives.
   await client.query('ROLLBACK');
 }
-
-// ----------------------------------------------------------------------- main
 
 header(`search ${mode}`);
 

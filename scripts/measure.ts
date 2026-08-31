@@ -1,34 +1,9 @@
-// Runs the db/ measurement instruments in the container. `pnpm db:paging depths`,
-// `pnpm db:explain sweep --org 150`, `pnpm db:search indexes --only gin`.
-//
-// This file exists because the four instrument entries in package.json had grown
-// to 709 characters of `docker compose exec -T -e ORG_ID -e STATUS -e SORT …`,
-// and because none of it told you which knobs a subcommand actually reads.
-// `k6/run-baseline.mjs` already solved the same problem for k6 in 24 characters
-// of package.json, by being a runner. This is that, for db/.
-//
-// The catalog below is the single declaration of every knob. It generates the
-// -e flags, so the class of bug scripts/check-arms.ts was written to catch —
-// a knob set in the shell that never reaches the code reading it — cannot be
-// introduced by forgetting a flag any more. check-arms now checks this catalog
-// against the instrument source instead.
-//
-// The catalog's literal shape is load-bearing twice over: check-arms parses it
-// as TEXT for `file: '…'` and `env: '…', def: '…'`, so the types below annotate
-// the surrounding const and never move a key inside the object literals. See
-// plans/2026-08-30_instrument-typescript.md.
-//
-// Runs on the HOST. See plans/2026-08-30_instrument-hardening.md section 6.
-
 import { spawnSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
 
 interface Knob {
-  /** The `--flag` spelling. */
   flag: string;
-  /** The environment variable `docker compose exec -e` forwards it as. */
   env: string;
-  /** Shown in --help. Not sent: the default lives in the container, in knob(). */
   def?: string;
   help: string;
 }
@@ -40,9 +15,6 @@ interface Instrument {
   knobs: Knob[];
 }
 
-// Written by db/lib/run.mts rather than by any instrument, so every instrument
-// gets them. GIT_SHA is computed here because .git is not mounted into the
-// container.
 const COMMON: Knob[] = [
   { flag: 'name', env: 'NAME', help: 'labels the report directory' },
 ];
@@ -175,8 +147,6 @@ const INSTRUMENTS: Record<string, Instrument> = {
   },
 };
 
-// Annotated on the const, not on the arrow: TypeScript only lets a `never`
-// return narrow the code after the call when the *variable* carries the type.
 const die: (message: string) => never = (message) => {
   console.error(message);
   process.exit(1);
@@ -207,8 +177,6 @@ function help(name: string, instrument: Instrument): string {
   return lines.join('\n');
 }
 
-// ------------------------------------------------------------------- dispatch
-
 const [name, ...rest] = process.argv.slice(2);
 const instrument = name ? INSTRUMENTS[name] : undefined;
 
@@ -220,25 +188,16 @@ if (!instrument) {
 
 const knobs = [...instrument.knobs, ...COMMON];
 
-// No defaults in this config on purpose. parseArgs returns a configured default
-// as though the operator had supplied it, which would forward every knob and
-// make db/lib/run.mts report `(env)` for values nobody set — destroying the
-// provenance the header exists to print. Defaults stay in knob(), in the
-// container.
 const options: Record<string, { type: 'string' | 'boolean'; short?: string }> =
   {
     help: { type: 'boolean', short: 'h' },
   };
 for (const k of knobs) options[k.flag] = { type: 'string' };
 
-// An arrow on a const, not a function declaration: a hoisted declaration does
-// not see that the `if` above already narrowed instrument away from null.
 const parse = (args: string[]) => {
   try {
     return parseArgs({ args, options, allowPositionals: true });
   } catch (error) {
-    // parseArgs' own message trails into advice about `--` and positional
-    // arguments, which is not the reader's problem. The knob list is.
     const message = error instanceof Error ? error.message : String(error);
     die(`${message.split('. ')[0]}\n\n${help(name, instrument)}`);
   }
@@ -257,10 +216,6 @@ if (instrument.subcommands && !instrument.subcommands[subcommand]) {
   die(`${name} has no subcommand '${subcommand}'\n\n${help(name, instrument)}`);
 }
 
-// ------------------------------------------------------------------- the run
-
-// A flag beats the environment; an unset knob is forwarded as nothing at all,
-// so the instrument sees it as absent rather than as the empty string.
 const env: string[] = [];
 for (const k of knobs) {
   const value = values[k.flag] ?? process.env[k.env];
@@ -278,8 +233,6 @@ const { status, error } = spawnSync(
     'compose',
     'exec',
     '-T',
-    // The instruments are run by path rather than through a package.json
-    // script, so apps/backend/package.json needs no entry per instrument.
     '-w',
     '/app/apps/backend',
     ...env,

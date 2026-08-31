@@ -1,12 +1,8 @@
-# Patterns without a leading **/ match only at the context root, so anything
-# that can appear inside apps/* is listed twice.
 
-# Dependencies — reinstalled in the image from the lockfile
 node_modules
 **/node_modules
 .pnpm-store
 
-# Build output
 dist
 **/dist
 **/.next
@@ -14,30 +10,25 @@ dist
 **/coverage
 **/*.tsbuildinfo
 
-# Secrets — compose injects these at runtime via env_file, never bake them in
 .env
 .env.local
 .env.*.local
 
-# Version control, editor, tooling
 .git
 .gitignore
 .gitattributes
 .vscode
 .claude
 
-# Process docs — not needed to build
 memory-bank
 plans
 **/README.md
 **/AGENTS.md
 **/CLAUDE.md
 
-# Docker's own files
 Dockerfile
 .dockerignore
 docker-compose.yml
 
-# Noise
 **/.DS_Store
 **/*.log

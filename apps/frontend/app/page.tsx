@@ -7,8 +7,6 @@ export default async function Home() {
   const startedAt = renderStartedAt();
   const result = await fetchInfo();
 
-  // Timed inside the callback: `after` runs once the response is finished, and
-  // the flush is part of the render.
   after(() => {
     logger.info(
       {

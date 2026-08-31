@@ -1,6 +1,4 @@
 #!/bin/bash
-# Enforces CLAUDE.md: "Run pnpm format and pnpm lint before marking any task done."
-# Runs only when there are uncommitted changes, so no-op turns stay fast.
 set -uo pipefail
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0

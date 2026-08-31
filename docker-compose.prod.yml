@@ -1,11 +1,3 @@
-# Overrides nest_server/next_app to build once and run the production
-# server (`start:prod` / `next start`) instead of the watch-mode dev
-# command. Everything else — ports, healthchecks, DB, Redis — is inherited
-# from docker-compose.yml unchanged. Source is still bind-mounted from the
-# host, so this rebuilds against whatever is on disk each time it starts;
-# a dependency change still needs `docker:rebuild` first, same as dev.
-#
-# Use via `pnpm docker:up:prod`.
 services:
   nest_server:
     command: sh -c "cd /app && pnpm --filter=backend run build && pnpm --filter=backend run start:prod"

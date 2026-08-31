@@ -3,34 +3,13 @@
 import type { Conversation } from '@/lib/api';
 import { useState } from 'react';
 
-/**
- * The table, plus the load-more button that appends to it.
- *
- * This is the first `"use client"` in the repo, and it spends a property drills
- * 03 and 09 both protected: `/conversations` used to ship **zero** application
- * JavaScript. That was worth keeping while the page was a document. A cursor is
- * not a document — "give me the next page and leave the ones I have alone" is
- * state, and a plain anchor cannot express it.
- *
- * What survives: the *first* page is still rendered on the server. A client
- * component is server-rendered too, so `curl` still returns every row of page 1
- * in the HTML. Only pages 2..n need the browser. And `?mode=offset` is a
- * complete, JavaScript-free path through the same data — see the <noscript> in
- * page.tsx.
- *
- * See plans/2026-08-26_drill-10-keyset-pagination.md.
- */
 export function ConversationList({
   initialItems,
   initialCursor,
   query,
 }: {
   initialItems: Conversation[];
-  /** Null when there is no next page — the API says so, we do not infer it. */
   initialCursor: string | null;
-  /** The current org/sort/filter state, forwarded to the route handler so page
-   *  2 is the same query as page 1. Without it the second page silently drops
-   *  the active filter, which is the bug the page's linkTo() already guards. */
   query: Record<string, string>;
 }) {
   const [items, setItems] = useState(initialItems);
@@ -40,9 +19,6 @@ export function ConversationList({
 
   async function loadMore() {
     if (!cursor || loading) return;
-    // Guarding on `loading` and disabling the button are not the same guard:
-    // the disabled attribute is a UI hint, this is the one that stops a
-    // double-click appending the same page twice.
     setLoading(true);
     setError(null);
 
@@ -57,8 +33,6 @@ export function ConversationList({
       }
 
       const page = body as { items: Conversation[]; nextCursor: string | null };
-      // Append, never replace: the whole point of the cursor is that the rows
-      // already on screen do not move.
       setItems((current) => [...current, ...page.items]);
       setCursor(page.nextCursor);
     } catch (cause) {

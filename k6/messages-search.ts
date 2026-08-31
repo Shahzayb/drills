@@ -8,30 +8,6 @@ import {
   type SummaryData,
 } from './lib/scenario.ts';
 
-/**
- * Drill 11 — GET /messages/search under load.
- *
- * Same method as conversations-baseline.ts, and now literally so: both import
- * lib/scenario.ts. The only reason this is a separate file rather than a knob
- * on the baseline is that the baseline's recorded runs must keep measuring the
- * same URL. See plans/2026-08-13_drill-05-load-test-baseline.md.
- *
- * Which arm answers is not set here. It is `SEARCH_STRATEGY` on the *server*, so
- * an A/B is two runs with a `docker compose up -d nest_server` between them:
- *
- *   SEARCH_STRATEGY=like docker compose up -d nest_server
- *   pnpm load search --name like --q export
- *   docker compose up -d nest_server
- *   pnpm load search --name fts --q export
- *
- * Q is the term, and it changes the measurement more than any other knob: a 4%
- * selective term and a 0.05% one are two different queries wearing one URL.
- * It is NOT in the report directory name — a search term can be any text, and a
- * filename is a filename — so the summary prints it instead.
- */
-
-// PAGE_SIZE rather than a LIMIT of its own, so one runner knob feeds both
-// scripts and the report directory name keeps meaning what it says.
 const url = `${BASE_URL}/messages/search?q=${encodeURIComponent(Q)}&limit=${PAGE_SIZE}`;
 
 export const options = scenario();

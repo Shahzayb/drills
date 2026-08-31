@@ -11,7 +11,6 @@ export default tseslint.config(
       'dist/**/*.js',
       '**.mjs',
       '**/*.mjs',
-      // db/ instruments — outside this config's tsconfig, same as .mjs was.
       '**/*.mts',
     ],
   },
@@ -39,17 +38,6 @@ export default tseslint.config(
       'prettier/prettier': ['error', { endOfLine: 'auto' }],
     },
   },
-  // Drill 07's stretch goal, static half: a query against tenant data has to go
-  // through TenantDb, which cannot run one without a tenant context.
-  //
-  // What this is worth, honestly: it stops the accident, not the intent. One
-  // `eslint-disable-next-line` defeats it, and it cannot see a query built in a
-  // string somewhere else. The enforcement is the row-level security in
-  // migration 003 — this only means you have to mean it. The schema half of the
-  // check is `pnpm check:tenancy`.
-  //
-  // Exempt by design: `tenancy/` is the seam itself, `postgres/` owns the pool,
-  // and `health/` and `info/` are genuinely tenant-free (SELECT 1, version()).
   {
     files: ['src/**/*.ts'],
     ignores: [

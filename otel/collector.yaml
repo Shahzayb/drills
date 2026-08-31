@@ -1,50 +1,22 @@
-# OpenTelemetry Collector — the hop between the two apps and Jaeger.
-#
-# Jaeger accepts OTLP directly and this file could be deleted, with both apps
-# pointed straight at it. It exists because everything you would eventually
-# need — sampling, dropping health probes, stripping PII out of span
-# attributes, fanning the same spans out to a second backend — lives here, in
-# config, rather than in a redeploy of the app. See
-# plans/2026-08-13_drill-06-request-id-propagation.md.
-
 receivers:
   otlp:
     protocols:
-      # Both apps use http (4318). grpc is on because it costs a line and it is
-      # what most other OTLP producers default to.
       http:
         endpoint: 0.0.0.0:4318
       grpc:
         endpoint: 0.0.0.0:4317
 
 processors:
-  # Groups spans into fewer, larger export calls. Without it every span is its
-  # own HTTP request to Jaeger, which is the collector equivalent of the
-  # unbatched-log problem drill 06 phase 1 measured.
   batch:
     timeout: 1s
 
 exporters:
-  # Prints to the collector's own stdout, so `docker compose logs otel_collector`
-  # answers "did the span arrive at all" without trusting a UI to render it —
-  # the difference between debugging the app and debugging Jaeger.
-  #
-  # `basic` is one line per batch with a span count. `normal` is one line per
-  # *span* — ~10,000 lines/s into Docker's json-file driver at 1,800 req/s.
-  # Changed for that reason, but the honest note is that it was *suspected* of
-  # confounding the load A/B and, measured, did not: the `normal` run came out
-  # marginally faster than the `basic` one. Hygiene, not the explanation.
-  # Use `normal` by hand, for one request.
   debug:
     verbosity: basic
 
-  # otlp_grpc, not otlp: the collector still accepts `otlp` here and logs
-  # `"otlp" alias is deprecated` on every start.
   otlp_grpc/jaeger:
     endpoint: jaeger:4317
     tls:
-      # Plain HTTP on a private Compose network. In production this is where
-      # the certificate goes.
       insecure: true
 
 service:
