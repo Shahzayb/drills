@@ -95,5 +95,6 @@ Once work is done or a decision is made, `memory-bank/` is out of date and needs
 - Use clear subject/verb/object constructions. Do not use cleft sentences, contrastive appositives, appended-glosses, or trailing clauses.
 - Assume I may edit documents myself. Especially markdown documents.
 - When writing markdown documents, don't include references to conversations or threads a reader would not know about.
+- Short sentences. RFC 2119 keywords for obligations. Commit = imperative subject; body only for a fact the diff cannot show. Comments only where code needs clarification — never narration.
 - Write-ups go into the `drills/`, not the `plans/`.
 - Clean up any Docker containers, images, and volumes you create, but never touch anything created by the default `docker-compose` setup.
