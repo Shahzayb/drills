@@ -40,6 +40,12 @@ export const DURATION = __ENV.DURATION || '60s';
 export const PAGE = Number(__ENV.PAGE || '1');
 export const PAGE_SIZE = Number(__ENV.PAGE_SIZE || '20');
 export const Q = __ENV.Q || 'export';
+// Drill 12. The key is minted out of band (`pnpm db:storm key`) and passed in,
+// because a k6 script has no database. UNIQUE is how many distinct events the
+// run cycles through: the duplicate ratio is VUS x iterations / UNIQUE, and at
+// UNIQUE=1 every request in the run is a duplicate of the same event.
+export const API_KEY = __ENV.API_KEY || '';
+export const UNIQUE = Number(__ENV.UNIQUE || '3000');
 
 // Stretch goal / card 31: fails the run if the measured p95 goes past a stated
 // number. Off unless set, because a failed threshold exits 99 and would abort a
@@ -252,6 +258,28 @@ export function scenario({
 export function request(url: string): void {
   const res = http.get(url, { headers: { 'x-org-id': ORG_ID } });
   check(res, { 'status is 200': (r) => r.status === 200 });
+}
+
+/**
+ * One POST, checked. The sibling of `request()` above, and separate from it on
+ * purpose: `request()` is what ~60 recorded runs in k6/reports/ used, and
+ * widening it into a general-purpose method dispatcher would change the thing
+ * every one of those baselines was measured with.
+ *
+ * Idempotency lives in the STATUS code, so every 2xx is a success here — 201
+ * created, 200 already-had-it, 202 in flight elsewhere. A check that demanded
+ * 200 would fail an entirely correct run, and one that demanded 201 would fail
+ * 70% of a duplicate storm by design.
+ */
+export function post(
+  url: string,
+  body: unknown,
+  headers: Record<string, string>,
+): void {
+  const res = http.post(url, JSON.stringify(body), {
+    headers: { 'Content-Type': 'application/json', ...headers },
+  });
+  check(res, { 'status is 2xx': (r) => r.status >= 200 && r.status < 300 });
 }
 
 /**

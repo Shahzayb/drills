@@ -165,6 +165,50 @@ const INSTRUMENTS: Record<string, Instrument> = {
     ],
   },
 
+  storm: {
+    file: 'db/storm.mts',
+    blurb: 'idempotent ingest under a duplicate storm (drill 12)',
+    subcommands: {
+      key: 'mint an api key for an org and print it once',
+      fire: 'the storm: N requests, U unique, concurrent — asserts and exits 1',
+      race: 'what each mechanism protects against, with two live sessions',
+      'redis-restart': 'the same storm with the guard wiped half way through',
+    },
+    knobs: [
+      { flag: 'org', env: 'ORG_ID', def: '1', help: 'which org receives them' },
+      {
+        flag: 'requests',
+        env: 'REQUESTS',
+        def: '10000',
+        help: 'total deliveries',
+      },
+      {
+        flag: 'unique',
+        env: 'UNIQUE',
+        def: '3000',
+        help: 'distinct events among them',
+      },
+      {
+        flag: 'concurrency',
+        env: 'CONCURRENCY',
+        def: '50',
+        help: 'requests in flight at once',
+      },
+      {
+        flag: 'shape',
+        env: 'SHAPE',
+        def: 'adjacent',
+        help: 'adjacent | shuffled — shuffled never races',
+      },
+      {
+        flag: 'flush-at',
+        env: 'FLUSH_AT',
+        def: '50',
+        help: 'redis-restart: percent through the run to wipe the guard',
+      },
+    ],
+  },
+
   bench: {
     file: 'db/bench-copy.mts',
     blurb: 'INSERT vs multi-row INSERT vs COPY, on a scratch table',
