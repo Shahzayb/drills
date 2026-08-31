@@ -21,8 +21,7 @@
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
-    "types": ["jest"],
-    "ignoreDeprecations": "6.0"
+    "types": ["jest"]
   },
   "exclude": ["node_modules", "dist", "db"]
 }

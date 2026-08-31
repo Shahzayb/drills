@@ -128,6 +128,19 @@ services:
       # module's own default ('fts'). See
       # plans/2026-08-29_drill-11-full-text-search.md.
       - SEARCH_STRATEGY=${SEARCH_STRATEGY:-}
+      # Card 12, and the same one-line A/B as LIST_STRATEGY above:
+      # `IDEMPOTENCY=constraint docker compose up -d nest_server`. Four arms —
+      # none | constraint | redis | both — and empty means IngestService's own
+      # default ('both'). See plans/2026-08-31_drill-12-idempotent-ingest.md.
+      - IDEMPOTENCY=${IDEMPOTENCY:-}
+      # Card 12's second switch: update | nothing, the shape of the ON CONFLICT
+      # clause. Empty means 'update'. These are two switches rather than one
+      # because they answer different questions — WHICH mechanism, and which
+      # SHAPE of the constraint — and `nothing` is a red arm on the same commit.
+      - ON_CONFLICT=${ON_CONFLICT:-}
+      # How long a Redis guard lives. Empty means 86400 (24h). On the `redis`
+      # arm this is a correctness parameter, not a tuning one.
+      - IDEMPOTENCY_TTL_SECONDS=${IDEMPOTENCY_TTL_SECONDS:-}
       # off | on | header — see apps/backend/src/observability/query-counter.ts.
       # Empty forwards through to that module's own default ('on').
       - QUERY_COUNTER=${QUERY_COUNTER:-}

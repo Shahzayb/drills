@@ -67,6 +67,98 @@ export class RedisService implements OnApplicationShutdown {
     }
   }
 
+  /**
+   * `SET key value NX EX ttl` — the whole of drill 12's Redis guard.
+   *
+   * Returns true when this caller is the one that created the key. ioredis
+   * resolves to 'OK' when NX succeeded and to null when the key already
+   * existed, and that null is the entire mechanism: it is one round trip that
+   * both asks and claims, so two concurrent callers cannot both be told they
+   * won. A GET followed by a SET would let them.
+   *
+   * The TTL is not optional here. A guard with no expiry is a memory leak whose
+   * unit is "every event you have ever received".
+   */
+  async setIfAbsent(
+    key: string,
+    value: string,
+    ttlSeconds: number,
+  ): Promise<boolean> {
+    const rid = getRequestId();
+    const startedAt = performance.now();
+    try {
+      const result = await this.client.set(key, value, 'EX', ttlSeconds, 'NX');
+      return result === 'OK';
+    } finally {
+      if (this.logger.isLevelEnabled('debug')) {
+        this.logger.debug(
+          { rid, cmd: 'SET NX', key, durMs: since(startedAt) },
+          'redis_command',
+        );
+      }
+    }
+  }
+
+  /** Reads a guard back. Null both when it never existed and when it expired —
+   *  Redis does not distinguish those, and neither can any caller. */
+  async get(key: string): Promise<string | null> {
+    const rid = getRequestId();
+    const startedAt = performance.now();
+    try {
+      return await this.client.get(key);
+    } finally {
+      if (this.logger.isLevelEnabled('debug')) {
+        this.logger.debug(
+          { rid, cmd: 'GET', key, durMs: since(startedAt) },
+          'redis_command',
+        );
+      }
+    }
+  }
+
+  /** Overwrites a guard, keeping a TTL. Used to replace the placeholder with
+   *  the committed conversation id, so a later duplicate can be answered
+   *  without touching Postgres at all. */
+  async set(key: string, value: string, ttlSeconds: number): Promise<void> {
+    const rid = getRequestId();
+    const startedAt = performance.now();
+    try {
+      await this.client.set(key, value, 'EX', ttlSeconds);
+    } finally {
+      if (this.logger.isLevelEnabled('debug')) {
+        this.logger.debug(
+          { rid, cmd: 'SET', key, durMs: since(startedAt) },
+          'redis_command',
+        );
+      }
+    }
+  }
+
+  /**
+   * Releases a guard whose write failed, so the event stays retryable.
+   *
+   * This narrows the window and does not close it: a process that dies between
+   * the SETNX and this call leaves the guard held with nothing behind it, and
+   * the event is lost until the TTL expires. That gap is the failure mode the
+   * unique constraint does not have, and it cannot be closed from here — the
+   * guard and the commit are in two different systems. See
+   * plans/2026-08-31_drill-12-idempotent-ingest.md.
+   */
+  async del(key: string): Promise<void> {
+    const rid = getRequestId();
+    const startedAt = performance.now();
+    try {
+      await this.client.del(key);
+    } finally {
+      if (this.logger.isLevelEnabled('debug')) {
+        this.logger.debug(
+          { rid, cmd: 'DEL', key, durMs: since(startedAt) },
+          'redis_command',
+        );
+      }
+    }
+  }
+
   async onApplicationShutdown(): Promise<void> {
     try {
       // quit() throws on a client that never connected, which is the normal

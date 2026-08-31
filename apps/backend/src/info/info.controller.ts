@@ -5,6 +5,11 @@ import {
   LIST_STRATEGY,
 } from '../conversations/conversations.service';
 import { SEARCH_STRATEGY } from '../search/search.service';
+import {
+  IDEMPOTENCY,
+  IDEMPOTENCY_TTL_SECONDS,
+  ON_CONFLICT,
+} from '../ingest/ingest.service';
 import { QUERY_COUNTER_MODE } from '../observability/query-counter';
 import { TRACING_ENABLED } from '../observability/trace';
 import { logger } from '../observability/logger';
@@ -24,6 +29,9 @@ export interface InfoResponse {
     listStrategy: string;
     keysetTiebreak: string;
     searchStrategy: string;
+    idempotency: string;
+    onConflict: string;
+    idempotencyTtlSeconds: string;
     queryCounter: string;
     logLevel: string;
     tracing: string;
@@ -61,6 +69,9 @@ export class InfoController {
         listStrategy: LIST_STRATEGY,
         keysetTiebreak: KEYSET_TIEBREAK,
         searchStrategy: SEARCH_STRATEGY,
+        idempotency: IDEMPOTENCY,
+        onConflict: ON_CONFLICT,
+        idempotencyTtlSeconds: String(IDEMPOTENCY_TTL_SECONDS),
         queryCounter: QUERY_COUNTER_MODE,
         logLevel: logger.level,
         tracing: TRACING_ENABLED ? 'on' : 'off',
