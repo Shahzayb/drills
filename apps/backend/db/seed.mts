@@ -621,9 +621,15 @@ async function main() {
     // Order within the list does not matter — Postgres accepts one TRUNCATE
     // across every table in an FK cycle as long as all of them are named here,
     // which tags and conversation_tags now must be too.
+    //
+    // And api_keys, since drill 12. This list is not optional bookkeeping: a
+    // table referencing organizations that is missing from it fails the whole
+    // seed with 0A000 `cannot truncate a table referenced in a foreign key
+    // constraint`, naming the new table rather than this line. Adding an FK to
+    // organizations means adding it here.
     await client.query(
       'TRUNCATE messages, conversations, memberships, users, organizations, ' +
-        'tags, conversation_tags RESTART IDENTITY',
+        'tags, conversation_tags, api_keys RESTART IDENTITY',
     );
   });
 

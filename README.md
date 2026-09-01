@@ -7,7 +7,7 @@ it, and naive code is often a recorded decision rather than debt.
 pnpm monorepo: `apps/backend` (NestJS, raw `pg`, no ORM) and `apps/frontend` (Next.js App Router),
 orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose.
 
-## Progression — 11 of 32
+## Progression — 12 of 32
 
 | # | Drill | Result worth remembering |
 |---|---|---|
@@ -22,6 +22,7 @@ orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose
 | 09 | Indexes and the planner | Seq scan 107.9ms -> index scan 0.255ms; the planner correctly ignores the same index at 31% selectivity when it can't serve the ORDER BY. |
 | 10 | Keyset pagination | Page 5,000: offset 197ms and climbing, keyset 3.9ms flat. Without the `id` tiebreaker the whale skips 128,870 rows in one page turn, 200 OK. |
 | 11 | Full-text search | Whale org under load: 1.12 req/s on LIKE, 442 req/s on a GIN. The 426MB index was invisible to the planner until `@@` was marked leakproof — drill 07's RLS was switching it off — and the tsvector column cost 2,593MB, six times the index. |
+| 12 | Idempotent ingest | 10,000 concurrent deliveries of 3,000 events -> exactly 3,000 rows, by a unique constraint and by a Redis `SETNX` guard, separately. The guard is 34% faster on retries and worth nothing under simultaneous replay, where it costs 13% — it can only short-circuit a duplicate that arrives after the original committed. Wipe Redis mid-storm and the guard alone loses 3,964 of 10,000 deliveries; behind the constraint it loses none. |
 
 Current state and what's open live in `memory-bank/progress.md`; every decision and
 number is one row in `memory-bank/history.md`, with the full reasoning in `plans/`.
@@ -49,6 +50,7 @@ pnpm check:tenancy      # RLS coverage + the serving role cannot bypass it
 pnpm db:explain plans   # query plans for the list endpoint (sweep, experiments, stats, keyset)
 pnpm db:paging depths   # latency vs page depth, both paging arms (walk, concurrent)
 pnpm db:search plans    # LIKE vs full-text search (indexes, gaps, writes)
+pnpm db:storm fire      # 10k duplicate deliveries; asserts and exits 1 (key, race, redis-restart)
 pnpm format
 pnpm lint
 ```

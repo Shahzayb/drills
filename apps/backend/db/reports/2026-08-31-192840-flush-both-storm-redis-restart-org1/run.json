@@ -1,0 +1,65 @@
+{
+  "instrument": "storm",
+  "subcommand": "redis-restart",
+  "name": "flush-both",
+  "at": "2026-08-31T19:28:40.350Z",
+  "gitSha": "25e1757",
+  "knobs": {
+    "ORG_ID": {
+      "value": "1",
+      "source": "default"
+    },
+    "REQUESTS": {
+      "value": "10000",
+      "source": "default"
+    },
+    "UNIQUE": {
+      "value": "3000",
+      "source": "default"
+    },
+    "CONCURRENCY": {
+      "value": "50",
+      "source": "default"
+    },
+    "SHAPE": {
+      "value": "adjacent",
+      "source": "default"
+    },
+    "FLUSH_AT": {
+      "value": "50",
+      "source": "default"
+    }
+  },
+  "arms": {
+    "listStrategy": "batched",
+    "keysetTiebreak": "on",
+    "searchStrategy": "fts",
+    "idempotency": "both",
+    "onConflict": "update",
+    "idempotencyTtlSeconds": "86400",
+    "queryCounter": "on",
+    "logLevel": "info",
+    "tracing": "off"
+  },
+  "rows": {
+    "requests": 10000,
+    "unique": 3000,
+    "shape": "adjacent",
+    "peakInFlight": 50,
+    "wallMs": 5361.3,
+    "created": 3000,
+    "duplicate": 7000,
+    "pending": 0,
+    "serverErrors": 0,
+    "transportErrors": 0,
+    "conversations": 3000,
+    "messages": 3000,
+    "deadTuples": 252,
+    "updates": 6581,
+    "hotUpdates": 6573,
+    "p50": 24.92,
+    "p95": 39.44,
+    "p99": 51.48,
+    "flushedGuardAt": 50
+  }
+}

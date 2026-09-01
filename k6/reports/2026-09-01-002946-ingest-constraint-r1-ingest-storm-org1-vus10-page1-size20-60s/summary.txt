@@ -1,0 +1,9 @@
+
+  name=ingest-constraint-r1 org=1 vus=10 warmup=20s measured=60s unique=3000 prefix=k6-ingest-constraint-r1
+  measured requests : 170985
+  p50 / p95 / p99   : 3.35 / 4.85 / 6.51 ms
+  min / avg / max   : 1.55 / 3.48 / 29.12 ms
+  throughput        : 2849.75 req/s
+  (incl. warm-up)   : p50 3.38  p95 5.07  p99 6.75 ms
+
+RESULT,ingest-constraint-r1,1,10,3000,k6-ingest-constraint-r1,3.35,4.85,6.51,2849.75,170985

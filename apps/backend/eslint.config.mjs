@@ -50,6 +50,18 @@ export default tseslint.config(
   //
   // Exempt by design: `tenancy/` is the seam itself, `postgres/` owns the pool,
   // and `health/` and `info/` are genuinely tenant-free (SELECT 1, version()).
+  //
+  // `ingest/api-key.guard.ts` is the fourth, and it is exempt for a different
+  // reason than the other three. It is not tenant-free because it avoids tenant
+  // data — it reads `api_keys`, which carries org_id and has a policy like every
+  // other scoped table. It is exempt because it is the code that DECIDES the
+  // tenant, and so cannot run inside the scope it establishes: with app.org_id
+  // unset the policy admits no rows and the lookup finds nothing. It goes
+  // through `app_org_for_api_key()`, a SECURITY DEFINER function that returns a
+  // bigint and grants no SELECT on the table. One file, named individually
+  // rather than the whole directory, so `ingest/` gaining a second file does not
+  // silently gain the exemption too.
+  // See plans/2026-08-31_drill-12-idempotent-ingest.md.
   {
     files: ['src/**/*.ts'],
     ignores: [
@@ -57,6 +69,7 @@ export default tseslint.config(
       'src/postgres/**',
       'src/health/**',
       'src/info/**',
+      'src/ingest/api-key.guard.ts',
     ],
     rules: {
       'no-restricted-imports': [

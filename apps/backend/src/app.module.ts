@@ -4,6 +4,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { ConversationsModule } from './conversations/conversations.module';
 import { HealthModule } from './health/health.module';
 import { InfoModule } from './info/info.module';
+import { IngestModule } from './ingest/ingest.module';
 import { loggerOptions } from './observability/logger.options';
 import { LoggingInterceptor } from './observability/logging.interceptor';
 import { requestContextMiddleware } from './observability/request-context.middleware';
@@ -23,6 +24,7 @@ import { SearchModule } from './search/search.module';
     InfoModule,
     ConversationsModule,
     SearchModule,
+    IngestModule,
   ],
   providers: [
     {

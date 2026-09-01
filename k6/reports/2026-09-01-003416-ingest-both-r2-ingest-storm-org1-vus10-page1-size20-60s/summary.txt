@@ -1,0 +1,9 @@
+
+  name=ingest-both-r2 org=1 vus=10 warmup=20s measured=60s unique=3000 prefix=k6-ingest-both-r2
+  measured requests : 256921
+  p50 / p95 / p99   : 2.18 / 3.46 / 4.70 ms
+  min / avg / max   : 0.84 / 2.31 / 12.75 ms
+  throughput        : 4282.02 req/s
+  (incl. warm-up)   : p50 2.20  p95 3.87  p99 5.20 ms
+
+RESULT,ingest-both-r2,1,10,3000,k6-ingest-both-r2,2.18,3.46,4.70,4282.02,256921

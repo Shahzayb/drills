@@ -88,6 +88,25 @@ const SCRIPTS: Record<string, Script> = {
       { flag: 'page-size', env: 'PAGE_SIZE', def: '20', help: 'rows per page' },
     ],
   },
+
+  ingest: {
+    file: 'ingest-storm.ts',
+    blurb: 'POST /ingest under a duplicate storm (drill 12)',
+    knobs: [
+      {
+        flag: 'api-key',
+        env: 'API_KEY',
+        def: '',
+        help: 'from `pnpm db:storm key` — the run 401s without it',
+      },
+      {
+        flag: 'unique',
+        env: 'UNIQUE',
+        def: '3000',
+        help: 'distinct events the run cycles through',
+      },
+    ],
+  },
 };
 
 // Annotated on the const, not on the arrow: TypeScript only lets a `never`
