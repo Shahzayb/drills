@@ -12,3 +12,6 @@ drills/
 # k6's web dashboard — 170KB of self-contained HTML per run. Generated, read
 # locally, never committed. The summary.txt beside it is what stays.
 k6/reports/**/*.html
+
+# Machine-readable run dumps beside each k6 report. summary.txt is what stays.
+k6/reports/**/run.json

@@ -54,3 +54,6 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Machine-readable run dumps under db/reports (keep output.txt / README.md tracked)
+db/reports/**/run.json
