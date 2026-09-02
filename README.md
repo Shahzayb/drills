@@ -11,18 +11,18 @@ orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose
 
 | # | Drill | Result worth remembering |
 |---|---|---|
-| 01 | Health endpoint | Postgres + Redis probes, concurrent, 2s timeout, 503 if either is down. |
-| 02 | Schema and migrations | 5 tables, hand-written SQL; `org_id` on every tenant row; gaps left on purpose. |
-| 03 | Endpoint + RSC page | `GET /conversations`, deliberately naive — offset paging, no index, no cache. |
-| 04 | Bulk load | 12.5M rows via `COPY` in 104s; dropping the FK before load was the biggest lever. |
-| 05 | Load-test baseline | Whale org p95 340ms @ 49 req/s vs tail org 2.9ms @ 4,415 — the `before` column. |
-| 06 | Observability | One request id across 4 processes, structured logs, OTel spans behind a flag. |
-| 07 | Tenant isolation | Row-level security under four deliberately filterless endpoints; 14 tests fail without it. |
-| 08 | N+1 detection | Tail org: 2.77x throughput fixing a 37-query request down to 3; `pg_stat_statements` finds it, an ORM couldn't hide it either. |
-| 09 | Indexes and the planner | Seq scan 107.9ms -> index scan 0.255ms; the planner correctly ignores the same index at 31% selectivity when it can't serve the ORDER BY. |
-| 10 | Keyset pagination | Page 5,000: offset 197ms and climbing, keyset 3.9ms flat. Without the `id` tiebreaker the whale skips 128,870 rows in one page turn, 200 OK. |
-| 11 | Full-text search | Whale org under load: 1.12 req/s on LIKE, 442 req/s on a GIN. The 426MB index was invisible to the planner until `@@` was marked leakproof — drill 07's RLS was switching it off — and the tsvector column cost 2,593MB, six times the index. |
-| 12 | Idempotent ingest | 10,000 concurrent deliveries of 3,000 events -> exactly 3,000 rows, by a unique constraint and by a Redis `SETNX` guard, separately. The guard is 34% faster on retries and worth nothing under simultaneous replay, where it costs 13% — it can only short-circuit a duplicate that arrives after the original committed. Wipe Redis mid-storm and the guard alone loses 3,964 of 10,000 deliveries; behind the constraint it loses none. |
+| 01 | Health endpoint | Checks Postgres and Redis together, gives up after 2s, returns 503 if either is down. |
+| 02 | Schema and migrations | Five hand-written tables, a tenant id on every row, some gaps left in on purpose. |
+| 03 | Endpoint + RSC page | The first list endpoint, built deliberately slow: no index, no cache, offset paging. |
+| 04 | Bulk load | Loaded 12.5M rows in under two minutes; dropping the foreign key first was the biggest win. |
+| 05 | Load-test baseline | The biggest tenant was already far slower than a small one before any tuning — the "before" number. |
+| 06 | Observability | One id follows a request across every service, with structured logs and optional traces. |
+| 07 | Tenant isolation | The database itself now stops one tenant from reading another's rows; 14 tests prove it. |
+| 08 | N+1 detection | Cutting one request from 37 queries to 3 nearly tripled throughput for the small tenant. |
+| 09 | Indexes and the planner | An index took one query from 108ms to a fraction of a millisecond, and the planner knows when to skip it. |
+| 10 | Keyset pagination | Cursor paging stays fast on deep pages while offset paging keeps getting slower. |
+| 11 | Full-text search | A real search index handled far more traffic than a plain text match, once a config quirk stopped hiding it. |
+| 12 | Idempotent ingest | 10,000 duplicate deliveries still produced exactly 3,000 rows, held by a unique constraint. |
 
 Current state and what's open live in `memory-bank/progress.md`; every decision and
 number is one row in `memory-bank/history.md`, with the full reasoning in `plans/`.
