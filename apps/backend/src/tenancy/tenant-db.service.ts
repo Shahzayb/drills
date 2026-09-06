@@ -22,13 +22,21 @@ export interface TenantQuery {
 /**
  * How many times a transaction may restart before the caller gets a 503.
  *
- * Card 13's `QUOTA=serializable` arm is the only thing that reaches this today.
- * It is a knob rather than a constant because the right number is a property of
- * the contention, not of the code: on one hot counter row every retry
- * re-conflicts, so a generous cap converts a serialization failure into a long
- * tail instead of a fast error, and which of those you want is a decision.
+ * 20, and the number is MEASURED rather than picked. Card 13's
+ * `QUOTA=serializable` arm is the only thing that reaches this today, and at 5
+ * it fails: 100 concurrent increments on one counter row gave up on 35 of them,
+ * and the e2e suite's 40 gave up on 14. At 20, both reach 100%. So the retry
+ * budget is not a detail of the fix, it is what makes SERIALIZABLE a fix at all.
+ *
+ * It is also not a universal number. It is a property of the CONTENTION — how
+ * many writers share a row and how long each holds its transaction — so a
+ * different endpoint needs a different one, and the way to find it is the sweep
+ * in plans/2026-09-07_drill-13-lost-update.md rather than taste.
+ *
+ * A generous cap converts a fast error into a long tail. Which of those you
+ * want is a product decision, which is why this is a knob.
  */
-export const QUOTA_MAX_RETRIES = Number(process.env.QUOTA_MAX_RETRIES || '5');
+export const QUOTA_MAX_RETRIES = Number(process.env.QUOTA_MAX_RETRIES || '20');
 
 /** Postgres tells you to try again with exactly these two. 40001 is a
  *  serialization failure, 40P01 a deadlock; both mean "nothing you did was

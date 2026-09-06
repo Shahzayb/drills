@@ -58,11 +58,18 @@ export const up = (pgm) => {
   // and the conversation are inserted in one CTE inside one transaction, so
   // atomicity is the transaction's job; a unique index here would be a second
   // mechanism doing the first one's work, which drill 12 already priced.
+  //
+  // ON DELETE SET NULL, and nullable, is a statement about what a ledger IS.
+  // The row records that this org was billed; the link to the conversation is a
+  // convenience. Deleting a conversation must not unbill it, so CASCADE is
+  // wrong — and a plain NOT NULL reference is wrong too, because it makes
+  // DELETE /conversations/:id fail with a foreign key violation the moment the
+  // conversation arrived through ingest.
   pgm.sql(`
     CREATE TABLE usage_events (
       id              bigserial   PRIMARY KEY,
       org_id          bigint      NOT NULL REFERENCES organizations (id),
-      conversation_id uuid        NOT NULL REFERENCES conversations (id),
+      conversation_id uuid        REFERENCES conversations (id) ON DELETE SET NULL,
       period          date        NOT NULL,
       metric          text        NOT NULL
                       CONSTRAINT usage_events_metric_check

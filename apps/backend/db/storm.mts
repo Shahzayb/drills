@@ -286,7 +286,16 @@ function summarise(outcomes: Outcome[]) {
 }
 
 async function cleanup(org: string, ids: string[]): Promise<number> {
-  // Messages first: the FK from messages.conversation_id would refuse.
+  // The billing ledger first, since drill 13. Its link to a conversation is
+  // ON DELETE SET NULL, so this is not the FK talking — it is that a ledger row
+  // whose conversation is gone is a row nothing will ever clean up.
+  await client.query(
+    `DELETE FROM usage_events WHERE conversation_id IN (
+       SELECT id FROM conversations
+        WHERE org_id = $1::bigint AND provider_event_id = ANY($2::text[]))`,
+    [org, ids],
+  );
+  // Messages next: the FK from messages.conversation_id would refuse.
   await client.query(
     `DELETE FROM messages WHERE conversation_id IN (
        SELECT id FROM conversations
@@ -644,6 +653,9 @@ async function race() {
       '     different problem, whose fix is retrying the transaction.',
     );
   } finally {
+    await client.query(`DELETE FROM usage_events WHERE org_id = $1::bigint`, [
+      org,
+    ]);
     await client.query(`DELETE FROM conversations WHERE org_id = $1::bigint`, [
       org,
     ]);

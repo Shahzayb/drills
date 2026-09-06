@@ -159,8 +159,10 @@ services:
       # See plans/2026-09-07_drill-13-lost-update.md.
       - QUOTA=${QUOTA:-}
       # How many times a transaction restarts on 40001/40P01 before the caller
-      # gets a 503. Empty means 5. Only QUOTA=serializable reaches it, and the
-      # right value is a property of the contention rather than of the code.
+      # gets a 503. Empty means 20, which is measured: at 5 a 100-concurrent
+      # burst on one counter row gives up on ~35 of them. Only
+      # QUOTA=serializable reaches it, and the right value is a property of the
+      # contention rather than of the code.
       - QUOTA_MAX_RETRIES=${QUOTA_MAX_RETRIES:-}
       # off | on | header — see apps/backend/src/observability/query-counter.ts.
       # Empty forwards through to that module's own default ('on').
