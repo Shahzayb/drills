@@ -12,7 +12,11 @@ import {
   DEFAULT_QUERY_BUDGET,
   QUERY_BUDGET_KEY,
 } from './query-budget.decorator';
-import { QUERY_COUNT_HEADER, QUERY_COUNTER_MODE } from './query-counter';
+import {
+  QUERY_COUNT_HEADER,
+  QUERY_COUNTER_MODE,
+  TXN_RETRY_HEADER,
+} from './query-counter';
 import { ORG_ID_HEADER } from '../tenancy/org-id.decorator';
 import { logger, since } from './logger';
 import { getRequestContext, getRequestId } from './request-context';
@@ -90,6 +94,12 @@ export class LoggingInterceptor implements NestInterceptor {
 
       if (QUERY_COUNTER_MODE === 'header') {
         http.getResponse<Response>().setHeader(QUERY_COUNT_HEADER, queries);
+      }
+
+      // Always, and on the error path too — finish() runs before the exception
+      // filter writes the response, so a 503 still carries its retry count.
+      if (retries) {
+        http.getResponse<Response>().setHeader(TXN_RETRY_HEADER, retries);
       }
 
       if (debugOn) {

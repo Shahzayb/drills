@@ -1,0 +1,38 @@
+quota race  api http://nest_server:3002
+  ORG_ID               1                            (default)
+  REQUESTS             100                          (default)
+  CONCURRENCY          100                          (default)
+  ROUNDS               3                            (default)
+  ONLY                 (none)                       (default)
+  QUOTA_LIMIT          100                          (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","searchStrategy":"fts","idempotency":"both","onConflict":"update","idempotencyTtlSeconds":"86400","quota":"atomic","quotaMaxRetries":"5","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  1. read-modify-write, two sessions, counter starts at 99
+
+     A  SELECT used            -> 99
+     B  SELECT used            -> 99
+     A  UPDATE used = 100
+     A  COMMIT
+     B  UPDATE used = 100
+     B  COMMIT
+
+     counter = 100. Two deliveries, one billed. No error, no conflict, no log line.
+     Both statements succeeded and the database is doing exactly what it promised.
+
+  2. the same interleaving at each isolation level, and with the fixes
+
+     shape                 isolation         B write          counter  ok
+     read-modify-write     READ COMMITTED    ok                   100  NO
+     SELECT FOR UPDATE     READ COMMITTED    ok                   101  yes
+     used = used + 1       READ COMMITTED    ok                   101  yes
+     read-modify-write     REPEATABLE READ   ERROR 40001          100  yes
+     SELECT FOR UPDATE     REPEATABLE READ   ERROR 40001          100  yes
+     used = used + 1       REPEATABLE READ   ERROR 40001          100  yes
+     read-modify-write     SERIALIZABLE      ERROR 40001          100  yes
+     SELECT FOR UPDATE     SERIALIZABLE      ERROR 40001          100  yes
+     used = used + 1       SERIALIZABLE      ERROR 40001          100  yes
+
+     READ COMMITTED does not stop the lost update, and it is not broken:
+     it promises you never read uncommitted data. It says nothing about a
+     value going stale between your SELECT and your UPDATE.

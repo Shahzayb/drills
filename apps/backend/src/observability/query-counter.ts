@@ -26,3 +26,14 @@ export const QUERY_COUNTER_MODE: QueryCounterMode =
 /** Set only when QUERY_COUNTER_MODE is 'header'. Not on by default in
  *  production — see the mode's own comment above. */
 export const QUERY_COUNT_HEADER = 'x-query-count';
+
+/**
+ * Transaction restarts, on every response that had any.
+ *
+ * Not gated on QUERY_COUNTER, unlike the header above. A 503 from an exhausted
+ * retry loop carries Nest's error body, which has no room for the count — so
+ * without this the measured retry rate silently excludes exactly the requests
+ * that retried the most. Card 13 measured 0.50/request that way and the true
+ * figure was several times higher.
+ */
+export const TXN_RETRY_HEADER = 'x-txn-retries';

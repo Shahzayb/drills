@@ -42,6 +42,17 @@ services:
       # `pnpm db:stats:on`. See plans/2026-08-17_drill-08-n-plus-one.md.
       - -c
       - shared_preload_libraries=${PG_PRELOAD:-}
+      # Postgres' own default, and left there on purpose: every recorded
+      # baseline in k6/reports/ was taken at 100, and this is postmaster
+      # context, so changing it silently changes the server every later A/B is
+      # compared against. Card 13's `pnpm db:quota bench` is the first thing
+      # that wants more — it opens one connection per concurrent transaction,
+      # and at CONCURRENCY=100 there is no headroom left over the app's pool.
+      # `PG_MAX_CONNECTIONS=200 docker compose up -d postgres_db`, same shape as
+      # PG_PRELOAD above. The instrument checks and refuses rather than
+      # crashing with 53300.
+      - -c
+      - max_connections=${PG_MAX_CONNECTIONS:-100}
     ports:
       - '${POSTGRES_PORT:-5432}:5432'
     volumes:
