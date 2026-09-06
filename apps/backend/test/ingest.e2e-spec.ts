@@ -155,6 +155,17 @@ describe('POST /ingest (e2e)', () => {
       // and silently leave the other's rows behind.
       for (const id of [orgId, otherOrgId]) {
         await tenants.withOrg(id, async (tx) => {
+          // usage_events first, since drill 13: the ledger's link to a
+          // conversation is ON DELETE SET NULL, so the conversations below
+          // would survive it — but the org delete afterwards would not, and
+          // the counter row holds org_id too.
+          await tx.query(`DELETE FROM usage_events WHERE org_id = $1::bigint`, [
+            id,
+          ]);
+          await tx.query(
+            `DELETE FROM usage_counters WHERE org_id = $1::bigint`,
+            [id],
+          );
           await tx.query(`DELETE FROM messages WHERE org_id = $1::bigint`, [
             id,
           ]);

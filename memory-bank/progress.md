@@ -9,7 +9,7 @@ None.
 
 ## Next step
 
-Drill 13, or card 26 (the outbox) — drill 12 named the partial-failure problem and did not build it.
+Drill 14, or card 26 (the outbox) — drill 12 named the partial-failure problem and did not build it.
 
 ## Active plan
 
@@ -20,19 +20,35 @@ None open — every plan file in `plans/` is shipped. `history.md` lists them wi
 `pnpm docker:up`, then `pnpm db:migrate` and `pnpm db:seed` — or `pnpm db:reset` for both.
 Every instrument and toggle is listed in `techContext.md` under Commands.
 
-`pnpm db:test` runs the e2e suite inside the container (100 tests). Four suites are *expected* to
+`pnpm db:test` runs the e2e suite inside the container (106 tests). Five suites are *expected* to
 fail, and a green run of any of them means the switch stopped switching: `pnpm db:test:naive`
 (`LIST_STRATEGY=naive`) fails **two** query-budget assertions, `pnpm db:test:notiebreak`
 (`KEYSET_TIEBREAK=off`) fails **one** — the tie-block walk, which returns 9 of 12 rows with no error
-— `pnpm db:test:like` (`SEARCH_STRATEGY=like`) fails **one**, the stemming assertion, and
-`pnpm db:test:noidem` (`IDEMPOTENCY=none`) fails **three**. `pnpm db:test:redis` fails **one** for a
-different reason: not a broken switch, but the Redis arm's real failure mode — a concurrent duplicate
-gets a 202 instead of a conversation id. `db:test:constraint` and `db:test:donothing` are expected
-green; they are drill 12's DONE WHEN as a test.
+— `pnpm db:test:like` (`SEARCH_STRATEGY=like`) fails **one**, the stemming assertion,
+`pnpm db:test:noidem` (`IDEMPOTENCY=none`) fails **three**, and `pnpm db:test:rmw` (`QUOTA=rmw`)
+fails **two** — the counter against the request count and against the ledger. `pnpm db:test:redis`
+fails **one** for a different reason: not a broken switch, but the Redis arm's real failure mode — a
+concurrent duplicate gets a 202 instead of a conversation id. `db:test:constraint` and
+`db:test:donothing` are expected green (drill 12's DONE WHEN as a test), and so are
+`db:test:locking` and `db:test:serializable` (drill 13's).
 
-`pnpm db:storm fire` writes 3,000 rows into whichever org it measures and cleans them up itself, but
-a k6 `pnpm load ingest` run does **not** — k6 has no database connection. Delete rows with a
-`k6-` prefix on `provider_event_id` before running any drill 05/09/10 baseline.
+`pnpm db:storm fire` and `pnpm db:quota fire` write rows into whichever org they measure and clean
+them up themselves, but a k6 `pnpm load ingest` run does **not** — k6 has no database connection.
+Before any drill 05/09/10 baseline:
+
+```sql
+DELETE FROM conversations
+ WHERE org_id = 1 AND provider_event_id IS NOT NULL AND provider_event_id LIKE 'k6-%';
+```
+
+`provider_event_id IS NOT NULL` is what lets the partial unique index answer that instead of
+sequential-scanning 2.5M rows.
+
+`pnpm db:quota bench` needs `PG_MAX_CONNECTIONS=200 docker compose up -d postgres_db` — it opens one
+connection per concurrent transaction and the default 100 has no headroom over the app's pool. The
+default is deliberately unchanged, so every recorded baseline still describes the same server. Note
+that a later `docker compose up -d nest_server` without the variable set recreates `postgres_db` back
+to 100; put it in `.env` for the duration of a sweep.
 
 Baseline numbers and query plans for drill 03 are in its plan file — the `before` column cards 09
 and 10 were compared against; drill 04's plan records the same queries at 2.5M rows.
@@ -75,7 +91,18 @@ or after a `VACUUM`.
 10. **The ingest partial-failure case is named and not built.** Once a side effect exists, the row
    and the effect are no longer one atomic unit and `ON CONFLICT` stops being sufficient — a retry
    that finds the row returns 200 and the effect never runs. Needs an outbox. Card 26.
-11. **Logging is now a cost to watch, not an absence.** `LOG_LEVEL=debug` in anything resembling
+11. **Nothing enforces the quota.** `usage_counters.quota_limit` exists and no code reads it. Counting
+   correctly and rejecting at the limit are different jobs, and drill 13 only did the first.
+12. **The billing period is UTC.** `date_trunc('month', now() AT TIME ZONE 'UTC')` — a real meter
+   truncates in the org's billing timezone, which the schema does not carry. Invisible for eleven
+   months at a time.
+13. **Nothing reconciles the counter against the ledger.** The query exists (it is drill 13's test
+   assertion) and no job runs it. Drift here is money.
+14. **`Number(rows[0].used)` caps the meter at 2^53.** `bigint` arrives from `pg` as a string.
+15. **The write-skew case is demonstrated and not defended.** `db:quota skew` shows that `atomic`
+   cannot hold an invariant across two counter rows, but the endpoint writes one metric, so the day a
+   second counter joins that path the shipped arm is wrong and no test says so.
+16. **Logging is now a cost to watch, not an absence.** `LOG_LEVEL=debug` in anything resembling
    production would be expensive, and `url` is logged with its query string in full — safe for
    today's parameters, not for a token or an email.
 
@@ -87,6 +114,7 @@ or after a `VACUUM`.
 | [drill/10](https://github.com/Shahzayb/drills/releases/tag/drill/10) | 0.10.0 | `drill/10` | Keyset pagination, the depth chart, and the load-more UI. |
 | [drill/11](https://github.com/Shahzayb/drills/releases/tag/drill/11) | 0.11.0 | `drill/11` | Full-text search, the GIN index, and the leakproof flag it depends on. |
 | [drill/12](https://github.com/Shahzayb/drills/releases/tag/drill/12) | 0.12.0 | none (no open issues to attach) | Idempotent ingest: unique constraint vs Redis `SETNX`, both hit exactly 3,000/10,000 under a concurrent duplicate storm. |
+| [drill/13](https://github.com/Shahzayb/drills/releases/tag/drill/13) | 0.13.0 | none (no open issues to attach) | The lost update: a read-modify-write counter loses 84 of 100 concurrent increments; atomic `UPDATE` shipped over `FOR UPDATE` and `SERIALIZABLE`. |
 
 ## Preferences
 

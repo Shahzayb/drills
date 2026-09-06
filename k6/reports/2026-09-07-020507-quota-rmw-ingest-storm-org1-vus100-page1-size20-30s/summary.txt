@@ -1,0 +1,9 @@
+
+  name=quota-rmw org=1 vus=100 warmup=15s measured=30s unique=100000000 prefix=k6-quota-rmw
+  measured requests : 57210
+  p50 / p95 / p99   : 51.07 / 62.50 / 73.98 ms
+  min / avg / max   : 33.94 / 52.43 / 206.28 ms
+  throughput        : 1907.00 req/s
+  (incl. warm-up)   : p50 51.26  p95 63.98  p99 79.89 ms
+
+RESULT,quota-rmw,1,100,100000000,k6-quota-rmw,51.07,62.50,73.98,1907.00,57210

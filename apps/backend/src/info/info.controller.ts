@@ -9,7 +9,9 @@ import {
   IDEMPOTENCY,
   IDEMPOTENCY_TTL_SECONDS,
   ON_CONFLICT,
+  QUOTA,
 } from '../ingest/ingest.service';
+import { QUOTA_MAX_RETRIES } from '../tenancy/tenant-db.service';
 import { QUERY_COUNTER_MODE } from '../observability/query-counter';
 import { TRACING_ENABLED } from '../observability/trace';
 import { logger } from '../observability/logger';
@@ -32,6 +34,8 @@ export interface InfoResponse {
     idempotency: string;
     onConflict: string;
     idempotencyTtlSeconds: string;
+    quota: string;
+    quotaMaxRetries: string;
     queryCounter: string;
     logLevel: string;
     tracing: string;
@@ -72,6 +76,8 @@ export class InfoController {
         idempotency: IDEMPOTENCY,
         onConflict: ON_CONFLICT,
         idempotencyTtlSeconds: String(IDEMPOTENCY_TTL_SECONDS),
+        quota: QUOTA,
+        quotaMaxRetries: String(QUOTA_MAX_RETRIES),
         queryCounter: QUERY_COUNTER_MODE,
         logLevel: logger.level,
         tracing: TRACING_ENABLED ? 'on' : 'off',

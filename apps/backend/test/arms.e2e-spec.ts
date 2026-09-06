@@ -59,6 +59,12 @@ describe('GET /info arms (e2e)', () => {
         : 'both',
       onConflict: process.env.ON_CONFLICT === 'nothing' ? 'nothing' : 'update',
       idempotencyTtlSeconds: process.env.IDEMPOTENCY_TTL_SECONDS || '86400',
+      quota: ['rmw', 'atomic', 'locking', 'serializable'].includes(
+        process.env.QUOTA ?? '',
+      )
+        ? process.env.QUOTA
+        : 'atomic',
+      quotaMaxRetries: process.env.QUOTA_MAX_RETRIES || '20',
       queryCounter:
         process.env.QUERY_COUNTER === 'off' ||
         process.env.QUERY_COUNTER === 'header'

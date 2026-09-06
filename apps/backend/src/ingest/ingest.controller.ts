@@ -22,10 +22,13 @@ import { IngestResult, IngestService } from './ingest.service';
  *
  * Three status codes, and the third is the interesting one:
  *
- *   201  created — this delivery produced a conversation
- *   200  duplicate — already handled, here is the same conversation id
+ *   201  created — this delivery produced a conversation and moved the meter
+ *   200  duplicate — already handled, here is the same conversation id, and
+ *        the meter did NOT move
  *   202  accepted — a concurrent delivery of this event is in flight and has
  *        not committed, so nobody can name the row yet. Retry.
+ *   503  QUOTA=serializable only: the transaction restarted QUOTA_MAX_RETRIES
+ *        times and gave up. Card 13 — see TenantDb.withOrg.
  *
  * 202 only ever happens on `ON_CONFLICT=nothing` and on the pure `redis` arm.
  * It is a real answer, not an error: the alternative is to invent an id or to
@@ -38,13 +41,18 @@ import { IngestResult, IngestService } from './ingest.service';
 export class IngestController {
   constructor(private readonly ingest: IngestService) {}
 
-  // Three, because the worst *supported* arm is ON_CONFLICT=nothing: the
-  // guard's key lookup, the upsert, and the follow-up select. The `constraint`
-  // and `both` arms run two, and IDEMPOTENCY=none runs four and breaches on
-  // purpose — a naive arm that did not show up in the budget would be a
-  // measurement arm nobody could see.
+  // Four since card 13. The shipped default (`both` + `atomic`) runs three —
+  // the guard's key lookup, the upsert CTE that carries the ledger row, and the
+  // counter — and the worst *supported* combination adds one: either
+  // ON_CONFLICT=nothing's follow-up select or the read half of QUOTA=rmw.
+  //
+  // Combinations past that breach on purpose. IDEMPOTENCY=none runs five, and a
+  // QUOTA=serializable request that retried runs more still — which is correct,
+  // because it really did make those round trips, and it turns the budget into
+  // a second readout of the retry rate. A naive arm that did not show up in the
+  // budget would be a measurement arm nobody could see.
   @Post()
-  @QueryBudget(3)
+  @QueryBudget(4)
   async receive(
     @ApiKeyOrg() orgId: string,
     @Body() body: IngestEventDto,

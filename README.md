@@ -7,7 +7,7 @@ it, and naive code is often a recorded decision rather than debt.
 pnpm monorepo: `apps/backend` (NestJS, raw `pg`, no ORM) and `apps/frontend` (Next.js App Router),
 orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose.
 
-## Progression — 12 of 32
+## Progression — 13 of 32
 
 | # | Drill | Result worth remembering |
 |---|---|---|
@@ -23,6 +23,7 @@ orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose
 | 10 | Keyset pagination | Cursor paging stays fast on deep pages while offset paging keeps getting slower. |
 | 11 | Full-text search | A real search index handled far more traffic than a plain text match, once a config quirk stopped hiding it. |
 | 12 | Idempotent ingest | 10,000 duplicate deliveries still produced exactly 3,000 rows, held by a unique constraint. |
+| 13 | Lost updates | A counter read-and-written in code lost 89 of 100 increments; three fixes, one shipped. |
 
 Current state and what's open live in `memory-bank/progress.md`; every decision and
 number is one row in `memory-bank/history.md`, with the full reasoning in `plans/`.
@@ -51,6 +52,7 @@ pnpm db:explain plans   # query plans for the list endpoint (sweep, experiments,
 pnpm db:paging depths   # latency vs page depth, both paging arms (walk, concurrent)
 pnpm db:search plans    # LIKE vs full-text search (indexes, gaps, writes)
 pnpm db:storm fire      # 10k duplicate deliveries; asserts and exits 1 (key, race, redis-restart)
+pnpm db:quota fire      # 100 concurrent increments; asserts and exits 1 (bench, race, skew)
 pnpm format
 pnpm lint
 ```

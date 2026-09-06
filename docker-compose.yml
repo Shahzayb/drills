@@ -42,6 +42,17 @@ services:
       # `pnpm db:stats:on`. See plans/2026-08-17_drill-08-n-plus-one.md.
       - -c
       - shared_preload_libraries=${PG_PRELOAD:-}
+      # Postgres' own default, and left there on purpose: every recorded
+      # baseline in k6/reports/ was taken at 100, and this is postmaster
+      # context, so changing it silently changes the server every later A/B is
+      # compared against. Card 13's `pnpm db:quota bench` is the first thing
+      # that wants more — it opens one connection per concurrent transaction,
+      # and at CONCURRENCY=100 there is no headroom left over the app's pool.
+      # `PG_MAX_CONNECTIONS=200 docker compose up -d postgres_db`, same shape as
+      # PG_PRELOAD above. The instrument checks and refuses rather than
+      # crashing with 53300.
+      - -c
+      - max_connections=${PG_MAX_CONNECTIONS:-100}
     ports:
       - '${POSTGRES_PORT:-5432}:5432'
     volumes:
@@ -141,6 +152,18 @@ services:
       # How long a Redis guard lives. Empty means 86400 (24h). On the `redis`
       # arm this is a correctness parameter, not a tuning one.
       - IDEMPOTENCY_TTL_SECONDS=${IDEMPOTENCY_TTL_SECONDS:-}
+      # Card 13, and the same one-line A/B as LIST_STRATEGY above:
+      # `QUOTA=rmw docker compose up -d nest_server`. Four arms — rmw | atomic |
+      # locking | serializable — and empty means IngestService's own default
+      # ('atomic'). `rmw` is the lost update, kept as a permanent red arm.
+      # See plans/2026-09-07_drill-13-lost-update.md.
+      - QUOTA=${QUOTA:-}
+      # How many times a transaction restarts on 40001/40P01 before the caller
+      # gets a 503. Empty means 20, which is measured: at 5 a 100-concurrent
+      # burst on one counter row gives up on ~35 of them. Only
+      # QUOTA=serializable reaches it, and the right value is a property of the
+      # contention rather than of the code.
+      - QUOTA_MAX_RETRIES=${QUOTA_MAX_RETRIES:-}
       # off | on | header — see apps/backend/src/observability/query-counter.ts.
       # Empty forwards through to that module's own default ('on').
       - QUERY_COUNTER=${QUERY_COUNTER:-}

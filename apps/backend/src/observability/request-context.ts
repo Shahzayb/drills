@@ -25,6 +25,12 @@ export interface RequestContext {
   // shown it without re-deriving the number. See
   // plans/2026-08-17_drill-08-n-plus-one.md.
   roundTrips: number;
+  // Transactions this request restarted after a serialization failure (40001)
+  // or a deadlock (40P01). Card 13: on QUOTA=serializable this is the retry
+  // rate, per request, without a second instrument — and it is why a retried
+  // request legitimately breaches its @QueryBudget. See
+  // plans/2026-09-07_drill-13-lost-update.md.
+  retries: number;
 }
 
 const storage = new AsyncLocalStorage<RequestContext>();
@@ -62,6 +68,14 @@ export function recordRoundTrip(): void {
   if (!COUNTING_ENABLED) return;
   const store = storage.getStore();
   if (store) store.roundTrips += 1;
+}
+
+/** Called once per transaction restart in TenantDb.withOrg. Deliberately NOT
+ *  gated on COUNTING_ENABLED: a retry is a correctness event, not a
+ *  measurement, and `QUERY_COUNTER=off` must not hide one. */
+export function recordRetry(): void {
+  const store = storage.getStore();
+  if (store) store.retries += 1;
 }
 
 /**

@@ -209,6 +209,52 @@ const INSTRUMENTS: Record<string, Instrument> = {
     ],
   },
 
+  quota: {
+    file: 'db/quota.mts',
+    blurb:
+      'the lost update on the quota counter, and the three fixes (drill 13)',
+    subcommands: {
+      fire: 'N concurrent increments through POST /ingest — asserts and exits 1',
+      bench:
+        'the four arms in raw SQL at the same concurrency: throughput, retries',
+      race: 'two sessions, a controlled interleaving, and the isolation ladder',
+      skew: 'the stretch: a second counter under one shared budget',
+    },
+    knobs: [
+      { flag: 'org', env: 'ORG_ID', def: '1', help: 'which org is metered' },
+      {
+        flag: 'requests',
+        env: 'REQUESTS',
+        def: '100',
+        help: 'increments per run',
+      },
+      {
+        flag: 'concurrency',
+        env: 'CONCURRENCY',
+        def: '100',
+        help: 'how many are in flight at once',
+      },
+      {
+        flag: 'rounds',
+        env: 'ROUNDS',
+        def: '3',
+        help: 'bench: measurements per arm',
+      },
+      {
+        flag: 'only',
+        env: 'ONLY',
+        def: '(all)',
+        help: 'bench/skew: substring filter over arm labels',
+      },
+      {
+        flag: 'quota-limit',
+        env: 'QUOTA_LIMIT',
+        def: '100',
+        help: 'skew: the shared budget the two counters race against',
+      },
+    ],
+  },
+
   bench: {
     file: 'db/bench-copy.mts',
     blurb: 'INSERT vs multi-row INSERT vs COPY, on a scratch table',

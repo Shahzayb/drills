@@ -1,0 +1,30 @@
+quota fire  api http://nest_server:3002
+  ORG_ID               1                            (default)
+  REQUESTS             100                          (default)
+  CONCURRENCY          100                          (default)
+  ROUNDS               3                            (default)
+  ONLY                 (none)                       (default)
+  QUOTA_LIMIT          100                          (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","searchStrategy":"fts","idempotency":"both","onConflict":"update","idempotencyTtlSeconds":"86400","quota":"serializable","quotaMaxRetries":"20","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  prefix quota-mtqaoveo  (cleanup key, if this run dies)
+
+  requests            100 distinct events
+  concurrency         100 requested, 100 peak in flight
+  wall clock          0.32s  310 req/s
+
+  201 created         98
+  200 duplicate       0
+  503 give up         2
+  5xx                 2
+  transport failures  0
+
+  counter used        98 (expected 100)
+  ledger rows         98
+  LOST UPDATES        0  (0.0% of billable events never billed)
+  retries             193  (1.93 per request)
+
+  p50 / p95 / p99     229.40 / 299.26 / 314.06 ms
+
+  cleaned up          98 conversations
