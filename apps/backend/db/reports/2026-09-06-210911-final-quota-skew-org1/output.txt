@@ -1,0 +1,20 @@
+quota skew  api http://nest_server:3002
+  ORG_ID               1                            (default)
+  REQUESTS             100                          (default)
+  CONCURRENCY          100                          (default)
+  ROUNDS               3                            (default)
+  ONLY                 (none)                       (default)
+  QUOTA_LIMIT          100                          (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","searchStrategy":"fts","idempotency":"both","onConflict":"update","idempotencyTtlSeconds":"86400","quota":"atomic","quotaMaxRetries":"20","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  two counters, one budget of 100. events starts at 99, messages at 0,
+  so exactly ONE of the two concurrent increments may legally happen.
+
+  fix                       isolation         A         B                total  holds
+  atomic UPDATE             READ COMMITTED    ok        ok                 101  NO
+  FOR UPDATE (write row)    READ COMMITTED    ok        ok                 101  NO
+  FOR UPDATE (all read)     READ COMMITTED    ok        ok                 100  yes
+  SERIALIZABLE              SERIALIZABLE      ok        ERROR 40001        100  yes
+
+  The invariant is sum(used) <= 100. A row past it is an org served past its plan.

@@ -1,0 +1,9 @@
+
+  name=quota-locking org=1 vus=100 warmup=15s measured=30s unique=100000000 prefix=k6-quota-locking
+  measured requests : 52630
+  p50 / p95 / p99   : 55.01 / 70.84 / 82.88 ms
+  min / avg / max   : 42.90 / 57.00 / 214.61 ms
+  throughput        : 1754.33 req/s
+  (incl. warm-up)   : p50 54.86  p95 71.88  p99 85.62 ms
+
+RESULT,quota-locking,1,100,100000000,k6-quota-locking,55.01,70.84,82.88,1754.33,52630

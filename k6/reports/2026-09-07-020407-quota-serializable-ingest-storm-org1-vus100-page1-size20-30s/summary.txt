@@ -1,0 +1,9 @@
+
+  name=quota-serializable org=1 vus=100 warmup=15s measured=30s unique=100000000 prefix=k6-quota-serializable
+  measured requests : 26142
+  p50 / p95 / p99   : 104.27 / 211.25 / 260.67 ms
+  min / avg / max   : 75.50 / 114.87 / 438.20 ms
+  throughput        : 871.40 req/s
+  (incl. warm-up)   : p50 105.29  p95 213.42  p99 263.28 ms
+
+RESULT,quota-serializable,1,100,100000000,k6-quota-serializable,104.27,211.25,260.67,871.40,26142

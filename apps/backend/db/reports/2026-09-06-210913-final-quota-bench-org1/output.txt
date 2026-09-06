@@ -1,0 +1,19 @@
+quota bench  api http://nest_server:3002
+  ORG_ID               1                            (default)
+  REQUESTS             100                          (default)
+  CONCURRENCY          100                          (default)
+  ROUNDS               3                            (default)
+  ONLY                 (none)                       (default)
+  QUOTA_LIMIT          100                          (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","searchStrategy":"fts","idempotency":"both","onConflict":"update","idempotencyTtlSeconds":"86400","quota":"atomic","quotaMaxRetries":"20","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  100 increments at concurrency 100, 3 rounds, median
+
+  arm            counter   lost   retries/req   err    req/s      p50      p95      p99
+  rmw                  1     99          0.00     0     1252    25.99    49.17    52.66
+  atomic             100      0          0.00     0     1246    24.59    42.71    47.20
+  locking            100      0          0.00     0     1153    29.27    49.91    55.35
+  serializable       100      0          0.20     0      405    93.16   174.29   209.35
+
+  counter must equal 100. Anything less is money the meter did not bill.
