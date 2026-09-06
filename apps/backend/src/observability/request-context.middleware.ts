@@ -21,5 +21,8 @@ export function requestContextMiddleware(
 ): void {
   const requestId = requestIdFor(req);
   res.setHeader(REQUEST_ID_HEADER, requestId);
-  runWithRequestContext({ requestId, queries: 0, roundTrips: 0 }, next);
+  runWithRequestContext(
+    { requestId, queries: 0, roundTrips: 0, retries: 0 },
+    next,
+  );
 }

@@ -61,7 +61,11 @@ export class LoggingInterceptor implements NestInterceptor {
       ]) ?? DEFAULT_QUERY_BUDGET;
 
     const finish = (status: number) => {
-      const { queries = 0, roundTrips = 0 } = getRequestContext() ?? {};
+      const {
+        queries = 0,
+        roundTrips = 0,
+        retries = 0,
+      } = getRequestContext() ?? {};
 
       if (countingOn && queries > budget) {
         // warn, not debug: a threshold event has to survive the default
@@ -75,6 +79,10 @@ export class LoggingInterceptor implements NestInterceptor {
             orgId: request.header(ORG_ID_HEADER),
             queries,
             budget,
+            // Card 13: a QUOTA=serializable request that retried really did
+            // make those extra round trips, so the breach is correct and this
+            // is what says why. Omitted when nothing retried.
+            ...(retries ? { retries } : {}),
           },
           'query_budget_exceeded',
         );
@@ -96,6 +104,9 @@ export class LoggingInterceptor implements NestInterceptor {
             // incremented them, and a zero that means "not counted" reads
             // exactly like a zero that means "made no queries".
             ...(countingOn ? { queries, roundTrips } : {}),
+            // Not gated on countingOn: a transaction restart is a correctness
+            // event, not a measurement.
+            ...(retries ? { retries } : {}),
             durMs: since(startedAt),
           },
           'handler',

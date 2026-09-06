@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { RedisService } from '../redis/redis.service';
-import { TenantDb, TenantQuery } from '../tenancy/tenant-db.service';
+import { getRequestContext } from '../observability/request-context';
+import {
+  QUOTA_MAX_RETRIES,
+  ScopeOptions,
+  TenantDb,
+  TenantQuery,
+} from '../tenancy/tenant-db.service';
 import { IngestEventDto } from './dto/ingest-event.dto';
 
 /**
@@ -68,6 +74,54 @@ export const IDEMPOTENCY_TTL_SECONDS = Number(
   process.env.IDEMPOTENCY_TTL_SECONDS || '86400',
 );
 
+/**
+ * How the monthly quota counter is incremented. Card 13.
+ *
+ * - `rmw`          SELECT the count, add one in JavaScript, write it back. The
+ *                  bug: two callers read 99 and both write 100. It passes every
+ *                  sequential test and loses money under concurrency.
+ * - `atomic`       one statement, `used = usage_counters.used + 1`. Postgres
+ *                  takes the row lock and does the arithmetic on the value it
+ *                  can see, which is the one nobody else has moved.
+ * - `locking`      `rmw` plus `FOR UPDATE`. Same arithmetic in the application,
+ *                  correct anyway, because the row is held from the read to the
+ *                  write.
+ * - `serializable` `rmw` byte for byte, inside a SERIALIZABLE transaction with
+ *                  retry on 40001.
+ *
+ * `atomic` is the default because it is what you would ship. The three others
+ * are permanent measurement arms, the way `naive` and `like` are.
+ *
+ * See plans/2026-09-07_drill-13-lost-update.md.
+ */
+export type QuotaMode = 'rmw' | 'atomic' | 'locking' | 'serializable';
+
+const QUOTA_MODES: QuotaMode[] = ['rmw', 'atomic', 'locking', 'serializable'];
+
+export const QUOTA: QuotaMode = QUOTA_MODES.includes(
+  process.env.QUOTA as QuotaMode,
+)
+  ? (process.env.QUOTA as QuotaMode)
+  : 'atomic';
+
+/**
+ * The billing period, as SQL rather than as a JavaScript date.
+ *
+ * `now()` is transaction start time, so every statement in one transaction gets
+ * the same period even across a midnight-on-the-first boundary. Computing it in
+ * Node would put the *application server's* clock in the billing key, and two
+ * app servers disagreeing about the month is a class of bug that has no
+ * symptom until the invoice.
+ *
+ * UTC, and that is a placeholder rather than a defended choice: a real meter
+ * truncates in the org's billing timezone, which this schema does not carry.
+ */
+export const PERIOD_SQL = `date_trunc('month', now() AT TIME ZONE 'UTC')::date`;
+
+/** The only metric the endpoint writes. `usage_counters.metric` has a second
+ *  value, and it exists for `pnpm db:quota skew`. */
+export const QUOTA_METRIC = 'events';
+
 /** What the guard holds between the SETNX and the commit. Anything that is not
  *  this is a conversation id. */
 const PENDING = 'pending';
@@ -89,6 +143,14 @@ export interface IngestResult {
   /** Echoed so a measurement can tell which arm answered without reading the
    *  container's environment. */
   mode: IdempotencyMode;
+  /** Which quota arm answered, same reasoning as `mode`. */
+  quota: QuotaMode;
+  /** The counter after this delivery, or null when nothing was billed — a
+   *  duplicate must not move the meter. */
+  quotaUsed: number | null;
+  /** Transaction restarts this request paid for. Non-zero only on
+   *  `QUOTA=serializable`, and it is the retry rate one request at a time. */
+  retries: number;
 }
 
 @Injectable()
@@ -144,6 +206,11 @@ export class IngestService {
             duplicate: true,
             outcome: 'duplicate',
             mode: IDEMPOTENCY,
+            quota: QUOTA,
+            // Nothing was billed and nothing was read: the guard answered
+            // without touching Postgres at all.
+            quotaUsed: null,
+            retries: 0,
           };
         }
 
@@ -167,6 +234,9 @@ export class IngestService {
             duplicate: true,
             outcome: 'pending',
             mode: IDEMPOTENCY,
+            quota: QUOTA,
+            quotaUsed: null,
+            retries: 0,
           };
         }
       }
@@ -199,36 +269,69 @@ export class IngestService {
     }
   }
 
+  /**
+   * How the transaction is opened. Only the `serializable` arm changes it.
+   *
+   * Retrying restarts the WHOLE callback below, conversation insert included.
+   * That is safe here for one reason and it belongs to the previous card: the
+   * write is idempotent. `ON CONFLICT` means a re-run finds its own row instead
+   * of adding a second. Retry-on-40001 is a feature you buy with idempotency,
+   * which is why this arm would have been unshippable one drill ago.
+   */
+  private readonly scope: ScopeOptions =
+    QUOTA === 'serializable'
+      ? { isolation: 'SERIALIZABLE', retries: QUOTA_MAX_RETRIES }
+      : {};
+
   /** One transaction either way: the conversation and its first message are one
    *  atomic unit, or a retry finds a conversation with no message in it. */
   private write(orgId: string, event: IngestEventDto): Promise<IngestResult> {
-    return this.tenants.withOrg(orgId, async (tx) => {
-      // Three paths, not two. The pure `redis` arm inserts straight in: the
-      // guard has already decided this event is new, so a SELECT in front of
-      // the INSERT would be a second mechanism the arm is not supposed to have,
-      // and would price the guard against a comparison it never makes.
-      const row = this.usesConstraint
-        ? await this.upsert(tx, orgId, event)
-        : this.usesRedis
-          ? await this.plainInsert(tx, orgId, event)
-          : await this.checkThenInsert(tx, orgId, event);
+    return this.tenants.withOrg(
+      orgId,
+      async (tx) => {
+        // Three paths, not two. The pure `redis` arm inserts straight in: the
+        // guard has already decided this event is new, so a SELECT in front of
+        // the INSERT would be a second mechanism the arm is not supposed to have,
+        // and would price the guard against a comparison it never makes.
+        const row = this.usesConstraint
+          ? await this.upsert(tx, orgId, event)
+          : this.usesRedis
+            ? await this.plainInsert(tx, orgId, event)
+            : await this.checkThenInsert(tx, orgId, event);
 
-      if (!row) {
+        if (!row) {
+          return {
+            conversationId: null,
+            duplicate: true,
+            outcome: 'pending' as const,
+            mode: IDEMPOTENCY,
+            quota: QUOTA,
+            quotaUsed: null,
+            retries: 0,
+          };
+        }
+
+        // Only a delivery that CREATED something is billable. A duplicate that
+        // moved the meter would be the same overcount this drill is about, in the
+        // other direction — and drill 12's `created` discriminator is already the
+        // flag that says which is which.
+        const quotaUsed = row.created ? await this.bill(tx, orgId) : null;
+
         return {
-          conversationId: null,
-          duplicate: true,
-          outcome: 'pending' as const,
+          conversationId: row.id,
+          duplicate: !row.created,
+          outcome: row.created ? ('created' as const) : ('duplicate' as const),
           mode: IDEMPOTENCY,
+          quota: QUOTA,
+          quotaUsed,
+          // Read at the end of the transaction, not accumulated by hand: the
+          // count lives on the request context, so a retry inside withOrg
+          // increments it whether or not this file remembers to.
+          retries: getRequestContext()?.retries ?? 0,
         };
-      }
-
-      return {
-        conversationId: row.id,
-        duplicate: !row.created,
-        outcome: row.created ? ('created' as const) : ('duplicate' as const),
-        mode: IDEMPOTENCY,
-      };
-    });
+      },
+      this.scope,
+    );
   }
 
   /**
@@ -276,6 +379,10 @@ export class IngestService {
        ), first_message AS (
          INSERT INTO messages (conversation_id, org_id, message)
          SELECT id, $1::bigint, $3 FROM ingested WHERE created
+       ), billed AS (
+         INSERT INTO usage_events (org_id, conversation_id, period, metric)
+         SELECT $1::bigint, id, ${PERIOD_SQL}, '${QUOTA_METRIC}'
+           FROM ingested WHERE created
        )
        SELECT id, created FROM ingested`,
       [orgId, event.eventId, event.message, event.status],
@@ -329,6 +436,9 @@ export class IngestService {
        ), first_message AS (
          INSERT INTO messages (conversation_id, org_id, message)
          SELECT id, $1::bigint, $3 FROM ingested
+       ), billed AS (
+         INSERT INTO usage_events (org_id, conversation_id, period, metric)
+         SELECT $1::bigint, id, ${PERIOD_SQL}, '${QUOTA_METRIC}' FROM ingested
        )
        SELECT id FROM ingested`,
       [orgId, event.eventId, event.message, event.status],
@@ -380,6 +490,89 @@ export class IngestService {
       [id, orgId, event.message],
     );
 
+    // A fourth statement rather than a CTE, for the same reason the two INSERTs
+    // above are separate: this arm is what gets written before anyone has
+    // thought about any of this, and tidying it would stop it being the control.
+    await tx.query(
+      `INSERT INTO usage_events (org_id, conversation_id, period, metric)
+       VALUES ($1::bigint, $2::uuid, ${PERIOD_SQL}, '${QUOTA_METRIC}')`,
+      [orgId, id],
+    );
+
     return { id, created: true };
+  }
+
+  /**
+   * Move the meter by one, whichever way this arm moves it.
+   *
+   * The counter is a CACHE of `count(*)` over usage_events, and every problem
+   * below is a consequence of keeping one. The ledger cannot lose a row — an
+   * INSERT has nothing to read — so `count(usage_events)` is the oracle that
+   * tells you the counter is short.
+   */
+  private async bill(tx: TenantQuery, orgId: string): Promise<number> {
+    if (QUOTA === 'atomic') return this.incrementAtomic(tx, orgId);
+
+    // `rmw`, `locking` and `serializable` share these two statements exactly.
+    // The lock below is the whole of `locking`; the isolation level, set on the
+    // transaction rather than here, is the whole of `serializable`. Three arms,
+    // one code path, so nothing else can differ between them.
+    const lock = QUOTA === 'locking' ? ' FOR UPDATE' : '';
+
+    const { rows } = await tx.query<{ used: string }>(
+      `SELECT used FROM usage_counters
+        WHERE org_id = $1::bigint AND period = ${PERIOD_SQL}
+          AND metric = $2${lock}`,
+      [orgId, QUOTA_METRIC],
+    );
+
+    // No row yet — the first billable event of the period. There is nothing to
+    // read, so there is no read-modify-write to demonstrate: every arm creates
+    // the row atomically. Once per org per month, and it keeps the naive arm
+    // from failing for the wrong reason (a PK violation instead of an
+    // undercount).
+    if (!rows[0]) return this.incrementAtomic(tx, orgId);
+
+    // THE BUG, on the `rmw` arm. The value came from a snapshot; by the time
+    // the UPDATE below lands, another transaction may have written a larger one,
+    // and this statement overwrites it with a smaller number. No error, no
+    // conflict, no log line. `bigint` arrives as a string from pg, so the
+    // Number() is also what would silently cap this meter at 2^53.
+    const next = Number(rows[0].used) + 1;
+
+    await tx.query(
+      `UPDATE usage_counters SET used = $3::bigint, updated_at = now()
+        WHERE org_id = $1::bigint AND period = ${PERIOD_SQL} AND metric = $2`,
+      [orgId, QUOTA_METRIC, next],
+    );
+
+    return next;
+  }
+
+  /**
+   * One statement, and the fix nobody argues with.
+   *
+   * `used = usage_counters.used + 1` reads the value Postgres holds the row
+   * lock over, not the one this session saw a round trip ago. Under READ
+   * COMMITTED a concurrent updater blocks here, then re-evaluates against the
+   * committed row — so the increment composes instead of overwriting.
+   *
+   * The upsert shape is not decoration: it is also how the row gets created,
+   * which is why every other arm falls back to it on the cold path.
+   */
+  private async incrementAtomic(
+    tx: TenantQuery,
+    orgId: string,
+  ): Promise<number> {
+    const { rows } = await tx.query<{ used: string }>(
+      `INSERT INTO usage_counters (org_id, period, metric, used)
+       VALUES ($1::bigint, ${PERIOD_SQL}, $2, 1)
+       ON CONFLICT (org_id, period, metric)
+         DO UPDATE SET used = usage_counters.used + 1, updated_at = now()
+       RETURNING used`,
+      [orgId, QUOTA_METRIC],
+    );
+
+    return Number(rows[0].used);
   }
 }
