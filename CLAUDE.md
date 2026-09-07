@@ -60,6 +60,7 @@ Once work is done or a decision is made, `memory-bank/` is out of date and needs
 - Always list commands you've used to come up with a number along with the results.
 - Don't just give me results, teach me how to get them too.
 - ELI5
+- Always include a Tech stack cheat sheet section summarizing what is new or relevant to this feature across SQL/Postgres, NestJS, Next.js, Node.js, React.js, and any other relevant technologies.
 
 ---
 

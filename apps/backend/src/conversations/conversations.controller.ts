@@ -7,17 +7,20 @@ import {
   Param,
   ParseUUIDPipe,
   Patch,
+  Post,
   Query,
 } from '@nestjs/common';
 import { QueryBudget } from '../observability/query-budget.decorator';
 import { OrgId } from '../tenancy/org-id.decorator';
 import {
+  AgentListItem,
   ConversationCursorPage,
   ConversationPage,
   ConversationsService,
   ConversationSummary,
   MessageListItem,
 } from './conversations.service';
+import { AssignConversationDto } from './dto/assign-conversation.dto';
 import { ListConversationsQuery } from './dto/list-conversations.query';
 import { UpdateConversationDto } from './dto/update-conversation.dto';
 
@@ -55,6 +58,19 @@ export class ConversationsController {
     return this.conversations.list(orgId, query);
   }
 
+  /**
+   * DECLARED BEFORE `@Get(':id')`, and that is not tidiness.
+   *
+   * Nest matches routes in declaration order, so this below `:id` would never
+   * be reached — `agents` would bind as the id parameter, `ParseUUIDPipe` would
+   * reject it, and the route would answer 400 for a path that exists. A 404
+   * would at least read as missing; a 400 reads as your fault.
+   */
+  @Get('agents')
+  agents(@OrgId() orgId: string): Promise<AgentListItem[]> {
+    return this.conversations.listAgents(orgId);
+  }
+
   @Get(':id')
   get(
     @OrgId() orgId: string,
@@ -78,6 +94,40 @@ export class ConversationsController {
     @Body() body: UpdateConversationDto,
   ): Promise<ConversationSummary> {
     return this.conversations.updateStatus(orgId, id, body.status);
+  }
+
+  /**
+   * The claim. Card 14.
+   *
+   * A POST and not a PATCH: `PATCH :id` already exists for the status and takes
+   * a body of fields to merge, where this is an operation with a precondition
+   * and its own failure mode. Keeping them apart means the 409 belongs to one
+   * route rather than to "some updates, sometimes".
+   *
+   * 200 on success, 400 when the optimistic arm gets no version, 404 for a row
+   * that is not there or not yours, and **409 with the true current state** when
+   * someone else got there first. Not a 500, and not a 200 — the two answers a
+   * client cannot do anything sensible with.
+   *
+   * Two statements at worst, either arm: optimistic is one UPDATE and, when it
+   * matches nothing, one re-read to tell 409 from 404; pessimistic is the
+   * locking SELECT and one UPDATE. The budget is a ceiling on the worse of the
+   * two, the same way list()'s 3 is a ceiling on the offset arm.
+   */
+  @Post(':id/assign')
+  // 200, not Nest's default 201 for a POST. Nothing is created — a claim writes
+  // a column on a row that already existed, and 201 would oblige a Location
+  // header pointing at something new. Found by measuring: `pnpm db:claim fire`
+  // asserts on the 200 and reported *zero* winners on a run where the row had
+  // plainly been claimed, because the one success came back as a 201.
+  @HttpCode(200)
+  @QueryBudget(2)
+  assign(
+    @OrgId() orgId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: AssignConversationDto,
+  ): Promise<ConversationSummary> {
+    return this.conversations.assign(orgId, id, body);
   }
 
   @Delete(':id')

@@ -1,0 +1,28 @@
+claim bench  api http://nest_server:3002
+  ORG_ID               1                            (default)
+  REQUESTS             50                           (default)
+  CONCURRENCY          50                           (default)
+  LEVELS               2,10,50                      (default)
+  ROUNDS               3                            (default)
+  SECONDS              5                            (default)
+  ONLY                 (none)                       (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","assign":"optimistic","searchStrategy":"fts","idempotency":"both","onConflict":"update","idempotencyTtlSeconds":"86400","quota":"atomic","quotaMaxRetries":"20","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  one row, 5s per cell, 3 rounds, median. claim then release.
+
+  arm           claimers    claims/s   conflict%   rt/write      p50      p95      p99
+  lww                  2        4088         0.0       2.00     0.43     0.71     1.38
+  lww                 10        2709         0.0       2.00     3.04     8.10    12.79
+  lww                 50        1765         0.0       2.00    23.47    67.69    93.07
+
+  optimistic           2        2338        67.6       6.18     0.25     0.53     0.73
+  optimistic          10         820        96.3      54.78     0.28     1.36     1.80
+  optimistic          50         515        98.1     105.17     1.63     3.23     4.75
+
+  pessimistic          2        1963        66.6      15.99     0.29     0.64     0.87
+  pessimistic         10         570        94.4      75.27     0.92     1.68     2.13
+  pessimistic         50         181        98.4     251.49     5.26     7.06     8.44
+
+  claims/s is SUCCESSFUL writes. `lww` never conflicts and is never correct —
+  it is the ceiling you are paying the other two arms to stay under.

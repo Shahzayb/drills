@@ -7,7 +7,7 @@ it, and naive code is often a recorded decision rather than debt.
 pnpm monorepo: `apps/backend` (NestJS, raw `pg`, no ORM) and `apps/frontend` (Next.js App Router),
 orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose.
 
-## Progression — 13 of 32
+## Progression — 14 of 32
 
 | # | Drill | Result worth remembering |
 |---|---|---|
@@ -24,6 +24,7 @@ orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose
 | 11 | Full-text search | A real search index handled far more traffic than a plain text match, once a config quirk stopped hiding it. |
 | 12 | Idempotent ingest | 10,000 duplicate deliveries still produced exactly 3,000 rows, held by a unique constraint. |
 | 13 | Lost updates | A counter read-and-written in code lost 89 of 100 increments; three fixes, one shipped. |
+| 14 | Optimistic locking | Fifty agents claimed one ticket and all fifty were told yes; a version check leaves exactly one winner, and the losing browser corrects itself without reloading. |
 
 Current state and what's open live in `memory-bank/progress.md`; every decision and
 number is one row in `memory-bank/history.md`, with the full reasoning in `plans/`.
@@ -53,6 +54,8 @@ pnpm db:paging depths   # latency vs page depth, both paging arms (walk, concurr
 pnpm db:search plans    # LIKE vs full-text search (indexes, gaps, writes)
 pnpm db:storm fire      # 10k duplicate deliveries; asserts and exits 1 (key, race, redis-restart)
 pnpm db:quota fire      # 100 concurrent increments; asserts and exits 1 (bench, race, skew)
+pnpm db:claim fire      # 50 agents claim one ticket; asserts and exits 1 (bench, race)
+pnpm test:ui            # frontend Playwright suite, on the host against the container
 pnpm format
 pnpm lint
 ```

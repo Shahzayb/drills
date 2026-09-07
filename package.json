@@ -1,6 +1,6 @@
 {
   "name": "drills",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -23,6 +23,7 @@
     "db:bench": "node scripts/measure.ts bench",
     "db:storm": "node scripts/measure.ts storm",
     "db:quota": "node scripts/measure.ts quota",
+    "db:claim": "node scripts/measure.ts claim",
     "db:psql": "node scripts/psql.ts psql",
     "db:log:on": "node scripts/psql.ts log:on",
     "db:log:off": "node scripts/psql.ts log:off",
@@ -39,6 +40,8 @@
     "db:test:rmw": "docker compose exec -T -e QUOTA=rmw nest_server pnpm --filter=backend run test:e2e",
     "db:test:locking": "docker compose exec -T -e QUOTA=locking nest_server pnpm --filter=backend run test:e2e",
     "db:test:serializable": "docker compose exec -T -e QUOTA=serializable nest_server pnpm --filter=backend run test:e2e",
+    "db:test:lww": "docker compose exec -T -e ASSIGN=lww nest_server pnpm --filter=backend run test:e2e",
+    "db:test:pessimistic": "docker compose exec -T -e ASSIGN=pessimistic nest_server pnpm --filter=backend run test:e2e",
     "check:tenancy": "docker compose exec -T nest_server pnpm --filter=backend run check:tenancy",
     "check:arms": "node scripts/check-arms.ts",
     "arms": "node scripts/check-arms.ts live",
@@ -48,6 +51,7 @@
     "db:explain": "node scripts/measure.ts explain",
     "db:paging": "node scripts/measure.ts paging",
     "db:search": "node scripts/measure.ts search",
+    "test:ui": "pnpm --filter=frontend run test:e2e",
     "load": "node scripts/load.ts",
     "load:baseline": "node scripts/load.ts list",
     "docker:up": "docker compose up -d --pull always",

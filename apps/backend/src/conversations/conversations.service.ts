@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { TenantDb, TenantQuery } from '../tenancy/tenant-db.service';
+import { AssignConversationDto } from './dto/assign-conversation.dto';
 import {
   ListConversationsQuery,
   SORT_COLUMNS,
@@ -14,6 +16,9 @@ interface ConversationRow {
   id: string;
   status: string;
   assignee_id: string | null;
+  // integer, so `pg` hands it back as a JS number rather than as a string the
+  // way it does bigints. See ConversationSummary.version.
+  version: number;
   created_at: Date;
   updated_at: Date;
   /**
@@ -77,6 +82,16 @@ export interface ConversationSummary {
   // Number.MAX_SAFE_INTEGER, and a JS number would round it without saying so.
   // It stays a string all the way out.
   assigneeId: string | null;
+  /**
+   * Card 14's optimistic-locking token. A number, not a string: the column is
+   * `integer`, and `pg` only stringifies int8.
+   *
+   * It is not a timestamp and not an etag — it is a counter that every write to
+   * this row bumps, so "is the row still what I read?" is one integer
+   * comparison the database can do inside the UPDATE that depends on it. See
+   * plans/2026-09-08_drill-14-optimistic-locking.md.
+   */
+  version: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -95,6 +110,40 @@ export interface ConversationListItem extends ConversationSummary {
 export interface TagItem {
   id: string;
   name: string;
+}
+
+/** One person who can be assigned a conversation: a membership id and the
+ *  user's name. The id is what `assignee_id` references, so it is the id the
+ *  client sends back — not the user id, which would be wrong in every org but
+ *  one. */
+export interface AgentListItem {
+  id: string;
+  name: string;
+}
+
+/**
+ * What the server says is true, handed to the client in the same response that
+ * refuses its write.
+ *
+ * This is the whole reason a 409 here is not just a status code. The losing
+ * client showed an optimistic update that turned out to be a lie; it now has to
+ * un-tell it, and "who actually owns this" is the one fact it cannot derive.
+ * Sending it with the refusal means the loser needs no follow-up read to say
+ * something true.
+ */
+export interface ConflictState {
+  assigneeId: string | null;
+  assigneeName: string | null;
+  version: number;
+  updatedAt: string;
+}
+
+/** The 409 body. `error` is a stable machine-readable discriminator, `message`
+ *  is for a human, and `current` is the truth. */
+export interface AssignConflict {
+  error: 'conflict';
+  message: string;
+  current: ConflictState;
 }
 
 export interface ConversationPage {
@@ -182,6 +231,7 @@ const toSummary = (row: ConversationRow): ConversationSummary => ({
   id: row.id,
   status: row.status,
   assigneeId: row.assignee_id,
+  version: row.version,
   createdAt: row.created_at.toISOString(),
   updatedAt: row.updated_at.toISOString(),
 });
@@ -194,6 +244,28 @@ const toItem = (
   ...toSummary(row),
   assigneeName,
   tags,
+});
+
+/**
+ * The 409 body, built from the row as it actually is.
+ *
+ * The message names the winner because that is the sentence the losing UI has
+ * to put on screen, and building it here means both arms say the same thing. An
+ * unassigned row reaching this point means the version moved for some other
+ * reason — a status change, a release — so the wording has to cover that too
+ * rather than claiming somebody took it.
+ */
+const conflictBody = (row: ConversationWithAssigneeRow): AssignConflict => ({
+  error: 'conflict',
+  message: row.assignee_id
+    ? `already assigned to ${row.assignee_name ?? `membership ${row.assignee_id}`}`
+    : 'this conversation changed since you loaded it',
+  current: {
+    assigneeId: row.assignee_id,
+    assigneeName: row.assignee_name,
+    version: row.version,
+    updatedAt: row.updated_at.toISOString(),
+  },
 });
 
 const toMessage = (row: MessageRow): MessageListItem => ({
@@ -229,6 +301,40 @@ export const LIST_STRATEGY: ListStrategy =
  */
 export const KEYSET_TIEBREAK: 'on' | 'off' =
   process.env.KEYSET_TIEBREAK === 'off' ? 'off' : 'on';
+
+/**
+ * How `POST /conversations/:id/assign` decides whether a claim may proceed.
+ * Card 14.
+ *
+ * - `lww`          `UPDATE … WHERE id = $1`. Both agents get a 200 and the last
+ *                  write wins. No error, no conflict, no log line — the loser
+ *                  believes they own a ticket they do not. THE BUG, kept as a
+ *                  permanent red arm the way `rmw` and `naive` are.
+ * - `optimistic`   `UPDATE … WHERE id = $1 AND version = $2`. Nobody holds a
+ *                  lock across the human time between reading the row and
+ *                  clicking; the version is the receipt that says the row has
+ *                  not moved since. Exactly one writer matches, the rest see
+ *                  zero rows affected and are told so.
+ * - `pessimistic`  `SELECT … FOR UPDATE`, then decide inside the lock. The
+ *                  stretch's other arm and the other half of the throughput
+ *                  chart: nobody is refused for a stale read, because the read
+ *                  happens while the row is held — they queue instead.
+ *
+ * `optimistic` is the default because it is what ships. Read once at module
+ * load, same as LIST_STRATEGY: an A/B whose arms are two different checkouts
+ * measures the checkout (drill 07).
+ *
+ * See plans/2026-09-08_drill-14-optimistic-locking.md.
+ */
+export type AssignMode = 'lww' | 'optimistic' | 'pessimistic';
+
+const ASSIGN_MODES: AssignMode[] = ['lww', 'optimistic', 'pessimistic'];
+
+export const ASSIGN: AssignMode = ASSIGN_MODES.includes(
+  process.env.ASSIGN as AssignMode,
+)
+  ? (process.env.ASSIGN as AssignMode)
+  : 'optimistic';
 
 @Injectable()
 export class ConversationsService {
@@ -422,7 +528,8 @@ export class ConversationsService {
   ): Promise<ConversationPage | ConversationCursorPage> {
     const [rows, count] = await Promise.all([
       tx.query<ConversationRow>(
-        `SELECT c.id, c.status, c.assignee_id, c.created_at, c.updated_at
+        `SELECT c.id, c.status, c.assignee_id, c.version,
+                c.created_at, c.updated_at
                 ${this.cursorKeyColumn(paging, sortColumn)}
            FROM conversations c
           WHERE ${paging.where}
@@ -494,8 +601,8 @@ export class ConversationsService {
     // oversubscribed 2:1 — the two effects pull in opposite directions.
     const [rows, count] = await Promise.all([
       tx.query<ConversationWithAssigneeRow>(
-        `SELECT c.id, c.status, c.assignee_id, u.name AS assignee_name,
-                c.created_at, c.updated_at
+        `SELECT c.id, c.status, c.assignee_id, c.version,
+                u.name AS assignee_name, c.created_at, c.updated_at
                 ${this.cursorKeyColumn(paging, sortColumn)}
            FROM conversations c
            LEFT JOIN memberships m ON m.id = c.assignee_id
@@ -745,7 +852,7 @@ export class ConversationsService {
   async get(orgId: string, id: string): Promise<ConversationSummary> {
     const result = await this.tenants.withOrg(orgId, (tx) =>
       tx.query<ConversationRow>(
-        `SELECT id, status, assignee_id, created_at, updated_at
+        `SELECT id, status, assignee_id, version, created_at, updated_at
            FROM conversations
           WHERE id = $1`,
         [id],
@@ -770,9 +877,9 @@ export class ConversationsService {
     const result = await this.tenants.withOrg(orgId, (tx) =>
       tx.query<ConversationRow>(
         `UPDATE conversations
-            SET status = $2, updated_at = now()
+            SET status = $2, version = version + 1, updated_at = now()
           WHERE id = $1
-      RETURNING id, status, assignee_id, created_at, updated_at`,
+      RETURNING id, status, assignee_id, version, created_at, updated_at`,
         [id, status],
       ),
     );
@@ -825,5 +932,228 @@ export class ConversationsService {
 
       return result.rows.map(toMessage);
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Card 14. The claim.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Who can be assigned a conversation in this org.
+   *
+   * Membership ids, not user ids: `conversations.assignee_id` references
+   * `memberships (id)`, so a user who belongs to three orgs has three different
+   * ids here and only one of them is valid on this row. Sending the user id
+   * would be right in exactly the orgs where the two happen to coincide.
+   *
+   * No `WHERE org_id`, same as everything below drill 07's banner comment. The
+   * `memberships_tenant_isolation` policy is what scopes this, and the LIMIT is
+   * there because a real org has more agents than a picker should render.
+   */
+  async listAgents(orgId: string): Promise<AgentListItem[]> {
+    const result = await this.tenants.withOrg(orgId, (tx) =>
+      tx.query<AgentListItem>(
+        `SELECT m.id, u.name
+           FROM memberships m
+           JOIN users u ON u.id = m.user_id
+          ORDER BY u.name, m.id
+          LIMIT 50`,
+      ),
+    );
+
+    return result.rows;
+  }
+
+  /**
+   * Claim a conversation, release it, or be told why you cannot.
+   *
+   * The whole drill is which of three things this does, and all three are one
+   * commit — see ASSIGN.
+   *
+   * The rule every arm is trying to enforce: **you may set the assignee if the
+   * row is unassigned, or if it is already yours.** Releasing (`assigneeId:
+   * null`) is not a claim and is governed by the version alone — you may hand
+   * back what you were holding.
+   *
+   * `version` is required on the `optimistic` arm and rejected as a 400 when it
+   * is missing, rather than being treated as "no opinion". A write that silently
+   * skips its own concurrency check because a field was absent is the failure
+   * this endpoint exists to prevent, and it would be invisible: every request
+   * would still return 200.
+   *
+   * It is deliberately NOT required on the other two arms. `pessimistic` has no
+   * use for it — its read happens under the lock — and demanding one would make
+   * the client of the two arms different, which is the thing the stretch is
+   * comparing.
+   */
+  async assign(
+    orgId: string,
+    id: string,
+    body: AssignConversationDto,
+  ): Promise<ConversationSummary> {
+    if (ASSIGN === 'optimistic' && body.version === undefined) {
+      throw new BadRequestException(
+        'version is required: send the version you read with the conversation',
+      );
+    }
+
+    return this.tenants.withOrg(orgId, (tx) =>
+      ASSIGN === 'pessimistic'
+        ? this.assignLocking(tx, id, body.assigneeId)
+        : this.assignCompareAndSet(tx, id, body.assigneeId, body.version),
+    );
+  }
+
+  /**
+   * The optimistic arm, and — with the guard removed — the broken one.
+   *
+   * One statement. The predicate IS the concurrency control: `version = $3`
+   * matches for exactly one of N concurrent claimers, because the first one to
+   * commit moved it. The losers do not error, they affect **zero rows**, which
+   * is the part that has to be noticed. `rowCount === 0` is not "nothing to do";
+   * here it is the conflict, and reading it as success is how last-write-wins
+   * ships wearing an optimistic lock's clothes.
+   *
+   * The second half of the guard is nearly redundant and is not decoration. The
+   * version check already implies the row is as the client saw it, so a claim
+   * on a conversation they watched somebody else take would have a stale
+   * version anyway. What it covers is the client that reads the row, sees it
+   * assigned to another agent, and posts that same version deliberately — a
+   * steal with a valid receipt. The `pessimistic` arm enforces the same rule
+   * against live state, and two arms have to enforce one rule or the throughput
+   * chart is comparing two different features.
+   *
+   * `$2::bigint IS NULL OR …` is the release: handing a conversation back is not
+   * a claim, so it asks only that the row has not moved.
+   *
+   * On `lww` the guard is the empty string. That is the entire diff between the
+   * bug and the fix, and it is one line of SQL — which is the point worth
+   * carrying out of this drill.
+   */
+  private async assignCompareAndSet(
+    tx: TenantQuery,
+    id: string,
+    assigneeId: string | null,
+    version?: number,
+  ): Promise<ConversationSummary> {
+    const guard =
+      ASSIGN === 'lww'
+        ? ''
+        : `AND version = $3
+              AND ($2::bigint IS NULL
+                   OR assignee_id IS NULL
+                   OR assignee_id = $2::bigint)`;
+
+    // `version` is present whenever the guard is, because assign() rejected the
+    // request otherwise. Postgres refuses a bind carrying more parameters than
+    // the statement references, so sending it on the `lww` arm would be a 500.
+    const params =
+      ASSIGN === 'lww' ? [id, assigneeId] : [id, assigneeId, version];
+
+    const { rows } = await tx.query<ConversationRow>(
+      `UPDATE conversations
+          SET assignee_id = $2::bigint,
+              version     = version + 1,
+              updated_at  = now()
+        WHERE id = $1
+          ${guard}
+    RETURNING id, status, assignee_id, version, created_at, updated_at`,
+      params,
+    );
+
+    if (rows[0]) return toSummary(rows[0]);
+
+    throw await this.refusal(tx, id);
+  }
+
+  /**
+   * The pessimistic arm: hold the row, then decide.
+   *
+   * `FOR UPDATE OF c` and not a bare `FOR UPDATE` — Postgres refuses to lock the
+   * nullable side of an outer join, and `memberships`/`users` are reached by
+   * LEFT JOIN here so that a refusal already knows the winner's name. Naming the
+   * one relation to lock is what makes the join legal.
+   *
+   * The difference from the arm above is not the SQL, it is WHERE THE READ
+   * HAPPENS. Optimistic reads in the page render, minutes before the click, and
+   * checks a receipt. This reads inside the transaction that writes, so there is
+   * no stale value to check — a second claimer BLOCKS on the lock, then sees the
+   * committed truth. It is refused for a real reason ("someone holds this") and
+   * never for a bookkeeping one ("your copy is old").
+   *
+   * That is the trade the throughput chart measures: this arm never refuses a
+   * writer that could have succeeded, and it makes every writer queue to find
+   * out.
+   */
+  private async assignLocking(
+    tx: TenantQuery,
+    id: string,
+    assigneeId: string | null,
+  ): Promise<ConversationSummary> {
+    const { rows } = await tx.query<ConversationWithAssigneeRow>(
+      `SELECT c.id, c.status, c.assignee_id, c.version,
+              u.name AS assignee_name, c.created_at, c.updated_at
+         FROM conversations c
+         LEFT JOIN memberships m ON m.id = c.assignee_id
+         LEFT JOIN users u       ON u.id = m.user_id
+        WHERE c.id = $1
+          FOR UPDATE OF c`,
+      [id],
+    );
+
+    const row = rows[0];
+    if (!row) throw new NotFoundException('conversation not found');
+
+    const heldByAnother =
+      assigneeId !== null &&
+      row.assignee_id !== null &&
+      row.assignee_id !== assigneeId;
+
+    if (heldByAnother) throw new ConflictException(conflictBody(row));
+
+    const updated = await tx.query<ConversationRow>(
+      `UPDATE conversations
+          SET assignee_id = $2::bigint,
+              version     = version + 1,
+              updated_at  = now()
+        WHERE id = $1
+    RETURNING id, status, assignee_id, version, created_at, updated_at`,
+      [id, assigneeId],
+    );
+
+    return toSummary(updated.rows[0]);
+  }
+
+  /**
+   * Zero rows updated, and the two reasons that can mean.
+   *
+   * The re-read is what separates "somebody beat you to it" from "there is no
+   * such conversation", and it is the second statement on this arm's conflict
+   * path. Collapsing them into one answer would be cheaper and would make the
+   * UI unable to say anything true: a 404 tells the client to remove the row, a
+   * 409 tells it to show a different owner.
+   *
+   * Same transaction as the failed UPDATE, so this cannot read a row the write
+   * could not see. 404 rather than 403 for another org's row, for the reason
+   * `get()` records: a 403 confirms the row exists.
+   */
+  private async refusal(
+    tx: TenantQuery,
+    id: string,
+  ): Promise<ConflictException | NotFoundException> {
+    const { rows } = await tx.query<ConversationWithAssigneeRow>(
+      `SELECT c.id, c.status, c.assignee_id, c.version,
+              u.name AS assignee_name, c.created_at, c.updated_at
+         FROM conversations c
+         LEFT JOIN memberships m ON m.id = c.assignee_id
+         LEFT JOIN users u       ON u.id = m.user_id
+        WHERE c.id = $1`,
+      [id],
+    );
+
+    const row = rows[0];
+    if (!row) return new NotFoundException('conversation not found');
+
+    return new ConflictException(conflictBody(row));
   }
 }

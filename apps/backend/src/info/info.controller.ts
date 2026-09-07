@@ -1,6 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { PostgresService } from '../postgres/postgres.service';
 import {
+  ASSIGN,
   KEYSET_TIEBREAK,
   LIST_STRATEGY,
 } from '../conversations/conversations.service';
@@ -30,6 +31,7 @@ export interface InfoResponse {
   arms: {
     listStrategy: string;
     keysetTiebreak: string;
+    assign: string;
     searchStrategy: string;
     idempotency: string;
     onConflict: string;
@@ -72,6 +74,7 @@ export class InfoController {
       arms: {
         listStrategy: LIST_STRATEGY,
         keysetTiebreak: KEYSET_TIEBREAK,
+        assign: ASSIGN,
         searchStrategy: SEARCH_STRATEGY,
         idempotency: IDEMPOTENCY,
         onConflict: ON_CONFLICT,

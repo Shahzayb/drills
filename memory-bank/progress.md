@@ -9,7 +9,8 @@ None.
 
 ## Next step
 
-Drill 14, or card 26 (the outbox) — drill 12 named the partial-failure problem and did not build it.
+Drill 15, or card 26 (the outbox) — drill 12 named the partial-failure problem and did not build it.
+Card 19 (entitlement cache) and SQ1 are drill 14's stated alternatives.
 
 ## Active plan
 
@@ -20,7 +21,7 @@ None open — every plan file in `plans/` is shipped. `history.md` lists them wi
 `pnpm docker:up`, then `pnpm db:migrate` and `pnpm db:seed` — or `pnpm db:reset` for both.
 Every instrument and toggle is listed in `techContext.md` under Commands.
 
-`pnpm db:test` runs the e2e suite inside the container (106 tests). Five suites are *expected* to
+`pnpm db:test` runs the e2e suite inside the container (118 tests). Five suites are *expected* to
 fail, and a green run of any of them means the switch stopped switching: `pnpm db:test:naive`
 (`LIST_STRATEGY=naive`) fails **two** query-budget assertions, `pnpm db:test:notiebreak`
 (`KEYSET_TIEBREAK=off`) fails **one** — the tie-block walk, which returns 9 of 12 rows with no error
@@ -30,7 +31,14 @@ fails **two** — the counter against the request count and against the ledger. 
 fails **one** for a different reason: not a broken switch, but the Redis arm's real failure mode — a
 concurrent duplicate gets a 202 instead of a conversation id. `db:test:constraint` and
 `db:test:donothing` are expected green (drill 12's DONE WHEN as a test), and so are
-`db:test:locking` and `db:test:serializable` (drill 13's).
+`db:test:locking` and `db:test:serializable` (drill 13's). Drill 14 adds two more:
+`pnpm db:test:lww` (`ASSIGN=lww`) fails **four** — every assertion in the concurrent block, because
+all twenty claimers are told they won — and `pnpm db:test:pessimistic` is expected green.
+
+`pnpm test:ui` runs the frontend's Playwright suite (3 tests) on the **host** against the running
+container. One-time setup: `pnpm exec playwright install chromium`. It also has a required red run —
+`ASSIGN=lww docker compose up -d nest_server && pnpm test:ui` fails the conflict test, because the
+losing browser is never told anything.
 
 `pnpm db:storm fire` and `pnpm db:quota fire` write rows into whichever org they measure and clean
 them up themselves, but a k6 `pnpm load ingest` run does **not** — k6 has no database connection.
@@ -59,8 +67,9 @@ or after a `VACUUM`.
 
 ## Known issues
 
-1. Frontend has no test runner — and it now has a `"use client"` component and a Route Handler with
-   no coverage at all. Drill 10 verified load-more by hand in a browser; nothing guards it.
+1. Frontend coverage is one page and one flow. Drill 14 gave it a test runner (Playwright,
+   `pnpm test:ui`) and three tests, all about the assign conflict. The Route Handler, load-more,
+   `/search` and the filters still have none.
 2. Backend: `HealthService`, `InfoController` and `RedisService` have no tests of their own — the
    e2e suites reach `/health` over HTTP but never exercise the failure branches. `PostgresService`
    is the exception: `schema.e2e-spec.ts` drives it directly.
@@ -105,6 +114,16 @@ or after a `VACUUM`.
 16. **Logging is now a cost to watch, not an absence.** `LOG_LEVEL=debug` in anything resembling
    production would be expensive, and `url` is logged with its query string in full — safe for
    today's parameters, not for a token or an email.
+17. **Appended pages do not converge.** `refresh()` in the assign Server Action re-renders page 1,
+   which is a live prop. Rows fetched by load-more live in `useState` and keep whatever they were
+   showing, so a claim on page 3 stays optimistic forever.
+18. **Nobody but the clicker is told.** A claim corrects one browser. Every other agent's inbox goes
+   on showing the ticket as unassigned until something re-renders it. Needs a subscription, and
+   drill 14 explicitly did not build one.
+19. **`version` is a raw integer on the wire.** It leaks a row's write rate and invites guessing.
+   `ETag` / `If-Match` / `412` is the standard shape for the same mechanism.
+20. **The `lww` arm is a live route to a silent data bug.** It is deliberate — a red run is the only
+   proof a concurrency test works — and it is an environment variable away from being served.
 
 ## Releases
 
@@ -115,6 +134,7 @@ or after a `VACUUM`.
 | [drill/11](https://github.com/Shahzayb/drills/releases/tag/drill/11) | 0.11.0 | `drill/11` | Full-text search, the GIN index, and the leakproof flag it depends on. |
 | [drill/12](https://github.com/Shahzayb/drills/releases/tag/drill/12) | 0.12.0 | none (no open issues to attach) | Idempotent ingest: unique constraint vs Redis `SETNX`, both hit exactly 3,000/10,000 under a concurrent duplicate storm. |
 | [drill/13](https://github.com/Shahzayb/drills/releases/tag/drill/13) | 0.13.0 | none (no open issues to attach) | The lost update: a read-modify-write counter loses 84 of 100 concurrent increments; atomic `UPDATE` shipped over `FOR UPDATE` and `SERIALIZABLE`. |
+| [drill/14](https://github.com/Shahzayb/drills/releases/tag/drill/14) | 0.14.0 | none (no open issues to attach) | Optimistic locking on assignment: 50 agents claim one ticket and a version check leaves exactly one winner, with the losing browser converging on the truth without a reload. **Tagged on the branch before the merge**, at the request of the release, so `drill/14` points at `chore(release): 0.14.0` rather than at a merge commit the way `drill/13` does. `--generate-notes` produced only a changelog link for that reason — there was no merged PR to attribute commits to — so the body was written by hand. |
 
 ## Preferences
 
