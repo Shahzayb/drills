@@ -7,7 +7,7 @@ it, and naive code is often a recorded decision rather than debt.
 pnpm monorepo: `apps/backend` (NestJS, raw `pg`, no ORM) and `apps/frontend` (Next.js App Router),
 orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose.
 
-## Progression — 14 of 32
+## Progression
 
 | # | Drill | Result worth remembering |
 |---|---|---|
