@@ -134,6 +134,7 @@ or after a `VACUUM`.
 | [drill/11](https://github.com/Shahzayb/drills/releases/tag/drill/11) | 0.11.0 | `drill/11` | Full-text search, the GIN index, and the leakproof flag it depends on. |
 | [drill/12](https://github.com/Shahzayb/drills/releases/tag/drill/12) | 0.12.0 | none (no open issues to attach) | Idempotent ingest: unique constraint vs Redis `SETNX`, both hit exactly 3,000/10,000 under a concurrent duplicate storm. |
 | [drill/13](https://github.com/Shahzayb/drills/releases/tag/drill/13) | 0.13.0 | none (no open issues to attach) | The lost update: a read-modify-write counter loses 84 of 100 concurrent increments; atomic `UPDATE` shipped over `FOR UPDATE` and `SERIALIZABLE`. |
+| [drill/14](https://github.com/Shahzayb/drills/releases/tag/drill/14) | 0.14.0 | none (no open issues to attach) | Optimistic locking on assignment: 50 agents claim one ticket and a version check leaves exactly one winner, with the losing browser converging on the truth without a reload. **Tagged on the branch before the merge**, at the request of the release, so `drill/14` points at `chore(release): 0.14.0` rather than at a merge commit the way `drill/13` does. `--generate-notes` produced only a changelog link for that reason — there was no merged PR to attribute commits to — so the body was written by hand. |
 
 ## Preferences
 
