@@ -3,7 +3,7 @@
 Card 14. The drill is deliberately both halves: a version check on the server, and a UI that has
 to un-tell an optimistic update it already showed.
 
-**Status:** in progress
+**Status:** shipped
 
 ---
 
@@ -266,13 +266,13 @@ it closes `memory-bank/progress.md` known issue 1 for this page.
 
 - `plans/2026-09-08_drill-14-optimistic-locking.md` — this plan, written before any code, with
   predictions recorded **before** the measurements and a Results section filled in after.
-- `drills/14-optimistic-locking.md` — the learning guide. **First file in `drills/`**, so the
-  directory is created here. Required sections: `If you read nothing else` (with the diagram),
-  `Is this production ready?`, `Honest gaps`, `What I'd do differently at 10x`, and — new this time
-  and previously missed — a **Tech stack cheat sheet** covering what is new or relevant across
-  SQL/Postgres, NestJS, Next.js, Node.js and React. Every number is accompanied by the command that
-  produced it. The card's three WRITEUP questions get answered explicitly, including describing what
-  the losing user sees and then either defending it as good UX or admitting it is not.
+- The learning guide, written outside the repository — `drills/` is gitignored by an existing
+  decision, so a committed file must not link into it. Required sections: `Is this production
+  ready?`, `Honest gaps`, `What I'd do differently at 10x`, and — new this time and previously
+  missed — a **Tech stack cheat sheet** covering what is new or relevant across SQL/Postgres,
+  NestJS, Next.js, Node.js and React. Every number is accompanied by the command that produced it.
+  The card's three WRITEUP questions get answered explicitly, including describing what the losing
+  user sees and then either defending it as good UX or admitting it is not.
 - The diagram: both throughput curves (optimistic and pessimistic, successful writes/s against 2,
   10, 50 concurrent claimers) on one chart, with the crossover marked — plus a sequence diagram of
   the two-agent race showing where the optimistic lie is told and where it expires.
@@ -301,6 +301,118 @@ Written down so the drill can report which were wrong, which is the part worth r
    arm.
 
 ---
+
+## Results
+
+Every number below has the command that produced it. Runs are in
+`apps/backend/db/reports/`.
+
+### The DONE WHEN, over HTTP
+
+```bash
+ASSIGN=<arm> docker compose up -d nest_server && pnpm db:claim fire
+```
+
+50 distinct agents, one unassigned conversation, every one of them sending the version they all
+read. 50 in flight, confirmed by the peak counter.
+
+| arm | 200 claimed | 409 conflict | 5xx | version | verdict |
+|---|---|---|---|---|---|
+| `lww` | **50** | 0 | 0 | 1 → **51** | exits 1 |
+| `optimistic` | **1** | 49 | 0 | 1 → 2 | exits 0 |
+| `pessimistic` | **1** | 49 | 0 | 1 → 2 | exits 0 |
+
+The `lww` run prints all fifty membership ids under `told they won`. Forty-nine of those agents
+are about to start typing a reply into a ticket that belongs to somebody else, and nothing
+anywhere logged a word about it.
+
+### The instrument found a bug in the endpoint before it found one in the database
+
+The first `fire` run on the optimistic arm reported **zero** winners against 49 conflicts — on a
+row that had plainly been claimed, by an assignee the same run printed. Nest returns **201** from
+`@Post()` by default and the assertion was written against 200. Nothing was created, so 200 was
+the right answer and `@HttpCode(200)` was the fix. Worth keeping: the assertion that caught it was
+about the response, and the thing it caught was in the response.
+
+### Contention: 2, 10 and 50 claimers on one row
+
+```bash
+pnpm db:claim bench --levels 2,10,50 --rounds 3 --name drill14-final
+```
+
+Raw SQL, 5s per cell, 3 interleaved rounds, medians. Workers claim then release the same row, so
+successful writes stay legal at every level. `claims/s` is **successful** writes.
+
+| arm | claimers | claims/s | conflict % | round trips / write | p50 | p95 | p99 |
+|---|---|---|---|---|---|---|---|
+| `lww` | 2 | 4,088 | 0.0 | 2.00 | 0.43 | 0.71 | 1.38 |
+| `lww` | 10 | 2,709 | 0.0 | 2.00 | 3.04 | 8.10 | 12.79 |
+| `lww` | 50 | 1,765 | 0.0 | 2.00 | 23.47 | 67.69 | 93.07 |
+| `optimistic` | 2 | **2,338** | 67.6 | 6.18 | 0.25 | 0.53 | 0.73 |
+| `optimistic` | 10 | **820** | 96.3 | 54.78 | 0.28 | 1.36 | 1.80 |
+| `optimistic` | 50 | **515** | 98.1 | 105.17 | 1.63 | 3.23 | 4.75 |
+| `pessimistic` | 2 | 1,963 | 66.6 | 15.99 | 0.29 | 0.64 | 0.87 |
+| `pessimistic` | 10 | 570 | 94.4 | 75.27 | 0.92 | 1.68 | 2.13 |
+| `pessimistic` | 50 | 181 | 98.4 | 251.49 | 5.26 | 7.06 | 8.44 |
+
+### The interleaving, deterministically
+
+```bash
+pnpm db:claim race
+```
+
+Both agents read version 1 before either writes.
+
+| arm | A claim | B claim | assignee | version | one winner |
+|---|---|---|---|---|---|
+| `lww` | claimed | **claimed** | B | 3 | **no** |
+| `optimistic` | claimed | conflict | A | 2 | yes |
+| `pessimistic` | claimed | conflict | A | 2 | yes |
+
+Second experiment, the one that was not expected: A opens a transaction, takes the row and holds
+it for 250 ms. B claims.
+
+| arm | B waited | outcome |
+|---|---|---|
+| `optimistic` | **254 ms** | conflict |
+| `pessimistic` | 257 ms | conflict |
+
+### The migration
+
+```bash
+docker compose exec -T postgres_db psql -U postgres -d drills   # \timing on, inside a rolled-back transaction
+```
+
+2,500,000 rows, 250 MB heap.
+
+| statement | time |
+|---|---|
+| `ADD COLUMN version integer NOT NULL DEFAULT 1` | **2.398 ms** |
+| the same column with a volatile default | **2,563.752 ms** |
+
+1,069×, and the only difference is whether Postgres can store the default in the catalog.
+
+### Predictions, and what happened
+
+| # | prediction | outcome |
+|---|---|---|
+| 1 | the constant-default add does not rewrite | **right** — 2.4 ms against 2.56 s for the rewrite |
+| 2 | `lww` gives every claimer a 200 | **right** — 50 of 50, 0 conflicts, version +50 |
+| 3 | optimistic beats pessimistic at 2 | **right** — 2,338 against 1,963 claims/s |
+| 4 | pessimistic wins at 50 | **WRONG** — 515 against 181, optimistic is 2.8× ahead |
+| 5 | the curves cross near 10 | **WRONG** — they never cross; the gap widens with contention |
+| 6 | optimistic's latency looks better everywhere | **right**, and it is a trap — see the drill |
+
+Predictions 4 and 5 are the drill. The textbook crossover assumes the optimistic retry throws away
+*work*; here the wasted attempt is a single failed `UPDATE`, while the pessimistic arm pays
+`BEGIN`/`SELECT FOR UPDATE`/`UPDATE`/`COMMIT` — four round trips against one — for every write it
+does land. On this workload the pessimistic arm has no case at any level measured.
+
+The experiment that changed the most: **optimistic does not avoid the row lock.** Its `UPDATE`
+takes one too, and behind an open transaction it waits 254 ms to be refused where the pessimistic
+arm waits 257. What optimistic locking avoids is holding a lock across the *human* time between
+rendering a page and clicking a button — not the lock itself.
+
 
 ## Verification
 
