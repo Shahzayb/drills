@@ -1,0 +1,31 @@
+claim fire  api http://nest_server:3002
+  ORG_ID               1                            (default)
+  REQUESTS             50                           (default)
+  CONCURRENCY          50                           (default)
+  LEVELS               2,10,50                      (default)
+  ROUNDS               3                            (default)
+  SECONDS              5                            (default)
+  ONLY                 (none)                       (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","assign":"optimistic","searchStrategy":"fts","idempotency":"both","onConflict":"update","idempotencyTtlSeconds":"86400","quota":"atomic","quotaMaxRetries":"20","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  tag claim-mtrriqao  (cleanup key, if this run dies)
+
+  claimers            50 distinct agents, one row
+  concurrency         50 requested, 50 peak in flight
+  wall clock          0.10s  501 req/s
+
+  200 claimed         0 (expected 1)
+  409 conflict        49 (expected 49)
+  400 bad request     0
+  404 not found       0
+  5xx                 0
+  transport failures  0
+
+  version             1 -> 2 (expected 2)
+  final assignee      1781
+  told they won       (nobody)
+
+  p50 / p95 / p99     84.93 / 93.32 / 93.92 ms
+
+  cleaned up          1 conversation, 50 agents

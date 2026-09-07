@@ -1,0 +1,32 @@
+claim race  api http://nest_server:3002
+  ORG_ID               1                            (default)
+  REQUESTS             50                           (default)
+  CONCURRENCY          50                           (default)
+  LEVELS               2,10,50                      (default)
+  ROUNDS               3                            (default)
+  SECONDS              5                            (default)
+  ONLY                 (none)                       (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","assign":"optimistic","searchStrategy":"fts","idempotency":"both","onConflict":"update","idempotencyTtlSeconds":"86400","quota":"atomic","quotaMaxRetries":"20","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  two agents, one unassigned ticket, both with the inbox open at version 1
+
+     arm           A read  B read   A claim      B claim        assignee  version  ok
+     lww                1       1   claimed    claimed          1780        3  NO
+     optimistic         1       1   claimed    conflict         1779        2  yes
+     pessimistic        1       1   claimed    conflict         1779        2  yes
+
+     On `lww` both agents are told `claimed` and the row belongs to B. A is wrong,
+     nothing errored, and no log line anywhere says so. That is the bug: not a
+     crash, an agreement between the database and the application that one of the
+     two answers may quietly be a lie.
+
+  2. how long the loser waits to be refused
+
+     arm           B waited   while A held the row open
+     optimistic        254ms   conflict (A held it for 250ms)
+     pessimistic       257ms   conflict (A held it for 250ms)
+
+     Optimistic does not avoid the row lock — its UPDATE takes one too, and it
+     waits behind an open transaction exactly as long. What it avoids is holding
+     a lock across the human time between rendering a page and clicking a button.
