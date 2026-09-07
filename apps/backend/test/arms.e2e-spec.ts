@@ -51,6 +51,11 @@ describe('GET /info arms (e2e)', () => {
     expect(body.arms).toEqual({
       listStrategy: process.env.LIST_STRATEGY === 'naive' ? 'naive' : 'batched',
       keysetTiebreak: process.env.KEYSET_TIEBREAK === 'off' ? 'off' : 'on',
+      assign: ['lww', 'optimistic', 'pessimistic'].includes(
+        process.env.ASSIGN ?? '',
+      )
+        ? process.env.ASSIGN
+        : 'optimistic',
       searchStrategy: process.env.SEARCH_STRATEGY === 'like' ? 'like' : 'fts',
       idempotency: ['none', 'constraint', 'redis', 'both'].includes(
         process.env.IDEMPOTENCY ?? '',
