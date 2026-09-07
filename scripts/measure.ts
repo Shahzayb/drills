@@ -255,6 +255,57 @@ const INSTRUMENTS: Record<string, Instrument> = {
     ],
   },
 
+  claim: {
+    file: 'db/claim.mts',
+    blurb:
+      'two agents claim one ticket: last-write-wins vs a version check (drill 14)',
+    subcommands: {
+      fire: 'N concurrent claims on ONE row through the API — asserts and exits 1',
+      bench:
+        'conflict rate and successful-write throughput at each contention level',
+      race: 'two sessions, a controlled interleaving, and what each arm does',
+    },
+    knobs: [
+      { flag: 'org', env: 'ORG_ID', def: '1', help: 'which org owns the row' },
+      {
+        flag: 'requests',
+        env: 'REQUESTS',
+        def: '50',
+        help: 'fire: claimers racing for the row',
+      },
+      {
+        flag: 'concurrency',
+        env: 'CONCURRENCY',
+        def: '50',
+        help: 'fire: how many are in flight at once',
+      },
+      {
+        flag: 'levels',
+        env: 'LEVELS',
+        def: '2,10,50',
+        help: 'bench: the contention ladder',
+      },
+      {
+        flag: 'rounds',
+        env: 'ROUNDS',
+        def: '3',
+        help: 'bench: measurements per cell',
+      },
+      {
+        flag: 'seconds',
+        env: 'SECONDS',
+        def: '5',
+        help: 'bench: how long each cell runs',
+      },
+      {
+        flag: 'only',
+        env: 'ONLY',
+        def: '(all)',
+        help: 'bench: substring filter over arm labels',
+      },
+    ],
+  },
+
   bench: {
     file: 'db/bench-copy.mts',
     blurb: 'INSERT vs multi-row INSERT vs COPY, on a scratch table',
