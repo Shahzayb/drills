@@ -1,4 +1,4 @@
-import { fetchConversations, isCursorPage } from '@/lib/api';
+import { fetchAgents, fetchConversations, isCursorPage } from '@/lib/api';
 import { logger, since } from '@/lib/logger';
 import { renderStartedAt } from '@/lib/render-timing';
 import { after } from 'next/server';
@@ -53,17 +53,27 @@ export default async function ConversationsPage(
   // Anything that is not the literal 'offset' is keyset — a typo'd mode lands
   // on the default rather than on an error page.
   const mode = first(searchParams.mode, 'keyset') === 'offset' ? 'offset' : 'keyset'; // prettier-ignore
+  // Card 14. Who "assign to me" means, and the same stub as `?org` above: there
+  // is no auth here, so the acting agent is a URL parameter. Two browser windows
+  // with different `?me` is how the two-agent race is reproduced by hand.
+  const me = first(searchParams.me, '');
 
-  const result = await fetchConversations({
-    orgId,
-    page,
-    pageSize,
-    sort,
-    status,
-    updatedFrom,
-    updatedTo,
-    paging: mode === 'keyset' ? 'keyset' : undefined,
-  });
+  const [result, agents] = await Promise.all([
+    fetchConversations({
+      orgId,
+      page,
+      pageSize,
+      sort,
+      status,
+      updatedFrom,
+      updatedTo,
+      paging: mode === 'keyset' ? 'keyset' : undefined,
+    }),
+    fetchAgents(orgId),
+  ]);
+
+  const agentList = agents.ok ? agents.agents : [];
+  const meName = agentList.find((agent) => agent.id === me)?.name ?? null;
 
   // Timed *inside* the callback on purpose: `after` runs once the response is
   // finished, and the flush is part of the render. Stopping the clock before
@@ -109,6 +119,9 @@ export default async function ConversationsPage(
       ['status', status],
       ['updatedFrom', updatedFrom],
       ['updatedTo', updatedTo],
+      // Carried like every other bit of state: switching sort or page must not
+      // silently log you out of being an agent.
+      ['me', me],
     ] as const) {
       const chosen = overrides[key] ?? value;
       if (chosen) next.set(key, chosen);
@@ -191,6 +204,43 @@ export default async function ConversationsPage(
             ))}
           </nav>
 
+          {/* Card 14's "me". Links, not a dropdown, for the same reason the
+              sort and status navs are links: this page's filters ship no
+              JavaScript, and the claim button is the only thing on it that
+              needs any. Truncated to the first eight — a real picker is a
+              search box, and the API already caps the list at 50. */}
+          <nav className="flex flex-wrap items-baseline gap-3">
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              acting as
+            </span>
+            {agentList.slice(0, 8).map((agent) => (
+              <a
+                key={agent.id}
+                href={linkTo({ me: agent.id })}
+                data-agent={agent.id}
+                className={
+                  agent.id === me
+                    ? 'font-medium text-black underline dark:text-zinc-50'
+                    : 'text-zinc-500 underline hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50'
+                }
+              >
+                {agent.name}
+              </a>
+            ))}
+            {me ? (
+              <a
+                href={linkTo({ me: '' })}
+                className="text-xs text-zinc-500 underline hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50"
+              >
+                nobody
+              </a>
+            ) : (
+              <span className="text-xs text-zinc-400 dark:text-zinc-600">
+                pick one to enable “assign to me”
+              </span>
+            )}
+          </nav>
+
           {/* A GET form, so the range lands in the URL and the page stays
               shareable and cacheable — and, like everything else here, needs no
               JavaScript. The hidden inputs carry the state the form does not
@@ -202,6 +252,7 @@ export default async function ConversationsPage(
             <input type="hidden" name="pageSize" value={pageSize} />
             <input type="hidden" name="sort" value={sort} />
             <input type="hidden" name="status" value={status} />
+            <input type="hidden" name="me" value={me} />
             <input type="hidden" name="page" value="1" />
             <label className="text-xs text-zinc-500 dark:text-zinc-400">
               updated from{' '}
@@ -250,6 +301,8 @@ export default async function ConversationsPage(
               initialCursor={
                 isCursorPage(result.page) ? result.page.nextCursor : null
               }
+              me={me || null}
+              meName={meName}
               query={{
                 org: orgId,
                 pageSize,

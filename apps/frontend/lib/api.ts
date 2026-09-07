@@ -120,8 +120,26 @@ export interface Conversation {
   status: string;
   assigneeId: string | null;
   assigneeName: string | null;
+  /** Card 14's optimistic-locking token. Sent back with a claim; the API
+   *  refuses the write if it has moved. */
+  version: number;
   tags: Tag[];
   createdAt: string;
+  updatedAt: string;
+}
+
+/** Somebody a conversation can be assigned to. `id` is a membership id, which
+ *  is what `assigneeId` holds — not a user id. */
+export interface Agent {
+  id: string;
+  name: string;
+}
+
+/** What the API says is true, sent with the 409 that refuses a claim. */
+export interface ConflictState {
+  assigneeId: string | null;
+  assigneeName: string | null;
+  version: number;
   updatedAt: string;
 }
 
@@ -312,6 +330,110 @@ export async function searchMessages(params: {
       source,
       requestId,
       durMs: error instanceof UpstreamError ? error.durMs : 0,
+    };
+  }
+}
+
+export type AgentsResult =
+  { ok: true; agents: Agent[] } | { ok: false; error: string };
+
+/**
+ * Who can be assigned a conversation in this org.
+ *
+ * There is no auth in this repo, so "assign to me" needs a "me" that comes from
+ * somewhere. This list is what the page turns into a picker, the same way `?org`
+ * stands in for a session. Failure returns an empty list rather than throwing —
+ * an inbox with no agent picker is degraded, not broken.
+ */
+export async function fetchAgents(orgId: string): Promise<AgentsResult> {
+  const source = `${API_URL}/conversations/agents`;
+  const requestId = await getRequestId();
+
+  try {
+    const { response } = await callApi(source, requestId, {
+      headers: { 'x-org-id': orgId },
+    });
+    if (!response.ok)
+      return { ok: false, error: `API responded ${response.status}` };
+    return { ok: true, agents: (await response.json()) as Agent[] };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export type AssignResult =
+  | { ok: true; conversation: Conversation }
+  | { ok: false; status: number; message: string; current?: ConflictState };
+
+/**
+ * Claim or release a conversation. Card 14.
+ *
+ * A 409 is a RESULT, not an exception. Throwing here would send the losing
+ * client to an error boundary — a whole-page failure for the one outcome the UI
+ * is specifically built to explain — so the conflict comes back as a value with
+ * the server's own truth attached.
+ *
+ * Everything else in this module is a GET. This is the one write, and it still
+ * goes through `callApi` so the org header, `x-request-id` and the W3C
+ * `traceparent` are attached; a hand-rolled fetch would drop all three without
+ * saying so.
+ */
+export async function assignConversation(params: {
+  orgId: string;
+  id: string;
+  assigneeId: string | null;
+  version: number;
+}): Promise<AssignResult> {
+  const source = `${API_URL}/conversations/${params.id}/assign`;
+  const requestId = await getRequestId();
+
+  try {
+    const { response } = await callApi(source, requestId, {
+      method: 'POST',
+      headers: {
+        'x-org-id': params.orgId,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        assigneeId: params.assigneeId,
+        version: params.version,
+      }),
+    });
+
+    if (response.ok) {
+      return {
+        ok: true,
+        conversation: (await response.json()) as Conversation,
+      };
+    }
+
+    // The API's 409 body carries `current`; its 400 and 404 bodies do not. Both
+    // shapes are read through one parse so a non-JSON error page (a proxy, a
+    // crash) degrades to the status line instead of throwing in the catch below
+    // and being reported as a network failure.
+    const body = (await response.json().catch(() => null)) as {
+      message?: string | string[];
+      current?: ConflictState;
+    } | null;
+
+    const message = Array.isArray(body?.message)
+      ? body.message.join(', ')
+      : (body?.message ?? `API responded ${response.status}`);
+
+    return {
+      ok: false,
+      status: response.status,
+      message,
+      current: body?.current,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      message: error instanceof Error ? error.message : String(error),
     };
   }
 }
