@@ -437,3 +437,103 @@ export async function assignConversation(params: {
     };
   }
 }
+
+export interface ImportJob {
+  id: string;
+  filename: string;
+  byteSize: number;
+  status: 'pending' | 'running' | 'succeeded' | 'failed';
+  mode: string;
+  batchRows: number;
+  rowsRead: number;
+  rowsWritten: number;
+  rowsSkipped: number;
+  resumeRow: number;
+  peakRssBytes: number | null;
+  error: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ImportsResult =
+  { ok: true; jobs: ImportJob[] } | { ok: false; error: string };
+
+/** This org's import jobs, newest first. Card 15. */
+export async function fetchImports(orgId: string): Promise<ImportsResult> {
+  const source = `${API_URL}/imports`;
+  const requestId = await getRequestId();
+
+  try {
+    const { response } = await callApi(source, requestId, {
+      headers: { 'x-org-id': orgId },
+    });
+    if (!response.ok)
+      return { ok: false, error: `API responded ${response.status}` };
+    return { ok: true, jobs: (await response.json()) as ImportJob[] };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export type UploadResult =
+  { ok: true; job: ImportJob } | { ok: false; status: number; message: string };
+
+/**
+ * Hand a CSV to the API. Card 15.
+ *
+ * `body` is a web `ReadableStream`, not a string or a Buffer, and `duplex:
+ * 'half'` is what undici requires before it will send one. That combination is
+ * the whole reason this is a Route Handler rather than a Server Action: Next
+ * buffers a Server Action's body and caps it at `serverActions.bodySizeLimit`,
+ * default 1MB, so the streaming import would have a 200MB bug one tier above
+ * the code that fixed it.
+ *
+ * `duplex` is missing from the DOM `RequestInit` type, hence the cast. It is
+ * part of the fetch standard and Node implements it.
+ */
+export async function uploadImport(params: {
+  orgId: string;
+  filename: string;
+  body: ReadableStream<Uint8Array>;
+}): Promise<UploadResult> {
+  const source = `${API_URL}/imports`;
+  const requestId = await getRequestId();
+
+  try {
+    const { response } = await callApi(source, requestId, {
+      method: 'POST',
+      headers: {
+        'x-org-id': params.orgId,
+        'x-filename': params.filename,
+        'content-type': 'text/csv',
+      },
+      body: params.body,
+      duplex: 'half',
+    } as RequestInit);
+
+    if (response.ok) return { ok: true, job: (await response.json()) as ImportJob }; // prettier-ignore
+
+    const body = (await response.json().catch(() => null)) as {
+      message?: string | string[];
+    } | null;
+
+    return {
+      ok: false,
+      status: response.status,
+      message: Array.isArray(body?.message)
+        ? body.message.join(', ')
+        : (body?.message ?? `API responded ${response.status}`),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}

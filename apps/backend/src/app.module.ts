@@ -3,6 +3,7 @@ import { APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import { ConversationsModule } from './conversations/conversations.module';
 import { HealthModule } from './health/health.module';
+import { ImportsModule } from './imports/imports.module';
 import { InfoModule } from './info/info.module';
 import { IngestModule } from './ingest/ingest.module';
 import { loggerOptions } from './observability/logger.options';
@@ -25,6 +26,7 @@ import { SearchModule } from './search/search.module';
     ConversationsModule,
     SearchModule,
     IngestModule,
+    ImportsModule,
   ],
   providers: [
     {
