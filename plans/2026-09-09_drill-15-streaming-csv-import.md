@@ -262,13 +262,199 @@ New route `app/imports/page.tsx`, plus `app/api/imports/route.ts`.
 
 ## Results
 
-_Written as the measurements land._
+Every number below is a report directory under `apps/backend/db/reports/`, named
+by its `NAME` knob. All of them are org 1 on the seeded 2.5M-row database.
+
+### The DONE WHEN
+
+| file | rows | HTTP answer | wall clock | peak app RSS |
+|---|---|---|---|---|
+| 20 MB | 72,517 | **202 in 0.06s** | 4.36s | **123.3 MB** |
+| 200 MB | 719,503 | **202 in 0.39s** | 42.70s | **129.8 MB** |
+| 400 MB | 1,434,889 | **202 in 0.89s** | 87.44s | **116.5 MB** |
+
+Twenty times the file moves peak RSS by **-5.5%**. Doubling 200MB to 400MB moved
+it *down*, from 129.8 to 116.5 MB, so what is being measured there is GC timing
+rather than file size. Wall clock is linear: 42.70s to 87.44s is 2.05x for 2x the
+rows, at **16,400 rows/s** end to end through the endpoint.
+
+### The naive arm does not get slow. It dies in 2.6 seconds.
+
+`IMPORT=buffer` on the 200MB file never wrote a row. The upload finished, the
+worker called `readFile` and then parsed, and the process was gone 2.63 seconds
+later with `FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap
+out of memory`. All six assertions failed, including the two that need a job to
+have run at all.
+
+At 20MB the same arm works and can be compared:
+
+| arm | HTTP answer | wall clock | peak app RSS |
+|---|---|---|---|
+| `buffer` | 200 in **35.08s** | 35.08s | **233.9 MB** |
+| `stream` | 202 in **0.06s** | 4.36s | **123.3 MB** |
+
+**8.0x the wall clock, 1.9x the memory, and 585x the time to first answer** — on
+a file one tenth the size of the one the card is about.
+
+### Prediction 1 was wrong, and the correction is the better fact
+
+The container was **not** OOM-killed. `docker inspect` reports
+`OOMKilled=false`, `RestartCount=0`, and the container stayed up. V8's own heap
+limit fired first, at 511MB, while `mem_limit` is 1024MB.
+
+That limit is derived from the cgroup, and it is exactly half of it:
+
+```bash
+for LIM in 512m 1g 2g 4g; do docker run --rm -m $LIM drills-nest_server \
+  node -e "console.log(require('v8').getHeapStatistics().heap_size_limit/1048576, require('os').totalmem()/1048576)"; done
+```
+
+| `mem_limit` | V8 `heap_size_limit` | `os.totalmem()` |
+|---|---|---|
+| 512m | 259.0 MB | 7935 MB |
+| 1g | **524.0 MB** | 7935 MB |
+| 2g | 1048.0 MB | 7935 MB |
+| 4g | 2096.0 MB | 7935 MB |
+
+So **`os.totalmem()` lies inside a container and V8 does not.** Node reads the
+host's `/proc/meminfo`, which is not namespaced, and reports 8GB every time;
+V8 reads the cgroup and sizes its heap at half the limit. Two numbers, one of
+them the actual constraint. The symptoms differ too: a V8 heap-limit crash
+writes a `<--- Last few GCs --->` report and a stack trace, a cgroup OOM is a
+silent SIGKILL. Which one you got decides whether the lever is
+`--max-old-space-size` or the container limit, and here neither fixes anything —
+both just move the wall.
+
+### What a crashed import leaves behind
+
+The job row survives, because it is written before the work starts. It is stuck
+on `status = 'running'` forever, with `rows_read = 0`, and the `/imports` page
+polls it every two seconds for as long as the tenant leaves the tab open. Nothing
+marks it failed, because the code that would have done that was in the process
+that died. A worker needs a lease and a heartbeat; this one has neither, and it
+is recorded as a gap rather than patched over.
+
+### What set the batch size: a knee, then a wall
+
+`pnpm db:import bench`, 100,000 rows on an unlogged scratch table, arms
+interleaved, median of 3.
+
+| arm | ms | rows/s | peak RSS |
+|---|---|---|---|
+| `insert-per-row` | 7046.4 | 14,192 | 140.0 MB |
+| `insert-batch-100` | 432.3 | 231,345 | 142.3 MB |
+| **`insert-batch-1000`** | **343.6** | **291,010** | 143.1 MB |
+| `insert-batch-5000` | 376.2 | 265,805 | 149.3 MB |
+| `insert-batch-10000` | 392.7 | 254,651 | 151.1 MB |
+| `insert-batch-20000` | — | — | `08P01 bind message has 14465 parameter formats but 0 parameters` |
+| `copy` | 544.1 | 183,804 | 153.7 MB |
+
+Three findings, and two of them contradict the predictions.
+
+**The curve has a knee at 1,000 and then goes backwards.** 100 to 1,000 buys
+26%; 1,000 to 10,000 *loses* 12.5%. Batching is worth 20.5x over a per-row loop
+and the last 10x of batch size is worth nothing.
+
+**Prediction 4 held, and the error message is a lie.** The ceiling is the wire
+protocol's, not the planner's: a Bind message counts its parameters in an
+unsigned 16-bit integer. The insert binds four per row plus one shared `org_id`,
+so 16,383 rows is the last legal batch. At 20,000 rows it sends 80,001
+parameters, and 80001 mod 65536 is **14,465** — the number in the error, which
+appears nowhere in the request.
+
+**Prediction 5 was wrong: `COPY` lost.** 183,804 rows/s against batched
+`INSERT`'s 291,010 — batched INSERT is **1.58x faster**. Drill 04's "COPY beats
+INSERT" is still true against the shape it measured (a per-row loop, 13.0x here)
+and is false against a batch of 1,000. The difference is where the work is:
+`COPY FROM STDIN` makes Node serialise every row to tab-delimited text through a
+generator and a stream, and at this row count that per-row cost in JavaScript
+outweighs the per-statement cost it removes.
+
+### Mid-import failure: resume or restart
+
+`pnpm db:import resume` — 100,000 rows, an unparseable `created_at` at row
+40,000, batch 1,000.
+
+```
+error          row 40001: invalid input syntax for type timestamp with time zone: "not-a-timestamp"
+resume_row     39,000        <- committed
+rows_read      40,000        <- parsed
+conversations  39,000
+```
+
+`rows_read` is exactly one batch ahead of `resume_row`, which is why they are two
+columns. The batch that contained the poison rolled back whole, so what is
+durable is a batch boundary and the database holds exactly `resume_row` rows.
+
+The retry then **fails at the same row and writes nothing**. A retry is not a
+repair. Fixing the file and re-uploading writes the missing 61,000, skips the
+39,000 already there, and lands at exactly 100,000.
+
+Both fail-modes reach the identical end state, and they differ only in cost:
+
+| `IMPORT_ON_FAIL` | retry wall clock | end state |
+|---|---|---|
+| `resume` | **0.01s** | failed, `resume_row` 39,000, 39,000 rows |
+| `restart` | **0.65s** | failed, `resume_row` 39,000, 39,000 rows |
+
+65x, and the 0.64s is the cost of re-walking 39,000 rows that all skip. Skipping
+runs at ~60,000 rows/s against ~19,000 rows/s for writing, so a restart is
+roughly a third the price of the original import and it is linear in the cursor.
+
+**What the schema needs for this is one column**, and it needs the column to be
+written by the transaction that committed the rows it counts. What resume does
+*not* save is the parse: `from` skips emitting records, not reading them, so a
+resume at row 400,000 still runs the CSV parser over 400,000 rows. Making that
+cheap needs a byte offset and a parser that reports record boundaries.
+
+### Predictions, and what happened
+
+| # | Prediction | Outcome |
+|---|---|---|
+| 1 | `buffer` OOM-kills the container | **Wrong.** V8's heap limit fired at 511MB, `OOMKilled=false`, and the limit is half the cgroup's |
+| 2 | Streaming peak RSS 120-200MB | **Right.** 116.5-129.8 MB across a 20x range of file sizes |
+| 3 | Doubling the file moves RSS <10% | **Right**, and it moved *down* 10.3% |
+| 4 | A hard parameter wall, not a curve | **Right**, at 16,383 rows rather than the predicted ~10,900, and the error wraps |
+| 5 | `COPY` beats batched `INSERT` 2-4x | **Wrong.** Batched `INSERT` is 1.58x faster |
+| 6 | Postgres dominates wall clock | **Right.** Batching alone bought 20.5x, so the round trips were the cost |
+
+### Two bugs the measurements found
+
+**The generator wrote unquoted message bodies**, and the corpus writes real
+sentences, which contain commas. The first 200MB file failed on line 5 with
+`Invalid Record Length: columns length is 6, got 7`. A hand-rolled line splitter
+would have accepted that file and written the wrong rows.
+
+**`generate()` read its byte bound as a bare `bytes < targetBytes`**, so the
+`resume` subcommand — which passes a row count and leaves the byte target at
+zero — wrote an empty file. Every assertion in the run passed against nothing.
+Drill 08's rule again: a check that stops checking goes green.
+
+### The red arms
+
+`pnpm db:test:buffer` fails **4**, not the 3 the predictions expected. The fourth
+is the retry route answering 500 instead of 202, because the work it does
+synchronously is what throws. `pnpm db:test:restart` is green, and a red arm
+expected to pass is the point: both answers to the failure question are correct.
+
+Backend suite 118 -> **131**.
 
 ## Verification
 
 The stack must be brought up from this worktree before any of it runs.
 `docker-compose.yml` has no `name:` key, so Compose derives the project from the
-directory, and `container_name:` is pinned — two stacks cannot run at once.
+directory, and `container_name:` is pinned — two stacks cannot run at once. Set
+`COMPOSE_PROJECT_NAME=drills` on every compose and `pnpm db:*` call to reuse the
+existing project, and therefore the seeded volume, with this tree's bind mounts.
+
+Two operational facts that cost a run each:
+
+- **Recreating the container wipes `/tmp`**, so every arm switch loses both the
+  generated CSVs and the API's own spooled uploads. Regenerate after a switch.
+  `docker compose restart` keeps them; `up -d --force-recreate` does not.
+- **`nest start --watch` does not restart a process the heap limit killed.** The
+  container stays up and reports unhealthy, and the next run gets
+  `ECONNREFUSED`. Restart it after every `IMPORT=buffer` run.
 
 ```bash
 pnpm docker:rebuild          # csv-parse is a new dependency
@@ -283,11 +469,11 @@ Then, in order:
 ```bash
 pnpm db:import gen --mb 200
 IMPORT=buffer docker compose up -d nest_server && pnpm db:import fire   # expect exit 1
-docker compose up -d nest_server && pnpm db:import fire                 # expect exit 0
-pnpm db:import gen --mb 400 --out history-400mb.csv
-pnpm db:import fire --file history-400mb.csv                            # RSS must not move
+docker compose up -d nest_server && pnpm db:import gen --mb 200
+pnpm db:import fire                                                    # expect exit 0
+pnpm db:import gen --mb 400 --file history-400mb.csv
+pnpm db:import fire --file history-400mb.csv                           # RSS must not move
 pnpm db:import bench
-pnpm db:import gen --mb 20 --poison-at 400000 --out poisoned.csv
 pnpm db:import resume
 ```
 
