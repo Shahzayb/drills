@@ -1,0 +1,50 @@
+failing an import at row 40,000 of 100,000
+  ORG_ID               1                            (default)
+  MB                   200                          (default)
+  POISON_AT            0                            (default)
+  FILE                 history-200mb.csv            (default)
+  BATCHES              100,1000,5000,10000,20000    (default)
+  ROWS                 100000                       (default)
+  ROUNDS               3                            (default)
+  ONLY                 (none)                       (default)
+
+  server arm  IMPORT_ON_FAIL=resume batch=1000
+
+  poisoned  0.0 MB, 0 rows
+  clean     0.0 MB, 0 rows
+
+    0%  read 0  written 0  skipped 0  0.01s
+
+  after the failure
+    status         succeeded
+    error          null
+    resume_row     0
+    rows_read      0
+    conversations  0
+
+  FAIL  the job is marked failed
+  ok    the database holds exactly resume_row rows (0 vs 0)
+  ok    resume_row is on a batch boundary (0 % 1000)
+  ok    nothing past the poison row committed
+    0%  read 0  written 0  skipped 0  0.00s
+
+  after the retry
+    status         succeeded
+    resume_row     0
+    conversations  0
+    took           0.01s
+
+  FAIL  the retry fails at the same row — a retry is not a repair
+  ok    the retry double-wrote nothing (0 vs 0)
+    0%  read 0  written 0  skipped 0  0.00s
+
+  after re-uploading the fixed file
+    status         succeeded
+    rows_written   0
+    rows_skipped   0   <- already imported
+    conversations  0
+    took           0.01s
+
+  ok    the fixed file imports cleanly
+  ok    every row is present exactly once (0 of 0)
+  ok    it skipped exactly what was already there (0 vs 0)

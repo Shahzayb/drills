@@ -19,11 +19,14 @@ import { TenantDb } from '../src/tenancy/tenant-db.service';
  *
  * Two arms, and only one of them is expected to fail:
  *
- *   pnpm db:test:buffer    IMPORT=buffer          3 failures, and they are the
- *                          deliverable: the request is answered LATE, the
+ *   pnpm db:test:buffer    IMPORT=buffer          4 failures, and they are the
+ *                          deliverable: the request is answered LATE, one
+ *                          upload spends a query per row instead of one, the
  *                          durable state after a crash is an ARBITRARY row
- *                          rather than a batch boundary, and one upload spends
- *                          a query per row instead of one.
+ *                          rather than a batch boundary, and a retry answers
+ *                          500 rather than 202 because the work it does
+ *                          synchronously is what throws. The plan predicted
+ *                          three; the retry is the one it missed.
  *   pnpm db:test:restart   IMPORT_ON_FAIL=restart GREEN. Restarting from row
  *                          zero is slower and just as correct, because the
  *                          unique index makes every re-inserted row a no-op.

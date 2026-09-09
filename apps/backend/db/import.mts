@@ -193,7 +193,14 @@ async function generate(
   // stream bookkeeping, and the file this produces is identical either way.
   let pending = '';
 
-  while (bytes < targetBytes && (rowLimit === 0 || rows < rowLimit)) {
+  // Either bound stops it, and zero means "no bound" for both. `gen` sets a byte
+  // target; `resume` sets a row count and leaves the bytes at zero. Reading the
+  // byte bound as a bare `bytes < targetBytes` made the second case write an
+  // empty file and every assertion in `resume` pass against nothing.
+  while (
+    (targetBytes === 0 || bytes < targetBytes) &&
+    (rowLimit === 0 || rows < rowLimit)
+  ) {
     rows += 1;
 
     const closed = rnd() < 0.55;
@@ -208,10 +215,17 @@ async function generate(
     // experiment is what a transaction does when a statement fails.
     const created = rows === poisonAt ? 'not-a-timestamp' : createdAt;
 
+    // ALWAYS quoted, and that is not decoration. The corpus writes real
+    // sentences and real sentences contain commas — leaving the body bare made
+    // one row in four a seven-column record, which csv-parse rejected on line 5
+    // of the first 200MB file this generator produced. Every 97th row also
+    // carries an embedded newline, which is the case a line splitter cannot
+    // survive at all.
+    const quoted = body.replace(/"/g, '""');
     const message =
       rows % 97 === 0
-        ? `"${body.replace(/"/g, '""')}, and a second line:\nsteps to reproduce"`
-        : body;
+        ? `"${quoted}, and a second line:\nsteps to reproduce"`
+        : `"${quoted}"`;
 
     pending +=
       `hist-${rows},${closed ? 'closed' : 'open'},${created},${updatedAt},` +
@@ -281,27 +295,118 @@ const headers = () => ({
   'x-org-id': ORG_ID,
 });
 
-/** Upload one file. Returns the job and how long the RESPONSE took, which is a
- *  different number from how long the import took and is the whole point. */
-async function upload(
-  path: string,
-): Promise<{ job: Job; status: number; responseMs: number }> {
+/**
+ * Upload one file. Returns the job and how long the RESPONSE took, which is a
+ * different number from how long the import took and is the whole point.
+ *
+ * A transport failure is a RESULT here, not an exception. `IMPORT=buffer` on a
+ * 200MB file kills the API process mid-request and the socket closes with no
+ * status at all — and a red run that throws a stack trace instead of printing
+ * its assertions is a red run nobody can read. `job: null` is that outcome, and
+ * `fire` recovers the state from the database instead. Same shape as
+ * db/storm.mts's `status = 0`.
+ */
+async function upload(path: string): Promise<{
+  job: Job | null;
+  status: number;
+  responseMs: number;
+  transportError: string | null;
+}> {
   const startedAt = performance.now();
 
-  const response = await fetch(`${API}/imports`, {
-    method: 'POST',
-    headers: { ...headers(), 'x-filename': 'history.csv' },
-    // A web stream, so the body is sent as it is read rather than buffered into
-    // one Buffer first. `duplex: 'half'` is mandatory for a streaming body and
-    // is not in the DOM RequestInit type, hence the cast.
-    body: Readable.toWeb(createReadStream(path)) as ReadableStream,
-    duplex: 'half',
-  } as RequestInit);
+  try {
+    const response = await fetch(`${API}/imports`, {
+      method: 'POST',
+      headers: { ...headers(), 'x-filename': 'history.csv' },
+      // A web stream, so the body is sent as it is read rather than buffered
+      // into one Buffer first. `duplex: 'half'` is mandatory for a streaming
+      // body and is not in the DOM RequestInit type, hence the cast.
+      body: Readable.toWeb(createReadStream(path)) as ReadableStream,
+      duplex: 'half',
+    } as RequestInit);
 
-  const responseMs = performance.now() - startedAt;
-  const body = (await response.json()) as Job;
+    const responseMs = performance.now() - startedAt;
+    const body = (await response.json()) as Job;
 
-  return { job: body, status: response.status, responseMs };
+    return {
+      job: body,
+      status: response.status,
+      responseMs,
+      transportError: null,
+    };
+  } catch (error) {
+    const cause = (error as { cause?: { code?: string } }).cause;
+    return {
+      job: null,
+      status: 0,
+      responseMs: performance.now() - startedAt,
+      transportError: `${cause?.code ?? 'transport failure'}: ${(error as Error).message}`,
+    };
+  }
+}
+
+/**
+ * The newest job row for this org, read straight from Postgres.
+ *
+ * The only way to see what a crashed import left behind: the API cannot answer
+ * because the API is what died. Note what this returns on the buffered arm —
+ * `status = 'running'`, forever, because the code that would have marked it
+ * failed was in the process the kernel took away. A real worker needs a lease
+ * and a heartbeat; this one has neither and that is a recorded gap.
+ */
+async function newestJob(): Promise<Job | null> {
+  const { rows } = await client.query<{
+    id: string;
+    filename: string;
+    byte_size: string;
+    status: Job['status'];
+    mode: string;
+    batch_rows: number;
+    rows_read: string;
+    rows_written: string;
+    rows_skipped: string;
+    resume_row: string;
+    peak_rss_bytes: string | null;
+    error: string | null;
+  }>(
+    `SELECT id, filename, byte_size, status, mode, batch_rows, rows_read,
+            rows_written, rows_skipped, resume_row, peak_rss_bytes, error
+       FROM import_jobs
+      WHERE org_id = $1::bigint
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [ORG_ID],
+  );
+
+  const row = rows[0];
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    filename: row.filename,
+    byteSize: Number(row.byte_size),
+    status: row.status,
+    mode: row.mode,
+    batchRows: row.batch_rows,
+    rowsRead: Number(row.rows_read),
+    rowsWritten: Number(row.rows_written),
+    rowsSkipped: Number(row.rows_skipped),
+    resumeRow: Number(row.resume_row),
+    peakRssBytes:
+      row.peak_rss_bytes === null ? null : Number(row.peak_rss_bytes),
+    error: row.error,
+  };
+}
+
+/** `upload`, for the callers whose files are small enough that a dead server is
+ *  a bug in the run rather than the thing being measured. */
+async function uploadOrDie(path: string): Promise<Job> {
+  const { job, transportError } = await upload(path);
+  if (!job) {
+    console.error(`the API did not answer: ${transportError}`);
+    process.exit(1);
+  }
+  return job;
 }
 
 async function fetchJob(id: string): Promise<Job> {
@@ -311,23 +416,33 @@ async function fetchJob(id: string): Promise<Job> {
   return (await response.json()) as Job;
 }
 
-/** Poll until the job stops moving, printing progress on the way. */
-async function waitFor(id: string): Promise<{ job: Job; doneMs: number }> {
+/**
+ * Poll until the job stops moving, printing progress on the way.
+ *
+ * One line per decile rather than a `\r` that redraws in place: the run record
+ * captures console.log, and a carriage return produces one 30KB line in
+ * output.txt that no one can read. `total` is only known to the caller, so a
+ * run without it reports rows instead of a percentage.
+ */
+async function waitFor(
+  id: string,
+  total = 0,
+): Promise<{ job: Job; doneMs: number }> {
   const startedAt = performance.now();
-  let last = -1;
+  let decile = -1;
 
   for (;;) {
     const job = await fetchJob(id);
+    const next = total ? Math.floor((job.rowsRead / total) * 10) : 0;
 
-    if (job.rowsWritten !== last) {
-      last = job.rowsWritten;
-      process.stdout.write(
-        `\r  ${job.status.padEnd(9)} read ${job.rowsRead}  written ${job.rowsWritten}  skipped ${job.rowsSkipped}   `,
+    if (total && next > decile) {
+      decile = next;
+      console.log(
+        `  ${`${next * 10}%`.padStart(4)}  read ${job.rowsRead.toLocaleString()}  written ${job.rowsWritten.toLocaleString()}  skipped ${job.rowsSkipped.toLocaleString()}  ${secs(performance.now() - startedAt)}`,
       );
     }
 
     if (job.status === 'succeeded' || job.status === 'failed') {
-      process.stdout.write('\n');
       return { job, doneMs: performance.now() - startedAt };
     }
 
@@ -421,39 +536,61 @@ async function fire(): Promise<void> {
   const before = await cgroupBytes();
 
   const { result, peak: cgroupPeak } = await withCgroupSampler(async () => {
+    const startedAt = performance.now();
     const uploaded = await upload(path);
-    const finished = await waitFor(uploaded.job.id);
+
+    // No job id means the server never answered. The row still exists — it was
+    // written before the work started — so the state is read from Postgres.
+    if (!uploaded.job) {
+      return {
+        ...uploaded,
+        job: await newestJob(),
+        doneMs: performance.now() - startedAt,
+      };
+    }
+
+    const finished = await waitFor(uploaded.job.id, fileRows);
     return { ...uploaded, ...finished };
   });
 
   const landed = await importedRows();
+  const job = result.job;
 
   console.log('');
-  console.log(`  response          ${result.status} after ${secs(result.responseMs)}`); // prettier-ignore
+  if (result.transportError) {
+    console.log(`  response          none — ${result.transportError}`);
+    console.log(`                    after ${secs(result.responseMs)}, state read from Postgres`); // prettier-ignore
+  } else {
+    console.log(`  response          ${result.status} after ${secs(result.responseMs)}`); // prettier-ignore
+  }
   console.log(`  import finished   ${secs(result.doneMs)} after the upload started`); // prettier-ignore
-  console.log(`  rows written      ${result.job.rowsWritten.toLocaleString()}`);
-  console.log(`  rows skipped      ${result.job.rowsSkipped.toLocaleString()}`);
+  console.log(`  job status        ${job?.status ?? 'no job row'}`);
+  console.log(
+    `  rows written      ${(job?.rowsWritten ?? 0).toLocaleString()}`,
+  );
+  console.log(
+    `  rows skipped      ${(job?.rowsSkipped ?? 0).toLocaleString()}`,
+  );
   console.log(`  conversations     ${landed.toLocaleString()}`);
   console.log(
-    `  peak app RSS      ${result.job.peakRssBytes === null ? 'n/a' : mb(result.job.peakRssBytes)}`,
+    `  peak app RSS      ${job?.peakRssBytes == null ? 'n/a — the process that samples it is the process that died' : mb(job.peakRssBytes)}`,
   );
   console.log(
     `  cgroup            ${before === null ? 'n/a' : mb(before)} -> ${cgroupPeak === null ? 'n/a' : mb(cgroupPeak)}  (includes page cache)`,
   );
-  if (result.job.error) console.log(`  error             ${result.job.error}`);
+  if (job?.error) console.log(`  error             ${job.error}`);
 
   console.log('');
-  check(result.job.status === 'succeeded', `job succeeded (${result.job.status})`); // prettier-ignore
-  check(result.job.rowsWritten === fileRows, `wrote every row (${result.job.rowsWritten} of ${fileRows})`); // prettier-ignore
+  check(job?.status === 'succeeded', `job succeeded (${job?.status ?? 'no job row'})`); // prettier-ignore
+  check(job?.rowsWritten === fileRows, `wrote every row (${job?.rowsWritten ?? 0} of ${fileRows})`); // prettier-ignore
   check(landed === fileRows, `database holds every row (${landed} of ${fileRows})`); // prettier-ignore
-  check(result.status < 500, `no 5xx (${result.status})`);
+  check(result.status > 0 && result.status < 500, `answered at all, without a 5xx (${result.transportError ?? result.status})`); // prettier-ignore
   check(
     result.responseMs < result.doneMs / 2,
     `answered before the work finished (${secs(result.responseMs)} vs ${secs(result.doneMs)})`,
   );
   check(
-    result.job.peakRssBytes !== null &&
-      result.job.peakRssBytes < RSS_CEILING_BYTES,
+    job?.peakRssBytes != null && job.peakRssBytes < RSS_CEILING_BYTES,
     `peak app RSS under ${mb(RSS_CEILING_BYTES)}`,
   );
 
@@ -465,17 +602,19 @@ async function fire(): Promise<void> {
         bytes: size,
         fileRows,
         httpStatus: result.status,
+        transportError: result.transportError,
         responseMs: Math.round(result.responseMs),
         doneMs: Math.round(result.doneMs),
-        mode: result.job.mode,
-        batchRows: result.job.batchRows,
-        rowsWritten: result.job.rowsWritten,
-        rowsSkipped: result.job.rowsSkipped,
+        status: job?.status ?? null,
+        mode: job?.mode ?? null,
+        batchRows: job?.batchRows ?? null,
+        rowsWritten: job?.rowsWritten ?? null,
+        rowsSkipped: job?.rowsSkipped ?? null,
         conversations: landed,
-        peakRssBytes: result.job.peakRssBytes,
+        peakRssBytes: job?.peakRssBytes ?? null,
         cgroupBeforeBytes: before,
         cgroupPeakBytes: cgroupPeak,
-        error: result.job.error,
+        error: job?.error ?? null,
       },
     ],
   });
@@ -526,12 +665,16 @@ async function insertOneByOne(rows: Row[]): Promise<void> {
 }
 
 /**
- * N rows per statement, five bind parameters each.
+ * N rows per statement: four bind parameters each, plus one shared org_id.
  *
- * The ceiling is Postgres's and it is hard: a statement may bind at most 65535
- * parameters, so 13,107 rows is the last legal batch at this arity. The error
- * above it is not a slow query, it is a protocol error, which is why the ladder
- * runs past the wall on purpose.
+ * The ceiling is the WIRE PROTOCOL's, not the planner's. A Bind message counts
+ * its parameters in an unsigned 16-bit integer, so 65535 is the limit and
+ * 16,383 rows is the last legal batch at this arity.
+ *
+ * Past it the count wraps instead of erroring cleanly. 20,000 rows sends 80,001
+ * parameters, and 80001 mod 65536 is 14,465 — which is the number the error
+ * reports, and it appears nowhere in the request. That is why the ladder runs
+ * past the wall on purpose: the failure has to be seen to be recognised.
  */
 async function insertBatched(rows: Row[], size: number): Promise<void> {
   for (let start = 0; start < rows.length; start += size) {
@@ -683,8 +826,8 @@ async function resume(): Promise<void> {
   console.log(`  clean     ${mb(good.bytes)}, ${good.rows.toLocaleString()} rows\n`); // prettier-ignore
 
   // ---- attempt 1: it fails
-  const first = await upload(bad.path);
-  const failed = await waitFor(first.job.id);
+  const first = await uploadOrDie(bad.path);
+  const failed = await waitFor(first.id, ROWS);
   const afterFail = await importedRows();
 
   console.log('\n  after the failure');
@@ -704,12 +847,12 @@ async function resume(): Promise<void> {
 
   // ---- attempt 2: retrying the same bad file
   const retryStartedAt = performance.now();
-  const retried = await fetch(`${API}/imports/${first.job.id}/retry`, {
+  const retried = await fetch(`${API}/imports/${first.id}/retry`, {
     method: 'POST',
     headers: { 'x-org-id': ORG_ID },
   });
   await retried.arrayBuffer();
-  const second = await waitFor(first.job.id);
+  const second = await waitFor(first.id, ROWS);
   const retryMs = performance.now() - retryStartedAt;
   const afterRetry = await importedRows();
 
@@ -724,8 +867,8 @@ async function resume(): Promise<void> {
 
   // ---- attempt 3: the fixed file, uploaded fresh
   const fixStartedAt = performance.now();
-  const third = await upload(good.path);
-  const fixed = await waitFor(third.job.id);
+  const third = await uploadOrDie(good.path);
+  const fixed = await waitFor(third.id, ROWS);
   const fixMs = performance.now() - fixStartedAt;
   const afterFix = await importedRows();
 

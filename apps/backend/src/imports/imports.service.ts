@@ -40,15 +40,19 @@ export const IMPORT: ImportMode =
 /**
  * Rows per INSERT, and per transaction.
  *
- * Two ceilings, and only one of them is a judgement call. The hard one is
- * Postgres: a statement may bind at most 65535 parameters, and the conversation
- * insert binds five per row, so anything past ~13,100 rows fails outright with
- * `bind message has N parameter formats but M parameters`. The soft one is the
- * batch's memory footprint and the length of the transaction holding a
- * connection out of a pool of ten.
+ * Two ceilings, and only one of them is a judgement call.
  *
- * 1000 is measured rather than picked — `pnpm db:import bench` walks the ladder
- * and the shape of the curve is in the plan file.
+ * The hard one is the wire protocol: a Bind message counts its parameters in an
+ * unsigned 16-bit integer, so 65535 is the limit. The conversation insert binds
+ * four per row plus one shared org_id, which puts the ceiling at 16,383 rows.
+ * Past it the count WRAPS rather than erroring cleanly — 20,000 rows reports
+ * `bind message has 14465 parameter formats but 0 parameters`, a number that
+ * appears nowhere in the request. Measured in `pnpm db:import bench`.
+ *
+ * The soft one is the shape of the curve, and it has a knee rather than a
+ * slope: 100 rows a batch runs at 231k rows/s, 1000 at 291k, 5000 at 266k and
+ * 10000 at 255k. Bigger stops helping at 1000 and starts hurting, so 1000 is
+ * measured rather than picked.
  */
 export const IMPORT_BATCH_ROWS = Number(
   process.env.IMPORT_BATCH_ROWS || '1000',

@@ -1,0 +1,15 @@
+generating history-200mb.csv
+  ORG_ID               1                            (default)
+  MB                   200                          (env)
+  POISON_AT            0                            (default)
+  FILE                 history-200mb.csv            (default)
+  BATCHES              100,1000,5000,10000,20000    (default)
+  ROWS                 100000                       (default)
+  ROUNDS               3                            (default)
+  ONLY                 (none)                       (default)
+
+  path      /tmp/import-files/history-200mb.csv
+  size      200.7 MB
+  rows      719,503
+  poison    none
+  wrote in  2.33s
