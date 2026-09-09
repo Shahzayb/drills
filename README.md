@@ -25,6 +25,7 @@ orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose
 | 12 | Idempotent ingest | 10,000 duplicate deliveries still produced exactly 3,000 rows, held by a unique constraint. |
 | 13 | Lost updates | A counter read-and-written in code lost 89 of 100 increments; three fixes, one shipped. |
 | 14 | Optimistic locking | Fifty agents claimed one ticket and all fifty were told yes; a version check leaves exactly one winner, and the losing browser corrects itself without reloading. |
+| 15 | Streaming a 200MB import | The obvious version runs out of memory in under three seconds; streaming it keeps memory flat whether the file is 20MB or 400MB, and a failure half way through says exactly where it stopped. |
 
 Current state and what's open live in `memory-bank/progress.md`; every decision and
 number is one row in `memory-bank/history.md`, with the full reasoning in `plans/`.
@@ -55,6 +56,7 @@ pnpm db:search plans    # LIKE vs full-text search (indexes, gaps, writes)
 pnpm db:storm fire      # 10k duplicate deliveries; asserts and exits 1 (key, race, redis-restart)
 pnpm db:quota fire      # 100 concurrent increments; asserts and exits 1 (bench, race, skew)
 pnpm db:claim fire      # 50 agents claim one ticket; asserts and exits 1 (bench, race)
+pnpm db:import gen      # write a 200MB CSV, then import it (fire, bench, resume)
 pnpm test:ui            # frontend Playwright suite, on the host against the container
 pnpm format
 pnpm lint
