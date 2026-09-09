@@ -1,0 +1,42 @@
+importing history-200mb.csv
+  ORG_ID               1                            (default)
+  MB                   200                          (default)
+  POISON_AT            0                            (default)
+  FILE                 history-200mb.csv            (env)
+  BATCHES              100,1000,5000,10000,20000    (default)
+  ROWS                 100000                       (default)
+  ROUNDS               3                            (default)
+  ONLY                 (none)                       (default)
+
+  server arm  IMPORT=stream batch=1000
+
+  file       200.7 MB, 719,503 rows
+  cleaned    72,517 rows from a previous run
+
+    0%  read 0  written 0  skipped 0  0.02s
+   10%  read 75,000  written 75,000  skipped 0  4.33s
+   20%  read 144,000  written 144,000  skipped 0  8.64s
+   30%  read 219,000  written 219,000  skipped 0  12.75s
+   40%  read 290,000  written 290,000  skipped 0  16.65s
+   50%  read 362,000  written 362,000  skipped 0  20.76s
+   60%  read 432,000  written 432,000  skipped 0  25.06s
+   70%  read 504,000  written 504,000  skipped 0  29.79s
+   80%  read 578,000  written 578,000  skipped 0  34.10s
+   90%  read 650,000  written 650,000  skipped 0  38.20s
+  100%  read 719,503  written 719,503  skipped 0  42.70s
+
+  response          202 after 0.39s
+  import finished   42.70s after the upload started
+  job status        succeeded
+  rows written      719,503
+  rows skipped      0
+  conversations     719,503
+  peak app RSS      129.8 MB
+  cgroup            1021.6 MB -> 1024.0 MB  (includes page cache)
+
+  ok    job succeeded (succeeded)
+  ok    wrote every row (719503 of 719503)
+  ok    database holds every row (719503 of 719503)
+  ok    answered at all, without a 5xx (202)
+  ok    answered before the work finished (0.39s vs 42.70s)
+  ok    peak app RSS under 512.0 MB

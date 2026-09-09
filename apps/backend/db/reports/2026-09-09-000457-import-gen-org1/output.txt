@@ -1,0 +1,15 @@
+generating ui-demo.csv
+  ORG_ID               1                            (default)
+  MB                   8                            (env)
+  POISON_AT            0                            (default)
+  FILE                 ui-demo.csv                  (env)
+  BATCHES              100,1000,5000,10000,20000    (default)
+  ROWS                 100000                       (default)
+  ROUNDS               3                            (default)
+  ONLY                 (none)                       (default)
+
+  path      /tmp/import-files/ui-demo.csv
+  size      8.0 MB
+  rows      29,064
+  poison    none
+  wrote in  0.14s

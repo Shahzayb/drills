@@ -1,0 +1,31 @@
+importing history-200mb.csv
+  ORG_ID               1                            (default)
+  MB                   200                          (default)
+  POISON_AT            0                            (default)
+  FILE                 history-200mb.csv            (default)
+  BATCHES              100,1000,5000,10000,20000    (default)
+  ROWS                 100000                       (default)
+  ROUNDS               3                            (default)
+  ONLY                 (none)                       (default)
+
+  server arm  IMPORT=stream batch=1000
+
+  file       200.7 MB, 724,413 rows
+  cleaned    0 rows from a previous run
+
+
+  response          202 after 0.78s
+  import finished   0.02s after the upload started
+  rows written      0
+  rows skipped      0
+  conversations     0
+  peak app RSS      93.3 MB
+  cgroup            314.6 MB -> 777.4 MB  (includes page cache)
+  error             row 4: Invalid Record Length: columns length is 6, got 7 on line 5
+
+  FAIL  job succeeded (failed)
+  FAIL  wrote every row (0 of 724413)
+  FAIL  database holds every row (0 of 724413)
+  ok    no 5xx (202)
+  FAIL  answered before the work finished (0.78s vs 0.02s)
+  ok    peak app RSS under 512.0 MB

@@ -172,6 +172,25 @@ services:
       # QUOTA=serializable reaches it, and the right value is a property of the
       # contention rather than of the code.
       - QUOTA_MAX_RETRIES=${QUOTA_MAX_RETRIES:-}
+      # Card 15, and the same one-line A/B as LIST_STRATEGY above:
+      # `IMPORT=buffer docker compose up -d nest_server` puts the CSV import
+      # back on the version that reads the whole file into memory, parses it
+      # into an array, inserts one row per transaction, and holds the request
+      # open until it finishes. Two arms — buffer | stream — and empty means
+      # ImportsService's own default ('stream'). `buffer` is the permanent red
+      # arm and is what OOM-kills this container on a 200MB file.
+      # See plans/2026-09-09_drill-15-streaming-csv-import.md.
+      - IMPORT=${IMPORT:-}
+      # Rows per INSERT and per transaction on the streaming arm. Empty means
+      # 1000. There is a hard ceiling above this and it is Postgres's, not a
+      # preference: a statement binds at most 65535 parameters and the
+      # conversation insert binds five per row.
+      - IMPORT_BATCH_ROWS=${IMPORT_BATCH_ROWS:-}
+      # What a retry of a failed import does: resume | restart. Empty means
+      # 'resume'. Unusually, BOTH arms are correct — the unique index from card
+      # 12 makes a re-imported row a no-op — so `pnpm db:test:restart` is
+      # expected green rather than red.
+      - IMPORT_ON_FAIL=${IMPORT_ON_FAIL:-}
       # off | on | header — see apps/backend/src/observability/query-counter.ts.
       # Empty forwards through to that module's own default ('on').
       - QUERY_COUNTER=${QUERY_COUNTER:-}

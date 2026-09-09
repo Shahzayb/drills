@@ -306,6 +306,64 @@ const INSTRUMENTS: Record<string, Instrument> = {
     ],
   },
 
+  import: {
+    file: 'db/import.mts',
+    blurb:
+      'a 200MB CSV import: buffered vs streamed, and what a retry does (drill 15)',
+    subcommands: {
+      gen: 'write a deterministic CSV of MB megabytes, optionally poisoned',
+      fire: 'upload it through POST /imports and watch memory — asserts and exits 1',
+      bench:
+        'per-row vs batched INSERT vs COPY, in raw SQL, at each batch size',
+      resume: 'fail an import mid-file, then resume and restart it',
+    },
+    knobs: [
+      {
+        flag: 'org',
+        env: 'ORG_ID',
+        def: '1',
+        help: 'which org receives the rows',
+      },
+      {
+        flag: 'mb',
+        env: 'MB',
+        def: '200',
+        help: 'gen: file size in megabytes',
+      },
+      {
+        flag: 'poison-at',
+        env: 'POISON_AT',
+        def: '0',
+        help: 'gen: row number that fails to parse (0 = none)',
+      },
+      {
+        flag: 'file',
+        env: 'FILE',
+        def: 'history-200mb.csv',
+        help: 'the CSV every subcommand reads or writes',
+      },
+      {
+        flag: 'batches',
+        env: 'BATCHES',
+        def: '100,1000,5000,10000',
+        help: 'bench: the batch-size ladder',
+      },
+      { flag: 'rows', env: 'ROWS', def: '100000', help: 'bench: corpus size' },
+      {
+        flag: 'rounds',
+        env: 'ROUNDS',
+        def: '3',
+        help: 'bench: measurements per cell',
+      },
+      {
+        flag: 'only',
+        env: 'ONLY',
+        def: '(all)',
+        help: 'bench: substring filter over arm labels',
+      },
+    ],
+  },
+
   bench: {
     file: 'db/bench-copy.mts',
     blurb: 'INSERT vs multi-row INSERT vs COPY, on a scratch table',

@@ -12,6 +12,11 @@ import {
   ON_CONFLICT,
   QUOTA,
 } from '../ingest/ingest.service';
+import {
+  IMPORT,
+  IMPORT_BATCH_ROWS,
+  IMPORT_ON_FAIL,
+} from '../imports/imports.service';
 import { QUOTA_MAX_RETRIES } from '../tenancy/tenant-db.service';
 import { QUERY_COUNTER_MODE } from '../observability/query-counter';
 import { TRACING_ENABLED } from '../observability/trace';
@@ -38,6 +43,9 @@ export interface InfoResponse {
     idempotencyTtlSeconds: string;
     quota: string;
     quotaMaxRetries: string;
+    import: string;
+    importBatchRows: string;
+    importOnFail: string;
     queryCounter: string;
     logLevel: string;
     tracing: string;
@@ -81,6 +89,9 @@ export class InfoController {
         idempotencyTtlSeconds: String(IDEMPOTENCY_TTL_SECONDS),
         quota: QUOTA,
         quotaMaxRetries: String(QUOTA_MAX_RETRIES),
+        import: IMPORT,
+        importBatchRows: String(IMPORT_BATCH_ROWS),
+        importOnFail: IMPORT_ON_FAIL,
         queryCounter: QUERY_COUNTER_MODE,
         logLevel: logger.level,
         tracing: TRACING_ENABLED ? 'on' : 'off',

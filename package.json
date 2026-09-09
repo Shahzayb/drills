@@ -1,6 +1,6 @@
 {
   "name": "drills",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -24,6 +24,7 @@
     "db:storm": "node scripts/measure.ts storm",
     "db:quota": "node scripts/measure.ts quota",
     "db:claim": "node scripts/measure.ts claim",
+    "db:import": "node scripts/measure.ts import",
     "db:psql": "node scripts/psql.ts psql",
     "db:log:on": "node scripts/psql.ts log:on",
     "db:log:off": "node scripts/psql.ts log:off",
@@ -42,6 +43,8 @@
     "db:test:serializable": "docker compose exec -T -e QUOTA=serializable nest_server pnpm --filter=backend run test:e2e",
     "db:test:lww": "docker compose exec -T -e ASSIGN=lww nest_server pnpm --filter=backend run test:e2e",
     "db:test:pessimistic": "docker compose exec -T -e ASSIGN=pessimistic nest_server pnpm --filter=backend run test:e2e",
+    "db:test:buffer": "docker compose exec -T -e IMPORT=buffer nest_server pnpm --filter=backend run test:e2e",
+    "db:test:restart": "docker compose exec -T -e IMPORT_ON_FAIL=restart nest_server pnpm --filter=backend run test:e2e",
     "check:tenancy": "docker compose exec -T nest_server pnpm --filter=backend run check:tenancy",
     "check:arms": "node scripts/check-arms.ts",
     "arms": "node scripts/check-arms.ts live",

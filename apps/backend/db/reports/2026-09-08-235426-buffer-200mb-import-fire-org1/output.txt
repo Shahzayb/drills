@@ -1,0 +1,32 @@
+importing history-200mb.csv
+  ORG_ID               1                            (default)
+  MB                   200                          (default)
+  POISON_AT            0                            (default)
+  FILE                 history-200mb.csv            (default)
+  BATCHES              100,1000,5000,10000,20000    (default)
+  ROWS                 100000                       (default)
+  ROUNDS               3                            (default)
+  ONLY                 (none)                       (default)
+
+  server arm  IMPORT=buffer batch=1000
+
+  file       200.7 MB, 719,503 rows
+  cleaned    0 rows from a previous run
+
+
+  response          none — UND_ERR_SOCKET: fetch failed
+                    after 2.63s, state read from Postgres
+  import finished   2.64s after the upload started
+  job status        running
+  rows written      0
+  rows skipped      0
+  conversations     0
+  peak app RSS      n/a — the process that samples it is the process that died
+  cgroup            654.7 MB -> 1024.0 MB  (includes page cache)
+
+  FAIL  job succeeded (running)
+  FAIL  wrote every row (0 of 719503)
+  FAIL  database holds every row (0 of 719503)
+  FAIL  answered at all, without a 5xx (UND_ERR_SOCKET: fetch failed)
+  FAIL  answered before the work finished (2.63s vs 2.64s)
+  FAIL  peak app RSS under 512.0 MB

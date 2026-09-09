@@ -1,0 +1,30 @@
+importing history-20mb.csv
+  ORG_ID               1                            (default)
+  MB                   200                          (default)
+  POISON_AT            0                            (default)
+  FILE                 history-20mb.csv             (env)
+  BATCHES              100,1000,5000,10000,20000    (default)
+  ROWS                 100000                       (default)
+  ROUNDS               3                            (default)
+  ONLY                 (none)                       (default)
+
+  file       20.1 MB, 72,517 rows
+  cleaned    0 rows from a previous run
+
+
+  response          none — ECONNREFUSED: fetch failed
+                    after 0.00s, state read from Postgres
+  import finished   0.00s after the upload started
+  job status        running
+  rows written      0
+  rows skipped      0
+  conversations     0
+  peak app RSS      n/a — the process that samples it is the process that died
+  cgroup            335.2 MB -> 327.9 MB  (includes page cache)
+
+  FAIL  job succeeded (running)
+  FAIL  wrote every row (0 of 72517)
+  FAIL  database holds every row (0 of 72517)
+  FAIL  answered at all, without a 5xx (ECONNREFUSED: fetch failed)
+  FAIL  answered before the work finished (0.00s vs 0.00s)
+  FAIL  peak app RSS under 512.0 MB
