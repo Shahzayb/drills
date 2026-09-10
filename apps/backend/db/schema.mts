@@ -70,8 +70,17 @@ if (!SUBCOMMANDS.includes(subcommand)) {
 const ORG_ID = knob('ORG_ID', '1');
 const SHAPE = knob('SHAPE', 'backfill');
 const COLUMN = knob('COLUMN', 'last_message_at');
-const BATCH = knobNumber('BATCH', 10_000);
-const PAUSE_MS = knobNumber('PAUSE_MS', 50);
+// 1,000 and 10ms, and both were measured rather than guessed. `pnpm db:schema
+// bench` is where the numbers are: at 1,000 rows the planner keeps a Nested Loop
+// over conversations_pkey, and at 10,000 it switches to a Hash Semi Join whose
+// inner side is a sequential scan of all 2.5M rows — 134,001 rows/s against
+// 41,791. The batch that is ten times bigger is three times slower, and it also
+// holds its row locks for 250ms instead of 6.
+//
+// The pause moves with the batch. 50ms between 2,500 small batches is two
+// minutes of sleeping to do nineteen seconds of work.
+const BATCH = knobNumber('BATCH', 1_000);
+const PAUSE_MS = knobNumber('PAUSE_MS', 10);
 const SCAN = knob('SCAN', 'keyset');
 const SAMPLE_MS = knobNumber('SAMPLE_MS', 250);
 const WAIT = knobNumber('WAIT', 0);
@@ -139,8 +148,11 @@ const LOCK_SQL = `
          a.wait_event,
          l.mode,
          l.granted,
-         EXTRACT(epoch FROM (clock_timestamp() - a.state_change)) * 1000 AS waited_ms,
-         EXTRACT(epoch FROM (clock_timestamp() - a.xact_start)) * 1000 AS xact_ms,
+         -- ::float8, not the bare EXTRACT: it returns numeric, and pg hands
+         -- numeric back as a STRING for the same reason it does bigint. The
+         -- report then formatted a string with toFixed and died.
+         (EXTRACT(epoch FROM (clock_timestamp() - a.state_change)) * 1000)::float8 AS waited_ms,
+         (EXTRACT(epoch FROM (clock_timestamp() - a.xact_start)) * 1000)::float8 AS xact_ms,
          left(regexp_replace(a.query, '\\s+', ' ', 'g'), 68) AS query,
          pg_blocking_pids(a.pid) AS blocked_by
     FROM pg_locks l
@@ -278,6 +290,27 @@ const TRUE_VALUE = (alias: string) =>
   `COALESCE((SELECT max(m.created_at) FROM messages m
               WHERE m.conversation_id = ${alias}.id), ${alias}.created_at)`;
 
+/**
+ * One keyset batch, as text, so `bench` can EXPLAIN the statement the backfill
+ * actually runs rather than a hand-copied lookalike. The plan is the finding at
+ * the top of the ladder, and a plan measured on different SQL is not a finding.
+ */
+const keysetBatch = (column: string) => `WITH page AS (
+     SELECT id FROM conversations
+      WHERE id > $1::uuid
+      ORDER BY id
+      LIMIT $2
+   ), done AS (
+     UPDATE conversations c
+        SET ${column} = ${TRUE_VALUE('c')}
+      WHERE c.id IN (SELECT id FROM page)
+        AND c.${column} IS NULL
+      RETURNING 1
+   )
+   SELECT (SELECT id FROM page ORDER BY id DESC LIMIT 1) AS next_cursor,
+          (SELECT count(*) FROM page)::text AS scanned,
+          (SELECT count(*) FROM done)::text AS updated`;
+
 const addScratch = async (column: string) => {
   await client.query(
     `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS ${column} timestamptz`,
@@ -407,21 +440,7 @@ async function backfill(
           [batch],
         )
       : client.query<{ next_cursor: string | null; scanned: string; updated: string }>(
-          `WITH page AS (
-             SELECT id FROM conversations
-              WHERE id > $1::uuid
-              ORDER BY id
-              LIMIT $2
-           ), done AS (
-             UPDATE conversations c
-                SET ${column} = ${TRUE_VALUE('c')}
-              WHERE c.id IN (SELECT id FROM page)
-                AND c.${column} IS NULL
-              RETURNING 1
-           )
-           SELECT (SELECT id FROM page ORDER BY id DESC LIMIT 1) AS next_cursor,
-                  (SELECT count(*) FROM page)::text AS scanned,
-                  (SELECT count(*) FROM done)::text AS updated`,
+          keysetBatch(column),
           [cursor, batch],
         ));
 
@@ -681,11 +700,21 @@ async function safe(): Promise<Record<string, unknown>> {
   );
 
   // 3. Declare it required, without checking the past.
+  //
+  // Behind a lock_timeout, because the catalog write is microseconds and the
+  // QUEUE for it is not. A waiting ACCESS EXCLUSIVE blocks everything that
+  // arrives after it, so this statement's real risk is not its own duration —
+  // it is autovacuum, which the backfill above just gave 2.5M reasons to run.
   await step('ADD CONSTRAINT ... NOT VALID', 'ACCESS EXCLUSIVE (µs)', async () => {
-    await client.query(
-      `ALTER TABLE conversations
-         ADD CONSTRAINT ${constraint} NOT NULL ${column} NOT VALID`,
-    );
+    await client.query(`SET lock_timeout = '3s'`);
+    try {
+      await client.query(
+        `ALTER TABLE conversations
+           ADD CONSTRAINT ${constraint} NOT NULL ${column} NOT VALID`,
+      );
+    } finally {
+      await client.query(`RESET lock_timeout`);
+    }
   });
 
   // 4. Check the past, blocking nobody. SHARE UPDATE EXCLUSIVE conflicts with
@@ -778,7 +807,7 @@ async function runBackfill(): Promise<Record<string, unknown>> {
   const result = await backfill(COLUMN, {
     onBatch: (updated) => {
       done += updated;
-      if (done && done % 250_000 < BATCH) {
+      if (done && done % 500_000 < BATCH) {
         console.log(`    ${done.toLocaleString()} filled...`);
       }
     },
@@ -985,6 +1014,27 @@ async function locks(): Promise<Record<string, unknown>> {
  * and leaving it in would put the same constant into every cell and flatten the
  * thing being measured.
  */
+/**
+ * The top join node of one batch's plan, taken inside a rolled-back transaction
+ * so the measurement leaves nothing. `DDL is transactional in Postgres` is what
+ * makes this possible — the same trick db/explain.mts uses to price an index.
+ */
+async function topJoinNode(column: string, batch: number): Promise<string> {
+  await client.query('BEGIN');
+  try {
+    const { rows } = await client.query<{ 'QUERY PLAN': string }>(
+      `EXPLAIN (COSTS OFF) ${keysetBatch(column)}`,
+      ['00000000-0000-0000-0000-000000000000', batch],
+    );
+    const line = rows
+      .map((r) => r['QUERY PLAN'].trim())
+      .find((l) => /Join|Nested Loop/.test(l));
+    return line ?? '(no join node)';
+  } finally {
+    await client.query('ROLLBACK');
+  }
+}
+
 async function bench(): Promise<Record<string, unknown>> {
   const cells: Record<string, unknown>[] = [];
 
@@ -998,6 +1048,12 @@ async function bench(): Promise<Record<string, unknown>> {
         `ALTER TABLE conversations DROP COLUMN IF EXISTS ${column}`,
       );
       await addScratch(column);
+
+      // What the planner chose for the FIRST batch, read before the cell runs
+      // and rolled back. The ladder is not a straight line and this column is
+      // why: past some batch size the page stops being a page and Postgres
+      // sequential-scans the whole table to find it.
+      const plan = scan === 'keyset' ? await topJoinNode(column, batch) : '-';
 
       const r = await backfill(column, {
         batch,
@@ -1017,12 +1073,17 @@ async function bench(): Promise<Record<string, unknown>> {
         // The number that separates the two scan shapes: a keyset walk's batches
         // cost the same at the end as at the start, an IS NULL walk's do not.
         drift: `${n((r.lastBatchMs / (r.firstBatchMs || 1)) * 100 - 100)}%`,
+        plan,
       });
       console.table([cells[cells.length - 1]]);
 
       await client.query(
         `ALTER TABLE conversations DROP COLUMN IF EXISTS ${column}`,
       );
+      // Between cells, not at the end. Each cell leaves ROWS dead tuples, and
+      // without this the later cells scan past every earlier cell's garbage —
+      // an ordering effect that reads exactly like a batch-size effect.
+      await client.query('VACUUM conversations');
     }
   }
 
@@ -1064,6 +1125,29 @@ async function index(): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   const runs: Record<string, unknown>[] = [];
 
+  /**
+   * One write, timed, from another session, while a build is in progress.
+   *
+   * Timed and not just checked: a build that finishes in 890ms lets a write
+   * through with a 2s timeout, and "yes" then hides that the write spent 274ms
+   * queueing. Whether it SUCCEEDED is the wrong question — an index build that
+   * doubles write latency is an incident either way.
+   */
+  const timedWrite = async () => {
+    await other.query("SET statement_timeout = '5000ms'");
+    const t = process.hrtime.bigint();
+    const ok = await other
+      .query(
+        `INSERT INTO conversations (org_id, status, provider_event_id, last_message_at)
+         VALUES (${ORG_ID}, 'open', 'probe-' || gen_random_uuid(), now())`,
+      )
+      .then(() => true)
+      .catch(() => false);
+    const took = ms(t);
+    await other.query('SET statement_timeout = 0').catch(() => undefined);
+    return { ok, took };
+  };
+
   const sizeOfIndex = async () => {
     const { rows } = await client.query<{ bytes: string | null }>(
       `SELECT pg_relation_size(to_regclass($1)) AS bytes`,
@@ -1080,36 +1164,30 @@ async function index(): Promise<Record<string, unknown>> {
     // The probe runs against the SAME build, from another session, while it is
     // in progress. Timing it after the fact would measure an unlocked table.
     const probe = (async () => {
-      await sleep(500);
-      await other.query("SET statement_timeout = '2000ms'");
+      await sleep(50);
+      const readAt = process.hrtime.bigint();
       const readOk = await other
         .query('SELECT id FROM conversations LIMIT 1')
         .then(() => true)
         .catch(() => false);
-      const writeOk = await other
-        .query(
-          `INSERT INTO conversations (org_id, status, provider_event_id, last_message_at)
-           VALUES (${ORG_ID}, 'open', 'probe-' || gen_random_uuid(), now())`,
-        )
-        .then(() => true)
-        .catch(() => false);
-      await other.query('SET statement_timeout = 0').catch(() => undefined);
-      return { readOk, writeOk };
+      const readMs = ms(readAt);
+      const write = await timedWrite();
+      return { readOk, readMs, write };
     })();
 
     await client.query(`CREATE INDEX ${name} ON conversations ${definition}`);
     const took = ms(t);
-    const { readOk, writeOk } = await probe;
+    const { readOk, readMs, write } = await probe;
     const samples = await stop();
 
     runs.push({
       build: 'CREATE INDEX',
       ms: n(took),
       size: mb(await sizeOfIndex()),
-      'reads got through': readOk ? 'yes' : 'NO',
-      'writes got through': writeOk ? 'yes' : 'NO',
+      'a read took': `${n(readMs)}ms${readOk ? '' : ' (FAILED)'}`,
+      'a write took': `${n(write.took)}ms${write.ok ? '' : ' (FAILED)'}`,
     });
-    out.plain = { ms: took, readOk, writeOk, locks: reportLocks(samples) };
+    out.plain = { ms: took, readOk, readMs, write, locks: reportLocks(samples) };
     await drop();
   }
 
@@ -1117,33 +1195,31 @@ async function index(): Promise<Record<string, unknown>> {
   if (!ONLY || 'concurrent'.includes(ONLY)) {
     const t = process.hrtime.bigint();
     const probe = (async () => {
-      await sleep(500);
-      await other.query("SET statement_timeout = '2000ms'");
-      const writeOk = await other
-        .query(
-          `INSERT INTO conversations (org_id, status, provider_event_id, last_message_at)
-           VALUES (${ORG_ID}, 'open', 'probe-' || gen_random_uuid(), now())`,
-        )
+      await sleep(50);
+      const readAt = process.hrtime.bigint();
+      const readOk = await other
+        .query('SELECT id FROM conversations LIMIT 1')
         .then(() => true)
         .catch(() => false);
-      await other.query('SET statement_timeout = 0').catch(() => undefined);
-      return writeOk;
+      const readMs = ms(readAt);
+      const write = await timedWrite();
+      return { readOk, readMs, write };
     })();
 
     await client.query(
       `CREATE INDEX CONCURRENTLY ${name} ON conversations ${definition}`,
     );
     const took = ms(t);
-    const writeOk = await probe;
+    const { readOk, readMs, write } = await probe;
 
     runs.push({
       build: 'CREATE INDEX CONCURRENTLY',
       ms: n(took),
       size: mb(await sizeOfIndex()),
-      'reads got through': 'yes',
-      'writes got through': writeOk ? 'yes' : 'NO',
+      'a read took': `${n(readMs)}ms${readOk ? '' : ' (FAILED)'}`,
+      'a write took': `${n(write.took)}ms${write.ok ? '' : ' (FAILED)'}`,
     });
-    out.concurrent = { ms: took, writeOk };
+    out.concurrent = { ms: took, readOk, readMs, write };
     await drop();
   }
 
@@ -1163,9 +1239,11 @@ async function index(): Promise<Record<string, unknown>> {
     const { rows: pidRows } = await client.query<{ pid: number }>(
       'SELECT pg_backend_pid() AS pid',
     );
+    // Early, because this table is small enough to build in under a second.
+    // The point is to land the cancel INSIDE the build, not to time it.
     const cancelIn = setTimeout(() => {
       void watcher.query('SELECT pg_cancel_backend($1)', [pidRows[0].pid]);
-    }, 1500);
+    }, 250);
 
     let cancelledWith = 'it finished before the cancel landed';
     try {
@@ -1206,8 +1284,19 @@ async function index(): Promise<Record<string, unknown>> {
   // anything, which is why it looks like a hang rather than a lock.
   if (!ONLY || 'idle'.includes(ONLY)) {
     console.log(`  A CONCURRENTLY build behind one idle-in-transaction session:\n`);
+    const { rows: buildPidRows } = await client.query<{ pid: number }>(
+      'SELECT pg_backend_pid() AS pid',
+    );
+    const buildPid = buildPidRows[0].pid;
+    // It has to WRITE. A transaction that has only read holds a virtual
+    // transaction id, and the first version of this experiment watched a
+    // CONCURRENTLY build sail straight past one. An INSERT assigns a real xid,
+    // which is what the build's two wait phases actually wait for.
     await other.query('BEGIN');
-    await other.query('SELECT 1 FROM conversations LIMIT 1');
+    await other.query(
+      `INSERT INTO conversations (org_id, status, provider_event_id, last_message_at)
+       VALUES (${ORG_ID}, 'open', 'probe-' || gen_random_uuid(), now())`,
+    );
 
     const t = process.hrtime.bigint();
     const build = client
@@ -1216,13 +1305,17 @@ async function index(): Promise<Record<string, unknown>> {
       .catch((e: Error) => ({ ok: false, ms: ms(t), error: e.message }));
 
     await sleep(2000);
+    // BY PID, not by query text: an idle backend keeps its last query in
+    // pg_stat_activity, so matching on the text can report a finished build as
+    // though it were the running one.
     const { rows: waiting } = await watcher.query<{
       wait_event_type: string | null;
       wait_event: string | null;
       state: string | null;
     }>(
       `SELECT wait_event_type, wait_event, state FROM pg_stat_activity
-        WHERE query LIKE 'CREATE INDEX CONCURRENTLY%' AND pid <> pg_backend_pid()`,
+        WHERE pid = $1`,
+      [buildPid],
     );
     console.log(
       `    after 2s the build is: ${JSON.stringify(waiting[0] ?? null)}\n` +

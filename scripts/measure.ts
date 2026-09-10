@@ -390,11 +390,11 @@ const INSTRUMENTS: Record<string, Instrument> = {
         def: 'last_message_at',
         help: 'the column to fill; naive/safe suffix it',
       },
-      { flag: 'batch', env: 'BATCH', def: '10000', help: 'rows per batch' },
+      { flag: 'batch', env: 'BATCH', def: '1000', help: 'rows per batch' },
       {
         flag: 'pause-ms',
         env: 'PAUSE_MS',
-        def: '50',
+        def: '10',
         help: 'pause between batches',
       },
       {

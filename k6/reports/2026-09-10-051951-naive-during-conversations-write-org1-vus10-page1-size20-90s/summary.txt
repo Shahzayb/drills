@@ -1,0 +1,10 @@
+
+  name=naive-during org=1 rate=50.00/s maxvus=200 warmup=20s measured=90s prefix=k6-naive-during
+  measured requests : 4440
+  p50 / p95 / p99   : 2000.72 / 2002.99 / 2004.60 ms
+  min / avg / max   : 1.54 / 1325.20 / 55540.84 ms
+  throughput        : 49.33 req/s of 50.00 offered
+  dropped           : 61 iterations never started
+  (incl. warm-up)   : p50 14.24  p95 2002.76  p99 2004.29 ms
+
+RESULT,naive-during,1,200,50,k6-naive-during,2000.72,2002.99,2004.60,49.33,4440

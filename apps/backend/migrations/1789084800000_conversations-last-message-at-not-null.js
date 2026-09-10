@@ -57,6 +57,26 @@
  * and re-running is safe because VALIDATE on an already-valid constraint is a
  * no-op.
  *
+ * `lock_timeout` ON THE FIRST STATEMENT, AND ONLY THE FIRST
+ *
+ * A short lock is not a safe lock if you have to QUEUE for it. Postgres grants
+ * locks first come first served, so an ACCESS EXCLUSIVE request that is waiting
+ * — behind autovacuum, behind a long SELECT — also blocks every conflicting
+ * request that arrives after it. The catalog write takes microseconds and the
+ * WAIT for it takes as long as whatever is in front. Measured here twice, on a
+ * table the backfill had just made 2.5M dead tuples in: the ALTER below sat
+ * behind `autovacuum: VACUUM ANALYZE public.conversations` for ~940ms and ~130ms,
+ * and both times the whole application queued behind IT.
+ *
+ * So: fail fast and let the operator retry, rather than convert a
+ * microsecond of DDL into an outage of unknown length. Three seconds is a
+ * deliberate compromise — long enough to ride out a checkpoint, short enough
+ * that nobody notices.
+ *
+ * VALIDATE below needs no such guard. SHARE UPDATE EXCLUSIVE does not conflict
+ * with ACCESS SHARE or ROW EXCLUSIVE, so a queued one lets reads and writes
+ * past it; only VACUUM and ANALYZE wait.
+ *
  * PRIOR ART IN THIS REPO
  *
  * `db/seed.mts` already re-adds `messages_conversation_id_fkey` as NOT VALID and
@@ -77,10 +97,16 @@ const CONSTRAINT = 'conversations_last_message_at_not_null';
 export const up = (pgm) => {
   pgm.noTransaction();
 
+  // SET, not SET LOCAL: noTransaction() means there is no transaction for a
+  // LOCAL to be local to, and it would silently apply to nothing.
+  pgm.sql(`SET lock_timeout = '3s';`);
+
   pgm.sql(`
     ALTER TABLE conversations
       ADD CONSTRAINT ${CONSTRAINT} NOT NULL last_message_at NOT VALID;
   `);
+
+  pgm.sql(`RESET lock_timeout;`);
 
   pgm.sql(`
     ALTER TABLE conversations

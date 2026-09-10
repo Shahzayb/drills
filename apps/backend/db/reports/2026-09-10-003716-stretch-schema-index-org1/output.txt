@@ -1,0 +1,53 @@
+schema index
+  ORG_ID               1                            (default)
+  SHAPE                backfill                     (default)
+  COLUMN               last_message_at              (default)
+  BATCH                1000                         (default)
+  PAUSE_MS             10                           (default)
+  SCAN                 keyset                       (default)
+  SAMPLE_MS            250                          (default)
+  WAIT                 0                            (default)
+  ABORT_AFTER          0                            (default)
+  BATCHES              1000,10000,100000            (default)
+  ROWS                 200000                       (default)
+  ONLY                 (none)                       (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","assign":"optimistic","searchStrategy":"fts","idempotency":"both","onConflict":"update","idempotencyTtlSeconds":"86400","quota":"atomic","quotaMaxRetries":"20","lastMessage":"write","import":"stream","importBatchRows":"1000","importOnFail":"resume","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  pg_locks: 4 samples, 2 of them with a queue
+  worst sample at +517.72ms — 1 backend(s) waiting
+
+┌─────────┬──────┬────────────────────┬─────────┬─────────────────┬────────────────┬────────────────────────────────────────────────────────────────────────┐
+│ (index) │ pid  │ mode               │ granted │ wait            │ held/waited ms │ query                                                                  │
+├─────────┼──────┼────────────────────┼─────────┼─────────────────┼────────────────┼────────────────────────────────────────────────────────────────────────┤
+│ 0       │ 3283 │ 'ShareLock'        │ true    │ ''              │ '517.23'       │ 'CREATE INDEX conversations_org_last_message_idx ON conversations (or' │
+│ 1       │ 3285 │ 'RowExclusiveLock' │ false   │ 'Lock/relation' │ '13.61'        │ 'INSERT INTO conversations (org_id, status, provider_event_id, last_m' │
+└─────────┴──────┴────────────────────┴─────────┴─────────────────┴────────────────┴────────────────────────────────────────────────────────────────────────┘
+
+  the lock  : ShareLock
+  it blocked: 1 backend(s) queued for RowExclusiveLock
+  longest wait observed: 274.57ms
+
+┌─────────┬─────────────────────────────┬──────────┬───────────┬───────────────────┬────────────────────┐
+│ (index) │ build                       │ ms       │ size      │ reads got through │ writes got through │
+├─────────┼─────────────────────────────┼──────────┼───────────┼───────────────────┼────────────────────┤
+│ 0       │ 'CREATE INDEX'              │ '890.00' │ '118.6MB' │ 'yes'             │ 'yes'              │
+│ 1       │ 'CREATE INDEX CONCURRENTLY' │ '981.83' │ '118.6MB' │ 'yes'             │ 'yes'              │
+└─────────┴─────────────────────────────┴──────────┴───────────┴───────────────────┴────────────────────┘
+
+  Interrupting a CONCURRENTLY build (the failure a plain build cannot have):
+
+    build ended with: it finished before the cancel landed
+    invalid indexes now present: none
+    find them with:
+      SELECT indexrelid::regclass, indisvalid FROM pg_index WHERE NOT indisvalid;
+    recover by dropping and rebuilding — REINDEX CONCURRENTLY also works.
+
+  A CONCURRENTLY build behind one idle-in-transaction session:
+
+    after 2s the build is: {"wait_event_type":"Client","wait_event":"ClientRead","state":"idle"}
+    (a plain CREATE INDEX would be running by now — this is waiting for
+     a transaction that is doing nothing.)
+
+    once the idle transaction committed: {"ok":true,"ms":943.799375}
+

@@ -1,0 +1,35 @@
+schema naive
+  ORG_ID               1                            (default)
+  SHAPE                backfill                     (default)
+  COLUMN               last_message_at              (default)
+  BATCH                10000                        (default)
+  PAUSE_MS             50                           (default)
+  SCAN                 keyset                       (default)
+  SAMPLE_MS            250                          (default)
+  WAIT                 0                            (default)
+  ABORT_AFTER          15                           (env)
+  BATCHES              1000,10000,100000            (default)
+  ROWS                 200000                       (default)
+  ONLY                 (none)                       (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","assign":"optimistic","searchStrategy":"fts","idempotency":"both","onConflict":"update","idempotencyTtlSeconds":"86400","quota":"atomic","quotaMaxRetries":"20","lastMessage":"write","import":"stream","importBatchRows":"1000","importOnFail":"resume","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  shape: backfill   ddl backend pid: 2744
+
+┌─────────┬─────────────────────────┬────────┐
+│ (index) │ statement               │ ms     │
+├─────────┼─────────────────────────┼────────┤
+│ 0       │ 'ADD COLUMN (nullable)' │ '0.32' │
+│ 1       │ 'SET DEFAULT now()'     │ '1.61' │
+└─────────┴─────────────────────────┴────────┘
+
+  ONE transaction, held for 15004.02ms — then FAILED: canceling statement due to user request
+  Every statement above ran inside it, so the ACCESS EXCLUSIVE taken by
+  the first was held until the last one committed.
+
+  pg_locks: 60 samples, nothing ever waited
+
+  heap 275.9MB -> 338.5MB   n_dead_tup 0 -> 568,382   (cancelled mid-run, and the garbage is still here)
+
+  cleanup: dropped last_message_at_naive, VACUUM 282.04ms, 338.5MB -> 275.9MB
+

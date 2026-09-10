@@ -1,0 +1,11 @@
+
+  name=safe-during org=1 rate=50.00/s maxvus=200 warmup=20s measured=90s prefix=k6-safe-during
+  measured requests : 4501
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 0.96 / 4.56 / 6.09 ms
+  min / avg / max   : 0.51 / 1.41 / 23.72 ms
+  throughput        : 50.01 req/s of 50.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 1.01  p95 5.26  p99 6.62 ms
+
+RESULT,safe-during,1,200,50,k6-safe-during,0.96,4.56,6.09,50.01,4501

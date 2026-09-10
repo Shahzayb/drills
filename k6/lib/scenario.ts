@@ -83,6 +83,17 @@ export interface SummaryData {
   metrics: Record<string, { values: Record<string, number> }>;
 }
 
+/**
+ * The keys a k6 Rate sub-metric carries, and the trap in them.
+ *
+ * `http_req_failed` is a Rate whose observations are "did this request fail?",
+ * so on THAT metric `passes` counts the requests that FAILED and `fails` counts
+ * the ones that were fine. Reading `fails` prints the success count under the
+ * word "errors" — a baseline of 4,500 clean requests reported as 4,500 errors
+ * at 0.00%, which is how this was caught.
+ */
+type FailedValues = { rate?: number; passes?: number };
+
 /** What handleSummary returns: stdout, plus a file per path. */
 type SummaryOutput = Record<string, string>;
 
@@ -363,6 +374,14 @@ export function summary(
   // it never got to answer. Drill 16.
   const dropped = data.metrics[MEASURED_DROPPED]?.values.count ?? 0;
 
+  // The error rate, PRINTED rather than only enforced. It has been a threshold
+  // since drill 05 and the value has never appeared in a summary, so "zero
+  // errors" was a claim about an exit code rather than a recorded number — and
+  // drill 16's whole deliverable is one arm with errors beside one without.
+  // handleSummary REPLACES k6's own end-of-test block, so if this file does not
+  // print it, nothing does.
+  const failed: FailedValues = data.metrics[MEASURED_FAILED]?.values ?? {};
+
   // NOT the counter's own rate. k6 divides a counter's rate by the *whole* run
   // duration, warm-up included — 80s here, not 60s — which understates the
   // measured phase by 25%. Throughput is per measured second or it is wrong.
@@ -374,6 +393,7 @@ export function summary(
     '',
     `  ${NAME ? `name=${NAME} ` : ''}org=${ORG_ID} ${SHAPE.rate !== undefined ? `rate=${n(SHAPE.rate)}/s maxvus=` : 'vus='}${SHAPE.vus} warmup=${WARMUP} measured=${SHAPE.duration} ${params}`,
     `  measured requests : ${count}`,
+    `  errors            : ${failed.passes ?? 0} (${n((failed.rate ?? 0) * 100)}%)`,
     `  p50 / p95 / p99   : ${n(v.med)} / ${n(v['p(95)'])} / ${n(v['p(99)'])} ms`,
     `  min / avg / max   : ${n(v.min)} / ${n(v.avg)} / ${n(v.max)} ms`,
     `  throughput        : ${n(rps)} req/s${SHAPE.rate !== undefined ? ` of ${n(SHAPE.rate)} offered` : ''}`,
