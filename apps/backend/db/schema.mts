@@ -328,7 +328,9 @@ const addScratch = async (column: string) => {
  * reason anybody can find afterwards.
  */
 const cleanupScratch = async (column: string) => {
-  await client.query(`ALTER TABLE conversations DROP COLUMN IF EXISTS ${column}`);
+  await client.query(
+    `ALTER TABLE conversations DROP COLUMN IF EXISTS ${column}`,
+  );
   const before = await sizeOfTable();
   const t = process.hrtime.bigint();
   await client.query('VACUUM conversations');
@@ -422,7 +424,11 @@ async function backfill(
     // max() aggregate for uuid, in Postgres 18 or anywhere else. The page is
     // already ordered and already small, so the sort is free.
     const { rows } = await (scan === 'isnull'
-      ? client.query<{ next_cursor: string | null; scanned: string; updated: string }>(
+      ? client.query<{
+          next_cursor: string | null;
+          scanned: string;
+          updated: string;
+        }>(
           `WITH page AS (
              SELECT id FROM conversations
               WHERE ${column} IS NULL
@@ -439,10 +445,11 @@ async function backfill(
                   (SELECT count(*) FROM done)::text AS updated`,
           [batch],
         )
-      : client.query<{ next_cursor: string | null; scanned: string; updated: string }>(
-          keysetBatch(column),
-          [cursor, batch],
-        ));
+      : client.query<{
+          next_cursor: string | null;
+          scanned: string;
+          updated: string;
+        }>(keysetBatch(column), [cursor, batch]));
 
     const took = ms(t);
     const scanned = Number(rows[0].scanned);
@@ -502,10 +509,14 @@ async function naive(): Promise<Record<string, unknown>> {
   }
 
   const column = `${COLUMN}_naive`;
-  await client.query(`ALTER TABLE conversations DROP COLUMN IF EXISTS ${column}`);
+  await client.query(
+    `ALTER TABLE conversations DROP COLUMN IF EXISTS ${column}`,
+  );
 
   if (WAIT) {
-    console.log(`  waiting ${WAIT}s so the load has a measured window open...\n`);
+    console.log(
+      `  waiting ${WAIT}s so the load has a measured window open...\n`,
+    );
     await sleep(WAIT * 1000);
   }
 
@@ -663,10 +674,14 @@ async function safe(): Promise<Record<string, unknown>> {
   await client.query(
     `ALTER TABLE conversations DROP CONSTRAINT IF EXISTS ${constraint}`,
   );
-  await client.query(`ALTER TABLE conversations DROP COLUMN IF EXISTS ${column}`);
+  await client.query(
+    `ALTER TABLE conversations DROP COLUMN IF EXISTS ${column}`,
+  );
 
   if (WAIT) {
-    console.log(`  waiting ${WAIT}s so the load has a measured window open...\n`);
+    console.log(
+      `  waiting ${WAIT}s so the load has a measured window open...\n`,
+    );
     await sleep(WAIT * 1000);
   }
 
@@ -705,17 +720,21 @@ async function safe(): Promise<Record<string, unknown>> {
   // QUEUE for it is not. A waiting ACCESS EXCLUSIVE blocks everything that
   // arrives after it, so this statement's real risk is not its own duration —
   // it is autovacuum, which the backfill above just gave 2.5M reasons to run.
-  await step('ADD CONSTRAINT ... NOT VALID', 'ACCESS EXCLUSIVE (µs)', async () => {
-    await client.query(`SET lock_timeout = '3s'`);
-    try {
-      await client.query(
-        `ALTER TABLE conversations
+  await step(
+    'ADD CONSTRAINT ... NOT VALID',
+    'ACCESS EXCLUSIVE (µs)',
+    async () => {
+      await client.query(`SET lock_timeout = '3s'`);
+      try {
+        await client.query(
+          `ALTER TABLE conversations
            ADD CONSTRAINT ${constraint} NOT NULL ${column} NOT VALID`,
-      );
-    } finally {
-      await client.query(`RESET lock_timeout`);
-    }
-  });
+        );
+      } finally {
+        await client.query(`RESET lock_timeout`);
+      }
+    },
+  );
 
   // 4. Check the past, blocking nobody. SHARE UPDATE EXCLUSIVE conflicts with
   //    VACUUM, ANALYZE and CREATE INDEX CONCURRENTLY — and with no read and no
@@ -850,7 +869,9 @@ async function locks(): Promise<Record<string, unknown>> {
 
   const column = `${COLUMN}_locks`;
   const constraint = `conversations_${column}_nn`;
-  await client.query(`ALTER TABLE conversations DROP COLUMN IF EXISTS ${column}`);
+  await client.query(
+    `ALTER TABLE conversations DROP COLUMN IF EXISTS ${column}`,
+  );
 
   const results: Record<string, unknown>[] = [];
 
@@ -875,7 +896,10 @@ async function locks(): Promise<Record<string, unknown>> {
       `SELECT l.mode FROM pg_locks l JOIN pg_stat_activity a USING (pid)
         WHERE l.relation = 'conversations'::regclass AND l.granted
           AND a.application_name IS NOT NULL AND a.pid = $1`,
-      [(await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid],
+      [
+        (await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid'))
+          .rows[0].pid,
+      ],
     );
 
     await other.query("SET statement_timeout = '1500ms'");
@@ -938,14 +962,18 @@ async function locks(): Promise<Record<string, unknown>> {
 
   await probe(
     'UPDATE (the backfill statement)',
-    [`UPDATE conversations SET status = status WHERE id = (SELECT id FROM conversations LIMIT 1)`],
+    [
+      `UPDATE conversations SET status = status WHERE id = (SELECT id FROM conversations LIMIT 1)`,
+    ],
     'SELECT one row',
     `SELECT id FROM conversations LIMIT 1`,
   );
 
   await probe(
     'UPDATE (the backfill statement)',
-    [`UPDATE conversations SET status = status WHERE id = (SELECT id FROM conversations LIMIT 1)`],
+    [
+      `UPDATE conversations SET status = status WHERE id = (SELECT id FROM conversations LIMIT 1)`,
+    ],
     'INSERT one row',
     `INSERT INTO conversations (org_id, status, provider_event_id, last_message_at)
      VALUES (${ORG_ID}, 'open', 'probe-' || gen_random_uuid(), now())`,
@@ -953,8 +981,12 @@ async function locks(): Promise<Record<string, unknown>> {
 
   // The pay-off row. VALIDATE holds SHARE UPDATE EXCLUSIVE for its whole scan
   // and blocks neither of the two things an application does.
-  await client.query(`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS ${column} timestamptz`);
-  await client.query(`UPDATE conversations SET ${column} = now() WHERE ${column} IS NULL`);
+  await client.query(
+    `ALTER TABLE conversations ADD COLUMN IF NOT EXISTS ${column} timestamptz`,
+  );
+  await client.query(
+    `UPDATE conversations SET ${column} = now() WHERE ${column} IS NULL`,
+  );
   await client.query(
     `ALTER TABLE conversations ADD CONSTRAINT ${constraint} NOT NULL ${column} NOT VALID`,
   );
@@ -992,7 +1024,9 @@ async function locks(): Promise<Record<string, unknown>> {
   await client.query(
     `ALTER TABLE conversations DROP CONSTRAINT IF EXISTS ${constraint}`,
   );
-  await client.query(`ALTER TABLE conversations DROP COLUMN IF EXISTS ${column}`);
+  await client.query(
+    `ALTER TABLE conversations DROP COLUMN IF EXISTS ${column}`,
+  );
   await client.query(
     `DELETE FROM conversations WHERE provider_event_id LIKE 'probe-%'`,
   );
@@ -1187,7 +1221,13 @@ async function index(): Promise<Record<string, unknown>> {
       'a read took': `${n(readMs)}ms${readOk ? '' : ' (FAILED)'}`,
       'a write took': `${n(write.took)}ms${write.ok ? '' : ' (FAILED)'}`,
     });
-    out.plain = { ms: took, readOk, readMs, write, locks: reportLocks(samples) };
+    out.plain = {
+      ms: took,
+      readOk,
+      readMs,
+      write,
+      locks: reportLocks(samples),
+    };
     await drop();
   }
 
@@ -1283,7 +1323,9 @@ async function index(): Promise<Record<string, unknown>> {
   // CREATE INDEX takes SHARE and queues normally; this waits without holding
   // anything, which is why it looks like a hang rather than a lock.
   if (!ONLY || 'idle'.includes(ONLY)) {
-    console.log(`  A CONCURRENTLY build behind one idle-in-transaction session:\n`);
+    console.log(
+      `  A CONCURRENTLY build behind one idle-in-transaction session:\n`,
+    );
     const { rows: buildPidRows } = await client.query<{ pid: number }>(
       'SELECT pg_backend_pid() AS pid',
     );

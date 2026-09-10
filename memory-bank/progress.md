@@ -9,10 +9,10 @@ None.
 
 ## Next step
 
-Card 30 (the noisy-neighbour bulk import) now has the path it needs — drill 15's worker is an
-in-process async function sharing the pool with every request, which is the mechanism card 30
-exploits. Card 26 (the outbox) is still open from drill 12. Card 19 (entitlement cache) and SQ5 are
-drill 15's stated alternatives.
+Card 17 (streaming RSC) or SQ3 are drill 16's stated alternatives. Card 30 (the noisy-neighbour
+bulk import) has the path it needs — drill 15's worker is an in-process async function sharing the
+pool with every request, which is the mechanism card 30 exploits. Card 26 (the outbox) is still open
+from drill 12.
 
 ## Active plan
 
@@ -23,7 +23,7 @@ None open — every plan file in `plans/` is shipped. `history.md` lists them wi
 `pnpm docker:up`, then `pnpm db:migrate` and `pnpm db:seed` — or `pnpm db:reset` for both.
 Every instrument and toggle is listed in `techContext.md` under Commands.
 
-`pnpm db:test` runs the e2e suite inside the container (131 tests). Six suites are *expected* to
+`pnpm db:test` runs the e2e suite inside the container (136 tests). Nine arms are *expected* to
 fail, and a green run of any of them means the switch stopped switching: `pnpm db:test:naive`
 (`LIST_STRATEGY=naive`) fails **two** query-budget assertions, `pnpm db:test:notiebreak`
 (`KEYSET_TIEBREAK=off`) fails **one** — the tie-block walk, which returns 9 of 12 rows with no error
@@ -41,7 +41,10 @@ of 202, it spends a query per row instead of one, its durable state after a cras
 row rather than a batch boundary, and its retry answers 500 because the work it does synchronously
 is what throws. `pnpm db:test:restart` (`IMPORT_ON_FAIL=restart`) is expected **green**, and that is
 the point of it — restarting an import from row zero is slower and just as correct, because drill
-12's partial unique index makes a re-imported row a no-op.
+12's partial unique index makes a re-imported row a no-op. Drill 16 adds `pnpm db:test:skiplast`
+(`LAST_MESSAGE=skip`), which fails **15** across two suites — the whole ingest write path plus the
+quota counter riding on it, because a NOT NULL constraint deployed ahead of the code that fills the
+column is not a degradation, it is a stop.
 
 `pnpm test:ui` runs the frontend's Playwright suite (3 tests) on the **host** against the running
 container. One-time setup: `pnpm exec playwright install chromium`. It also has a required red run —
@@ -65,12 +68,20 @@ them up themselves, but a k6 `pnpm load ingest` run does **not** — k6 has no d
 Before any drill 05/09/10 baseline:
 
 ```sql
-DELETE FROM conversations
- WHERE org_id = 1 AND provider_event_id IS NOT NULL AND provider_event_id LIKE 'k6-%';
+CREATE TEMP TABLE doomed AS
+  SELECT id FROM conversations
+   WHERE org_id = 1 AND provider_event_id IS NOT NULL
+     AND (provider_event_id LIKE 'k6-%' OR provider_event_id LIKE 'probe-%');
+DELETE FROM usage_events  WHERE conversation_id IN (SELECT id FROM doomed);
+DELETE FROM messages      WHERE conversation_id IN (SELECT id FROM doomed);
+DELETE FROM conversations WHERE id IN (SELECT id FROM doomed);
 ```
 
 `provider_event_id IS NOT NULL` is what lets the partial unique index answer that instead of
-sequential-scanning 2.5M rows.
+sequential-scanning 2.5M rows. The three deletes are not optional and the one-line version
+recorded here before drill 16 was wrong: an ingested conversation has a message and a usage_event
+pointing at it, and a bare `DELETE FROM conversations` fails on `messages_conversation_id_fkey`.
+`probe-%` is what `pnpm db:schema locks` and `index` tag their probe rows with.
 
 `pnpm db:quota bench` needs `PG_MAX_CONNECTIONS=200 docker compose up -d postgres_db` — it opens one
 connection per concurrent transaction and the default 100 has no headroom over the app's pool. The
@@ -86,6 +97,8 @@ and 10 were compared against; drill 04's plan records the same queries at 2.5M r
 or after a `VACUUM`.
 
 ## Known issues
+
+**Drill 16 added five (30-34), and issue 29 is unchanged.**
 
 1. Frontend coverage is one page and one flow. Drill 14 gave it a test runner (Playwright,
    `pnpm test:ui`) and three tests, all about the assign conflict. The Route Handler, load-more,
@@ -169,6 +182,25 @@ or after a `VACUUM`.
 29. **The browser upload buffers.** A file input sends `multipart/form-data` and reading the part
    back out means `request.formData()`, which materialises it. The page says so beside the control;
    the fix is a presigned PUT direct to object storage.
+30. **The backfill is a script somebody has to remember to run, between two migrations, in the right
+   order, and nothing gates it.** `pnpm db:migrate` will run migration 016 against an unbackfilled
+   table; it fails loudly on `contains null values`, which is the good case, but "the deploy fails"
+   is not "the deploy is impossible". It also has no progress row, no lease and no resume marker —
+   it re-derives its position from `IS NULL` every run, so a stopped run says nothing about how far
+   it got. Drill 15's `import_jobs` is the shape that fixes this and was not reused.
+31. **Nothing throttles the backfill against live load.** The 10ms pause is a constant, not a
+   feedback loop on replication lag or on the endpoint's p99.
+32. **The imported rows disagree with the backfill's own oracle and nothing says so.** An import
+   writes `last_message_at` from the CSV while the messages it creates get `created_at = now()`, so
+   for those rows `last_message_at < max(messages.created_at)`. The `AND col IS NULL` guard inside
+   the backfill's UPDATE is the only thing stopping a re-run from "fixing" them into being wrong,
+   and there is no test for that guard.
+33. **Nothing reads `last_message_at`.** It is in the list response and no query sorts or filters by
+   it. `(org_id, last_message_at DESC, id DESC)` is priced at 118.6MB in drill 16's plan and
+   rejected, so shipping the sort would ship a sequential scan on the whale.
+34. **`lock_timeout` is on migration 016 only.** Nothing stops the next `ALTER TABLE` anyone writes
+   from omitting it, and `check:tenancy`/`check:arms` do not look for it. The deploy tooling is
+   where it belongs.
 
 ## Releases
 
@@ -181,6 +213,7 @@ or after a `VACUUM`.
 | [drill/13](https://github.com/Shahzayb/drills/releases/tag/drill/13) | 0.13.0 | none (no open issues to attach) | The lost update: a read-modify-write counter loses 84 of 100 concurrent increments; atomic `UPDATE` shipped over `FOR UPDATE` and `SERIALIZABLE`. |
 | [drill/14](https://github.com/Shahzayb/drills/releases/tag/drill/14) | 0.14.0 | none (no open issues to attach) | Optimistic locking on assignment: 50 agents claim one ticket and a version check leaves exactly one winner, with the losing browser converging on the truth without a reload. **Tagged on the branch before the merge**, at the request of the release, so `drill/14` points at `chore(release): 0.14.0` rather than at a merge commit the way `drill/13` does. `--generate-notes` produced only a changelog link for that reason — there was no merged PR to attribute commits to — so the body was written by hand. |
 | [drill/15](https://github.com/Shahzayb/drills/releases/tag/drill/15) | 0.15.0 | none (no open issues to attach) | Streaming CSV import: peak memory flat at ~120MB from a 20MB file to a 400MB one, against a naive version that dies in 2.63 seconds having written nothing. Tagged on the branch before the merge, the `drill/14` precedent. |
+| [drill/16](https://github.com/Shahzayb/drills/releases/tag/drill/16) | 0.16.0 | none (no open issues to attach) | Zero-downtime schema change: the naive migration held ACCESS EXCLUSIVE for 74.7s and failed 76.73% of writes; the same work in four transactions failed none and came in 21% *under* the baseline p99. Tagged on the branch before the merge, the `drill/14` precedent. |
 
 ## Preferences
 

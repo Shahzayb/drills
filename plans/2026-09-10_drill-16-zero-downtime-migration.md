@@ -1,6 +1,6 @@
 # Drill 16 — Add a required column to 2.5M rows without taking the site down
 
-**Status:** planned
+**Status:** shipped
 
 Card 16. Prereq was 13. Builds a batched backfill mechanism, a lock watcher, and the first
 k6 script in this repo that measures arrival rate rather than concurrency.
@@ -228,7 +228,219 @@ Extended rather than added:
 
 ## Results
 
-To be filled in after the measurements land.
+Postgres 18.6, 2,500,000 conversations, 10,000,000 messages, `shared_buffers=128MB`, pool of
+10 with a 2s acquire timeout. All three k6 runs are one sitting against the same starting
+table (349MB heap, 0 dead tuples, freshly `VACUUM (ANALYZE)`ed), `constant-arrival-rate` at
+50 req/s, 20s warm-up discarded, 90s measured.
+
+### The DONE WHEN
+
+| arm | requests | errors | p50 | p95 | p99 | max | req/s | dropped |
+|---|---|---|---|---|---|---|---|---|
+| baseline | 4,500 | **0 (0.00%)** | 4.01 | 6.49 | 7.75 | 17.91 | 50.00 | 0 |
+| naive | 4,439 | **3,406 (76.73%)** | 2001.07 | 2003.07 | 2005.01 | 60,001 | 49.32 | 61 |
+| safe | 4,501 | **0 (0.00%)** | 0.96 | 4.56 | 6.09 | 23.72 | 50.01 | 0 |
+
+`k6/reports/2026-09-10-00*-{baseline,naive-during,safe-during}-conversations-write-*`.
+
+The safe arm's p99 is **6.09ms against the baseline's 7.75ms — 21% below it**, not merely
+within a budget. The naive arm's p99 is **259x baseline**, and 61 requests were never sent at
+all because every allocated VU was parked behind the lock.
+
+**The naive p50 is 2001.07ms and that number is not the database.** It is
+`connectionTimeoutMillis: 2000` on the `pg` pool. Ten connections were queued on the lock, so
+every request behind them waited exactly two seconds for a pool slot and then got a 500. The
+tail past that — max 60,001ms — is k6's own default HTTP timeout, not a response either.
+
+### Which statement took the lock, and what it blocked
+
+`pnpm db:schema naive`, one transaction:
+
+| statement | ms |
+|---|---|
+| `ADD COLUMN` (nullable) | 1.01 |
+| `SET DEFAULT now()` | 1.04 |
+| `UPDATE` … 2.5M rows | 74,389.12 |
+| `SET NOT NULL` | 324.67 |
+
+**One transaction, held 74,722.08ms.** The `ALTER TABLE ADD COLUMN` on line one takes ACCESS
+EXCLUSIVE in a millisecond and does not give it back until COMMIT. The outage is the length of
+the migration, not the length of any statement in it.
+
+The `pg_locks` capture, sampled every 250ms on a second connection:
+
+```
+pid 3821  AccessExclusiveLock  granted=true   UPDATE conversations c SET last_message_at_naive …
+pid 3745  RowExclusiveLock     granted=false  WITH ingested AS ( INSERT INTO conversations …
+… 9 more, all RowExclusiveLock, all Lock/relation
+```
+
+296 of 297 samples had a queue. Peak 10 waiters — the pool's whole capacity — every one of
+them a `POST /ingest`. Longest wait observed **74,615.89ms**.
+
+`pnpm db:schema locks` proves the conflict matrix rather than quoting it, with a 1500ms
+statement timeout on the probing session:
+
+| session A holds | lock | session B tries | blocked |
+|---|---|---|---|
+| `ALTER TABLE ADD COLUMN` | AccessExclusive | SELECT | **YES** (queued for AccessShare) |
+| `ALTER TABLE ADD COLUMN` | AccessExclusive | INSERT | **YES** (queued for RowExclusive) |
+| `UPDATE` | RowExclusive | SELECT | no |
+| `UPDATE` | RowExclusive | INSERT | no |
+| `VALIDATE CONSTRAINT` | ShareUpdateExclusive | INSERT | no |
+| `VALIDATE CONSTRAINT` | ShareUpdateExclusive | ANALYZE | **YES** |
+
+### The safe sequence
+
+| step | lock | ms |
+|---|---|---|
+| `ADD COLUMN` + `SET DEFAULT` | ACCESS EXCLUSIVE | 4.17 |
+| backfill, 1,000-row batches, 10ms pause | ROW EXCLUSIVE per batch | 73,530.14 |
+| `ADD CONSTRAINT … NOT VALID` | ACCESS EXCLUSIVE | 1,006.40 |
+| `VALIDATE CONSTRAINT` | SHARE UPDATE EXCLUSIVE | 284.52 |
+
+74,840.05ms end to end — **the same work in the same time**, and the longest ACCESS EXCLUSIVE
+lock in it was 1,006.40ms rather than 74,722ms.
+
+### Prediction 2 was right, and it makes the card's framing wrong
+
+The card describes the naive migration as "add it NOT NULL with a default". Measured, that is
+the *least* damaging shape available:
+
+| naive shape | held | what it leaves |
+|---|---|---|
+| `backfill` — nullable, `UPDATE`, `SET NOT NULL` | **74,722ms** | correct data |
+| `rewrite` — `NOT NULL DEFAULT clock_timestamp()` | **2,827ms** | correct-ish data, heap 552MB → **276MB** |
+| `fastwrong` — `NOT NULL DEFAULT now()` | **2.04ms** | **1 distinct value across 2,505,787 rows** |
+
+Since Postgres 11 a **non-volatile** default is evaluated once and stored in
+`pg_attribute.attmissingval`, so nothing is rewritten. `now()` is STABLE and qualifies —
+which makes `ADD COLUMN … NOT NULL DEFAULT now()` finish in 1.44ms and tell every row in the
+table that its last message arrived at the instant of the migration. Fast, silent, and 100%
+wrong. A **volatile** default (`clock_timestamp()`) does not qualify, rewrites the whole
+table, and takes 2.5s — matching drill 14's 2,563ms for the same shape.
+
+Side effect worth knowing: the rewrite **compacted the heap from 552MB to 276MB**. A table
+rewrite is a `VACUUM FULL` you did not ask for.
+
+### The batch size, and what happens at 10x
+
+`pnpm db:schema bench --batches 1000,10000,100000`, 200,000 rows per cell, `VACUUM` between
+cells, plan read from `EXPLAIN` on the statement the backfill actually runs:
+
+| scan | batch | rows/s | first batch | last batch | drift | plan |
+|---|---|---|---|---|---|---|
+| keyset | 1,000 | **134,001** | 21.82ms | 5.87ms | -73% | Nested Loop |
+| keyset | 10,000 | 41,791 | 272.59ms | 242.02ms | -11% | Hash Semi Join |
+| keyset | 100,000 | 83,044 | 1,193.06ms | 1,215.30ms | +2% | Hash Right Semi Join |
+| isnull | 1,000 | 40,725 | 7.14ms | 41.24ms | **+478%** | — |
+| isnull | 10,000 | 37,629 | 280.64ms | 255.82ms | -9% | — |
+| isnull | 100,000 | 76,161 | 1,299.48ms | 1,326.53ms | +2% | — |
+
+**The batch size chooses the query plan.** At 1,000 rows the planner keeps a Nested Loop
+driven by `conversations_pkey`; past that it switches to a hash join whose inner side is a
+sequential scan of all 2.5M rows. Isolated `EXPLAIN (ANALYZE)` on the same statement:
+
+```
+batch   1,000   Nested Loop  → Index Scan conversations_pkey        15.06ms
+batch  10,000   Nested Loop  → Index Scan conversations_pkey        97.19ms
+batch 100,000   Hash Semi Join → Seq Scan on conversations (2,505,787 rows)   1,140.18ms
+```
+
+So at 10x the chosen batch the page stops being a page: the statement reads the whole table to
+find the 10,000 rows it wanted. 10,000 sits exactly on the boundary and the planner does not
+choose the same way twice — which is the argument for 1,000 rather than a reason to tune.
+
+Prediction 5 was **wrong**, and in the opposite direction to the one predicted: the knee is
+*lower* for this UPDATE than drill 15's 1,000-row INSERT knee, not higher.
+
+Batch 1,000 with a 10ms pause also halves the run: **39,386ms of work against 70,563ms** at
+10,000/50ms, while holding each batch's row locks for 6ms instead of 250ms. Both defaults
+changed to match.
+
+`SCAN=isnull` is the anti-pattern and it degrades exactly as drill 10's OFFSET does — **+478%
+from first batch to last** at 1,000 rows. It is invisible at 100,000 because 200,000 rows is
+only two batches; the shape only hurts when there are many, which is when you would use it.
+
+### The finding that changed the shipped migration
+
+`ADD CONSTRAINT … NOT VALID` is a catalog write that should take microseconds. It took
+**1,006ms and 1,012ms on two separate runs**, and `pg_locks` says why:
+
+```
+pid 3767  ShareUpdateExclusiveLock  granted=true   autovacuum: VACUUM ANALYZE public.conversations
+pid 3625  AccessExclusiveLock       granted=false  ALTER TABLE conversations ADD CONSTRAINT …
+```
+
+The backfill had just made 2.5M dead tuples, autovacuum started, and the ALTER queued behind
+it. Postgres grants locks first come first served, so a *waiting* ACCESS EXCLUSIVE blocks
+every conflicting request that arrives after it — the safe path's own garbage nearly bought a
+second outage. Migration 016 now sets `lock_timeout = '3s'` around that one statement: fail
+the deploy, retry, rather than convert microseconds of DDL into a wait of unknown length.
+`VALIDATE` needs no guard, because SHARE UPDATE EXCLUSIVE does not conflict with the locks
+reads and writes take.
+
+### The rollback
+
+`pnpm db:schema naive --abort-after 15` cancels the UPDATE mid-flight. The transaction
+unwinds correctly — no half-filled column, nothing to reconcile — and still leaves **568,382
+dead tuples and the heap up from 275.9MB to 338.5MB**. Fifteen seconds of total outage, every
+byte of WAL written, and nothing to show for it.
+
+### The stretch: CREATE INDEX, CONCURRENTLY, and what CONCURRENTLY costs
+
+`pnpm db:schema index` on `(org_id, last_message_at DESC, id DESC)`, 118.6MB either way:
+
+| build | ms | a read took | a write took |
+|---|---|---|---|
+| `CREATE INDEX` | 683.00 | 2.11ms | **631.44ms** |
+| `CREATE INDEX CONCURRENTLY` | 958.09 | 0.62ms | 1.32ms |
+
+SHARE blocks writers and lets readers through, exactly as documented, and here it is the
+`pg_locks` line for it:
+
+```
+pid 3378  ShareLock         granted=true   CREATE INDEX conversations_org_last_message_idx …
+pid 3380  RowExclusiveLock  granted=false  INSERT INTO conversations …
+```
+
+The index is **not shipped**: a second 118.6MB copy of drill 09's inbox index, for a column
+nothing sorts by.
+
+CONCURRENTLY's two failure modes, both reproduced:
+
+1. **Cancelled mid-build it leaves `indisvalid = false`** — `conversations_org_last_message_idx`
+   invisible to the planner and still maintained on every write. A plain build runs in a
+   transaction and rolls back to nothing.
+2. **It waits for transactions it did not start.** Behind one idle-in-transaction session that
+   had INSERTed, the build sat at `wait_event_type=Lock, wait_event=virtualxid, state=active`
+   indefinitely, and finished 2,949ms after that transaction committed. The first version of
+   this experiment used a read-only idle transaction and the build sailed straight past it —
+   a virtual xid is not what it waits for.
+
+### Predictions, and what happened
+
+| # | prediction | outcome |
+|---|---|---|
+| 1 | naive holds ACCESS EXCLUSIVE 60–150s, 500s from the pool timeout | **right** — 74.7s, 76.73% errors, p50 pinned to the 2s pool timeout |
+| 2 | `rewrite` is far shorter, making the card's framing the milder shape | **right** — 2.8s against 74.7s |
+| 3 | `fastwrong` under 10ms and ~2.5M rows wrong | **right** — 1.44ms, one distinct value across 2,505,787 rows |
+| 4 | safe within 15% of baseline p99 | **right, and better** — 6.09ms against 7.75ms, 21% below |
+| 5 | the UPDATE knee is higher than the INSERT's 1,000 | **wrong** — it is lower, and it is a plan flip rather than a slope |
+| 6 | `SCAN=isnull` degrades superlinearly, keyset stays flat | **right** — +478% against -73% |
+
+### Two bugs the measurements found
+
+- `EXTRACT(epoch …)` returns **numeric**, which `pg` hands back as a string for the same
+  reason it does bigint. The lock report formatted it with `toFixed` and died — after a
+  55-second migration it had just finished watching.
+- **`http_req_failed`'s `passes` counts the FAILURES.** It is a k6 Rate over "did this request
+  fail?", so `fails` is the success count. The first version of the new error line reported a
+  clean baseline as "4,500 errors (0.00%)".
+
+And one absence: `handleSummary` **replaces** k6's end-of-test block, so this repo has printed
+no error count since drill 05 — "zero errors" was a claim about an exit code. `summary()` now
+prints it on every run, including the ~60 already recorded shapes.
 
 ## Verification
 

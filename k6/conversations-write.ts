@@ -78,7 +78,10 @@ export default function (): void {
   const n = __VU * 1_000_000 + __ITER;
   post(
     `${BASE_URL}/ingest`,
-    { eventId: `${RUN}-${String(n).padStart(9, '0')}`, message: `k6 write ${n}` },
+    {
+      eventId: `${RUN}-${String(n).padStart(9, '0')}`,
+      message: `k6 write ${n}`,
+    },
     { Authorization: `Bearer ${API_KEY}` },
   );
 }

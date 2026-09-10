@@ -268,7 +268,7 @@ describe('POST /ingest (e2e)', () => {
      * written in one transaction. `clock_timestamp()` on either side would make
      * this an inequality with no fixed bound.
      */
-    it('is the first message\'s timestamp, to the microsecond', async () => {
+    it("is the first message's timestamp, to the microsecond", async () => {
       const body = event('lastmsg');
       await post(body).expect(201);
 

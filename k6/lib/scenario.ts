@@ -290,9 +290,7 @@ export function scenario({
     thresholds: {
       // A declaration, not an assertion, and conditional for the reason given
       // where MEASURED_DROPPED is defined.
-      ...(SHAPE.rate !== undefined
-        ? { [MEASURED_DROPPED]: ['count>=0'] }
-        : {}),
+      ...(SHAPE.rate !== undefined ? { [MEASURED_DROPPED]: ['count>=0'] } : {}),
       // Policy, so the script owns it. A run containing errors is not a
       // baseline — and is exactly what a stress test is looking for. A crossed
       // threshold exits 99 and scripts/load.ts propagates it, so a stress run

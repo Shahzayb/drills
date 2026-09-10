@@ -371,7 +371,7 @@ const INSTRUMENTS: Record<string, Instrument> = {
     subcommands: {
       naive: 'the whole migration in one transaction — timed, and watched',
       safe: 'the same result in four steps, none of them blocking',
-      backfill: 'the real column\'s one-time backfill, resumable',
+      backfill: "the real column's one-time backfill, resumable",
       locks: 'two live sessions: which lock, held how long, blocking what',
       bench: 'the batch ladder, and the scan shape inside it',
       index: 'CREATE INDEX vs CONCURRENTLY, and the failures CIC has alone',

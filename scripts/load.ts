@@ -97,7 +97,8 @@ const SCRIPTS: Record<string, Script> = {
 
   write: {
     file: 'conversations-write.ts',
-    blurb: 'POST /ingest at a steady arrival rate, during a migration (drill 16)',
+    blurb:
+      'POST /ingest at a steady arrival rate, during a migration (drill 16)',
     knobs: [
       {
         flag: 'api-key',
