@@ -98,7 +98,7 @@ or after a `VACUUM`.
 
 ## Known issues
 
-**Drill 16 added five (30-34), and issue 29 is unchanged.**
+**Drill 16 added six (30-35), and issue 29 is unchanged.**
 
 1. Frontend coverage is one page and one flow. Drill 14 gave it a test runner (Playwright,
    `pnpm test:ui`) and three tests, all about the assign conflict. The Route Handler, load-more,
@@ -201,6 +201,13 @@ or after a `VACUUM`.
 34. **`lock_timeout` is on migration 016 only.** Nothing stops the next `ALTER TABLE` anyone writes
    from omitting it, and `check:tenancy`/`check:arms` do not look for it. The deploy tooling is
    where it belongs.
+35. **A k6 report directory name says `vus10` for an arrival-rate run.** `scripts/load.ts` builds
+   the name from the catalog defaults and does not know which executor the script declares, so
+   drill 16's runs are filed under `…-org1-vus10-page1-size20-90s` while the summary inside them
+   correctly reads `rate=50.00/s maxvus=200`. It is the "a summary that looks right and is not"
+   defect in the one place `k6/lib/scenario.ts` does not reach, and the directory name is the only
+   index those runs have. Adding `rate` to the name would rename every future directory for every
+   script, which is why it was named rather than done.
 
 ## Releases
 
