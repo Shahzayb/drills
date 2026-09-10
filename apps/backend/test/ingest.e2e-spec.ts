@@ -233,6 +233,70 @@ describe('POST /ingest (e2e)', () => {
     });
   });
 
+  // ------------------------------------------------------------ last_message_at
+
+  /**
+   * Card 16. The column is NOT NULL with `DEFAULT now()`, and this path writes
+   * it explicitly rather than leaning on the default — so `LAST_MESSAGE=skip`
+   * has somewhere to write a NULL.
+   *
+   * Under that arm every assertion in this block fails, and so does most of the
+   * rest of the suite, because a POST /ingest that violates a not-null
+   * constraint is a 500. That is the point of the arm: the deploy that adds the
+   * constraint before the code that fills the column does not degrade, it stops.
+   */
+  describe('last_message_at', () => {
+    const timesFor = async (org: string, eventId: string) =>
+      tenants.withOrg(org, async (tx) => {
+        const { rows } = await tx.query<{
+          last_message_at: Date;
+          first_message_at: Date;
+        }>(
+          `SELECT c.last_message_at,
+                  (SELECT min(m.created_at) FROM messages m
+                    WHERE m.conversation_id = c.id) AS first_message_at
+             FROM conversations c
+            WHERE c.org_id = $1::bigint AND c.provider_event_id = $2`,
+          [org, eventId],
+        );
+        return rows[0];
+      });
+
+    /**
+     * Equal to the microsecond, and not by luck: both are `now()`, which is
+     * TRANSACTION start time, and the conversation and its first message are
+     * written in one transaction. `clock_timestamp()` on either side would make
+     * this an inequality with no fixed bound.
+     */
+    it('is the first message\'s timestamp, to the microsecond', async () => {
+      const body = event('lastmsg');
+      await post(body).expect(201);
+
+      const times = await timesFor(orgId, body.eventId);
+      expect(times.last_message_at).toBeInstanceOf(Date);
+      expect(times.last_message_at.getTime()).toBe(
+        times.first_message_at.getTime(),
+      );
+    });
+
+    /** A duplicate delivery appends no message, so it must move no timestamp.
+     *  The ON CONFLICT DO UPDATE writes provider_event_id back to itself and
+     *  nothing else — this is the assertion that says so. */
+    it('does not move when a duplicate is redelivered', async () => {
+      const body = event('lastmsg-dup');
+      await post(body).expect(201);
+      const before = await timesFor(orgId, body.eventId);
+
+      await new Promise((r) => setTimeout(r, 20));
+      await post(body).expect(200);
+      const after = await timesFor(orgId, body.eventId);
+
+      expect(after.last_message_at.getTime()).toBe(
+        before.last_message_at.getTime(),
+      );
+    });
+  });
+
   // -------------------------------------------------------------- validation
 
   describe('validation', () => {

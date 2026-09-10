@@ -903,8 +903,8 @@ async function locks(): Promise<Record<string, unknown>> {
     'ALTER TABLE ADD COLUMN',
     [`ALTER TABLE conversations ADD COLUMN ${column} timestamptz`],
     'INSERT one row',
-    `INSERT INTO conversations (org_id, status, subject, last_message_at)
-     VALUES (${ORG_ID}, 'open', 'lock probe', now())`,
+    `INSERT INTO conversations (org_id, status, provider_event_id, last_message_at)
+     VALUES (${ORG_ID}, 'open', 'probe-' || gen_random_uuid(), now())`,
   );
 
   await probe(
@@ -918,8 +918,8 @@ async function locks(): Promise<Record<string, unknown>> {
     'UPDATE (the backfill statement)',
     [`UPDATE conversations SET status = status WHERE id = (SELECT id FROM conversations LIMIT 1)`],
     'INSERT one row',
-    `INSERT INTO conversations (org_id, status, subject, last_message_at)
-     VALUES (${ORG_ID}, 'open', 'lock probe', now())`,
+    `INSERT INTO conversations (org_id, status, provider_event_id, last_message_at)
+     VALUES (${ORG_ID}, 'open', 'probe-' || gen_random_uuid(), now())`,
   );
 
   // The pay-off row. VALIDATE holds SHARE UPDATE EXCLUSIVE for its whole scan
@@ -934,8 +934,8 @@ async function locks(): Promise<Record<string, unknown>> {
     'VALIDATE CONSTRAINT',
     [`ALTER TABLE conversations VALIDATE CONSTRAINT ${constraint}`],
     'INSERT one row',
-    `INSERT INTO conversations (org_id, status, subject, last_message_at, ${column})
-     VALUES (${ORG_ID}, 'open', 'lock probe', now(), now())`,
+    `INSERT INTO conversations (org_id, status, provider_event_id, last_message_at, ${column})
+     VALUES (${ORG_ID}, 'open', 'probe-' || gen_random_uuid(), now(), now())`,
   );
 
   await probe(
@@ -965,7 +965,7 @@ async function locks(): Promise<Record<string, unknown>> {
   );
   await client.query(`ALTER TABLE conversations DROP COLUMN IF EXISTS ${column}`);
   await client.query(
-    `DELETE FROM conversations WHERE subject = 'lock probe'`,
+    `DELETE FROM conversations WHERE provider_event_id LIKE 'probe-%'`,
   );
   await other.end();
 
@@ -1088,8 +1088,8 @@ async function index(): Promise<Record<string, unknown>> {
         .catch(() => false);
       const writeOk = await other
         .query(
-          `INSERT INTO conversations (org_id, status, subject, last_message_at)
-           VALUES (${ORG_ID}, 'open', 'index probe', now())`,
+          `INSERT INTO conversations (org_id, status, provider_event_id, last_message_at)
+           VALUES (${ORG_ID}, 'open', 'probe-' || gen_random_uuid(), now())`,
         )
         .then(() => true)
         .catch(() => false);
@@ -1121,8 +1121,8 @@ async function index(): Promise<Record<string, unknown>> {
       await other.query("SET statement_timeout = '2000ms'");
       const writeOk = await other
         .query(
-          `INSERT INTO conversations (org_id, status, subject, last_message_at)
-           VALUES (${ORG_ID}, 'open', 'index probe', now())`,
+          `INSERT INTO conversations (org_id, status, provider_event_id, last_message_at)
+           VALUES (${ORG_ID}, 'open', 'probe-' || gen_random_uuid(), now())`,
         )
         .then(() => true)
         .catch(() => false);
@@ -1239,7 +1239,9 @@ async function index(): Promise<Record<string, unknown>> {
     await drop();
   }
 
-  await client.query(`DELETE FROM conversations WHERE subject = 'index probe'`);
+  await client.query(
+    `DELETE FROM conversations WHERE provider_event_id LIKE 'probe-%'`,
+  );
   await other.end();
 
   out.runs = runs;
