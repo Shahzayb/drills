@@ -1,0 +1,61 @@
+schema naive
+  ORG_ID               1                            (default)
+  SHAPE                backfill                     (default)
+  COLUMN               last_message_at              (default)
+  BATCH                10000                        (default)
+  PAUSE_MS             50                           (default)
+  SCAN                 keyset                       (default)
+  SAMPLE_MS            250                          (default)
+  WAIT                 35                           (env)
+  ABORT_AFTER          0                            (default)
+  BATCHES              1000,10000,100000            (default)
+  ROWS                 200000                       (default)
+  ONLY                 (none)                       (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","assign":"optimistic","searchStrategy":"fts","idempotency":"both","onConflict":"update","idempotencyTtlSeconds":"86400","quota":"atomic","quotaMaxRetries":"20","lastMessage":"write","import":"stream","importBatchRows":"1000","importOnFail":"resume","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  waiting 35s so the load has a measured window open...
+
+  shape: backfill   ddl backend pid: 2299
+
+┌─────────┬─────────────────────────┬────────────┐
+│ (index) │ statement               │ ms         │
+├─────────┼─────────────────────────┼────────────┤
+│ 0       │ 'ADD COLUMN (nullable)' │ '1.05'     │
+│ 1       │ 'SET DEFAULT now()'     │ '4.54'     │
+│ 2       │ 'UPDATE ... 2.5M rows'  │ '53272.81' │
+│ 3       │ 'SET NOT NULL'          │ '206.59'   │
+└─────────┴─────────────────────────┴────────────┘
+
+  ONE transaction, held for 53487.99ms
+  Every statement above ran inside it, so the ACCESS EXCLUSIVE taken by
+  the first was held until the last one committed.
+
+  pg_locks: 212 samples, 210 of them with a queue
+  worst sample at +770.02ms — 10 backend(s) waiting
+
+┌─────────┬──────┬───────────────────────┬─────────┬───────────────────┬────────────────┬────────────────────────────────────────────────────────────────────────┐
+│ (index) │ pid  │ mode                  │ granted │ wait              │ held/waited ms │ query                                                                  │
+├─────────┼──────┼───────────────────────┼─────────┼───────────────────┼────────────────┼────────────────────────────────────────────────────────────────────────┤
+│ 0       │ 2299 │ 'AccessExclusiveLock' │ true    │ 'IO/DataFileRead' │ '762.97'       │ 'UPDATE conversations c SET last_message_at_naive = COALESCE((SELECT ' │
+│ 1       │ 2299 │ 'RowExclusiveLock'    │ true    │ 'IO/DataFileRead' │ '762.98'       │ 'UPDATE conversations c SET last_message_at_naive = COALESCE((SELECT ' │
+│ 2       │ 2308 │ 'RowExclusiveLock'    │ false   │ 'Lock/relation'   │ '447.99'       │ 'WITH ingested AS ( INSERT INTO conversations (org_id, status, provid' │
+│ 3       │ 1677 │ 'RowExclusiveLock'    │ false   │ 'Lock/relation'   │ '423.08'       │ 'WITH ingested AS ( INSERT INTO conversations (org_id, status, provid' │
+│ 4       │ 2353 │ 'RowExclusiveLock'    │ false   │ 'Lock/relation'   │ '397.20'       │ 'WITH ingested AS ( INSERT INTO conversations (org_id, status, provid' │
+│ 5       │ 2354 │ 'RowExclusiveLock'    │ false   │ 'Lock/relation'   │ '383.14'       │ 'WITH ingested AS ( INSERT INTO conversations (org_id, status, provid' │
+│ 6       │ 2355 │ 'RowExclusiveLock'    │ false   │ 'Lock/relation'   │ '363.07'       │ 'WITH ingested AS ( INSERT INTO conversations (org_id, status, provid' │
+│ 7       │ 2356 │ 'RowExclusiveLock'    │ false   │ 'Lock/relation'   │ '341.54'       │ 'WITH ingested AS ( INSERT INTO conversations (org_id, status, provid' │
+│ 8       │ 2357 │ 'RowExclusiveLock'    │ false   │ 'Lock/relation'   │ '279.54'       │ 'WITH ingested AS ( INSERT INTO conversations (org_id, status, provid' │
+│ 9       │ 2358 │ 'RowExclusiveLock'    │ false   │ 'Lock/relation'   │ '262.97'       │ 'WITH ingested AS ( INSERT INTO conversations (org_id, status, provid' │
+│ 10      │ 2359 │ 'RowExclusiveLock'    │ false   │ 'Lock/relation'   │ '235.88'       │ 'WITH ingested AS ( INSERT INTO conversations (org_id, status, provid' │
+│ 11      │ 2360 │ 'RowExclusiveLock'    │ false   │ 'Lock/relation'   │ '222.52'       │ 'WITH ingested AS ( INSERT INTO conversations (org_id, status, provid' │
+└─────────┴──────┴───────────────────────┴─────────┴───────────────────┴────────────────┴────────────────────────────────────────────────────────────────────────┘
+
+  the lock  : AccessExclusiveLock, RowExclusiveLock
+  it blocked: 10 backend(s) queued for RowExclusiveLock
+  longest wait observed: 52922.97ms
+
+  heap 552.3MB -> 552.3MB   n_dead_tup 8,498 -> 2,508,501
+
+  cleanup: dropped last_message_at_naive, VACUUM 2194.93ms, 552.3MB -> 552.3MB
+

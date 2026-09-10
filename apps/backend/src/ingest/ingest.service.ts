@@ -105,6 +105,30 @@ export const QUOTA: QuotaMode = QUOTA_MODES.includes(
   : 'atomic';
 
 /**
+ * Whether the ingest path fills `conversations.last_message_at`. Card 16.
+ *
+ * - `write`  `now()`, which inside this transaction is the same instant the
+ *            first message's `created_at` default resolves to.
+ * - `skip`   NULL, which the NOT NULL constraint added by migration 016 rejects.
+ *
+ * `skip` is the expand/contract ordering failure as a switch: the constraint
+ * went on before the code that fills the column, so every delivery is a 500.
+ * That is what a required column costs when the three deploys are done in the
+ * wrong order, and `pnpm db:test:skiplast` is the red run that proves the arm
+ * still switches.
+ *
+ * See plans/2026-09-10_drill-16-zero-downtime-migration.md.
+ */
+export type LastMessageMode = 'write' | 'skip';
+
+export const LAST_MESSAGE: LastMessageMode =
+  process.env.LAST_MESSAGE === 'skip' ? 'skip' : 'write';
+
+/** Inlined rather than bound: it is SQL, not a value, and the two arms differ
+ *  in which expression runs rather than in what is sent. */
+const LAST_MESSAGE_AT = LAST_MESSAGE === 'skip' ? 'NULL' : 'now()';
+
+/**
  * The billing period, as SQL rather than as a JavaScript date.
  *
  * `now()` is transaction start time, so every statement in one transaction gets
@@ -371,8 +395,8 @@ export class IngestService {
 
     const { rows } = await tx.query<IngestRow>(
       `WITH ingested AS (
-         INSERT INTO conversations (org_id, status, provider_event_id)
-         VALUES ($1::bigint, $4, $2)
+         INSERT INTO conversations (org_id, status, provider_event_id, last_message_at)
+         VALUES ($1::bigint, $4, $2, ${LAST_MESSAGE_AT})
          ON CONFLICT (org_id, provider_event_id) WHERE provider_event_id IS NOT NULL
            ${action}
          RETURNING id, xmax = 0 AS created
@@ -430,8 +454,8 @@ export class IngestService {
   ): Promise<IngestRow> {
     const { rows } = await tx.query<{ id: string }>(
       `WITH ingested AS (
-         INSERT INTO conversations (org_id, status, provider_event_id)
-         VALUES ($1::bigint, $4, $2)
+         INSERT INTO conversations (org_id, status, provider_event_id, last_message_at)
+         VALUES ($1::bigint, $4, $2, ${LAST_MESSAGE_AT})
          RETURNING id
        ), first_message AS (
          INSERT INTO messages (conversation_id, org_id, message)
@@ -476,8 +500,8 @@ export class IngestService {
     if (existing.rows[0]) return { id: existing.rows[0].id, created: false };
 
     const inserted = await tx.query<{ id: string }>(
-      `INSERT INTO conversations (org_id, status, provider_event_id)
-       VALUES ($1::bigint, $3, $2)
+      `INSERT INTO conversations (org_id, status, provider_event_id, last_message_at)
+       VALUES ($1::bigint, $3, $2, ${LAST_MESSAGE_AT})
        RETURNING id`,
       [orgId, event.eventId, event.status],
     );

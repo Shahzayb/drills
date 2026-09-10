@@ -147,6 +147,14 @@ services:
       # module's own default ('fts'). See
       # plans/2026-08-29_drill-11-full-text-search.md.
       - SEARCH_STRATEGY=${SEARCH_STRATEGY:-}
+      # Card 16, and the same one-line A/B as LIST_STRATEGY above:
+      # `LAST_MESSAGE=skip docker compose up -d nest_server` makes POST /ingest
+      # write NULL into conversations.last_message_at, which migration 016's
+      # NOT NULL constraint rejects. It is the expand/contract ordering failure
+      # as a switch — the constraint deployed before the code that fills the
+      # column — and it is a permanent red arm.
+      # See plans/2026-09-10_drill-16-zero-downtime-migration.md.
+      - LAST_MESSAGE=${LAST_MESSAGE:-}
       # Card 12, and the same one-line A/B as LIST_STRATEGY above:
       # `IDEMPOTENCY=constraint docker compose up -d nest_server`. Four arms —
       # none | constraint | redis | both — and empty means IngestService's own

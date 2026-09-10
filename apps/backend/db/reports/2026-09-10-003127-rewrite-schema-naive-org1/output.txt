@@ -1,0 +1,34 @@
+schema naive
+  ORG_ID               1                            (default)
+  SHAPE                rewrite                      (env)
+  COLUMN               last_message_at              (default)
+  BATCH                10000                        (default)
+  PAUSE_MS             50                           (default)
+  SCAN                 keyset                       (default)
+  SAMPLE_MS            250                          (default)
+  WAIT                 0                            (default)
+  ABORT_AFTER          0                            (default)
+  BATCHES              1000,10000,100000            (default)
+  ROWS                 200000                       (default)
+  ONLY                 (none)                       (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","assign":"optimistic","searchStrategy":"fts","idempotency":"both","onConflict":"update","idempotencyTtlSeconds":"86400","quota":"atomic","quotaMaxRetries":"20","lastMessage":"write","import":"stream","importBatchRows":"1000","importOnFail":"resume","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  shape: rewrite   ddl backend pid: 2702
+
+┌─────────┬─────────────────────────────────────────────────────────────┬───────────┐
+│ (index) │ statement                                                   │ ms        │
+├─────────┼─────────────────────────────────────────────────────────────┼───────────┤
+│ 0       │ 'ADD COLUMN NOT NULL DEFAULT clock_timestamp()  [volatile]' │ '2518.23' │
+└─────────┴─────────────────────────────────────────────────────────────┴───────────┘
+
+  ONE transaction, held for 2827.17ms
+  Every statement above ran inside it, so the ACCESS EXCLUSIVE taken by
+  the first was held until the last one committed.
+
+  pg_locks: 12 samples, nothing ever waited
+
+  heap 552.3MB -> 276.0MB   n_dead_tup 0 -> 0
+
+  cleanup: dropped last_message_at_naive, VACUUM 379.81ms, 276.0MB -> 276.0MB
+

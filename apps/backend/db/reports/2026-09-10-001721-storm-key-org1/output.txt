@@ -1,0 +1,14 @@
+storm key  api http://nest_server:3002
+  ORG_ID               1                            (env)
+  REQUESTS             10000                        (default)
+  UNIQUE               3000                         (default)
+  CONCURRENCY          50                           (default)
+  SHAPE                adjacent                     (default)
+  FLUSH_AT             50                           (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","assign":"optimistic","searchStrategy":"fts","idempotency":"both","onConflict":"update","idempotencyTtlSeconds":"86400","quota":"atomic","quotaMaxRetries":"20","lastMessage":"write","import":"stream","importBatchRows":"1000","importOnFail":"resume","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  org 1 api key (shown once, only the sha256 is stored):
+
+    dk_53d6b83173b04bf290a59b0d66556fbc
+

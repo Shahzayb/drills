@@ -1,0 +1,43 @@
+schema locks
+  ORG_ID               1                            (default)
+  SHAPE                backfill                     (default)
+  COLUMN               last_message_at              (default)
+  BATCH                10000                        (default)
+  PAUSE_MS             50                           (default)
+  SCAN                 keyset                       (default)
+  SAMPLE_MS            250                          (default)
+  WAIT                 0                            (default)
+  ABORT_AFTER          0                            (default)
+  BATCHES              1000,10000,100000            (default)
+  ROWS                 200000                       (default)
+  ONLY                 (none)                       (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","assign":"optimistic","searchStrategy":"fts","idempotency":"both","onConflict":"update","idempotencyTtlSeconds":"86400","quota":"atomic","quotaMaxRetries":"20","lastMessage":"write","import":"stream","importBatchRows":"1000","importOnFail":"resume","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  Each row: session A holds a lock inside an open transaction, session B
+  tries something, and B has a 1500ms statement_timeout. "blocked: YES"
+  means B never got through.
+
+┌─────────┬───────────────────────────────────┬─────────────────────────────────────┬────────────────────────────────┬─────────┬────────────────────────────┬───────────┐
+│ (index) │ holding                           │ lock held                           │ attempting                     │ blocked │ queued for                 │ ms        │
+├─────────┼───────────────────────────────────┼─────────────────────────────────────┼────────────────────────────────┼─────────┼────────────────────────────┼───────────┤
+│ 0       │ 'ALTER TABLE ADD COLUMN'          │ 'AccessExclusiveLock'               │ 'SELECT one row'               │ 'YES'   │ 'AccessShareLock'          │ '1507.26' │
+│ 1       │ 'ALTER TABLE ADD COLUMN'          │ 'AccessExclusiveLock'               │ 'INSERT one row'               │ 'YES'   │ 'RowExclusiveLock'         │ '1502.33' │
+│ 2       │ 'UPDATE (the backfill statement)' │ 'AccessShareLock, RowExclusiveLock' │ 'SELECT one row'               │ 'no'    │ '-'                        │ '404.17'  │
+│ 3       │ 'UPDATE (the backfill statement)' │ 'AccessShareLock, RowExclusiveLock' │ 'INSERT one row'               │ 'no'    │ '-'                        │ '404.13'  │
+│ 4       │ 'VALIDATE CONSTRAINT'             │ 'ShareUpdateExclusiveLock'          │ 'INSERT one row'               │ 'no'    │ '-'                        │ '404.46'  │
+│ 5       │ 'VALIDATE CONSTRAINT'             │ 'ShareUpdateExclusiveLock'          │ 'VACUUM is what it DOES block' │ 'YES'   │ 'ShareUpdateExclusiveLock' │ '1507.92' │
+└─────────┴───────────────────────────────────┴─────────────────────────────────────┴────────────────────────────────┴─────────┴────────────────────────────┴───────────┘
+
+  The conflict table this walks a corner of (Postgres docs, "Explicit
+  Locking"). ACCESS EXCLUSIVE is the only mode that conflicts with
+  ACCESS SHARE, which is the mode a plain SELECT takes — which is why it
+  is the only one that can stop a read:
+
+    ACCESS SHARE             SELECT
+    ROW EXCLUSIVE            INSERT / UPDATE / DELETE
+    SHARE                    CREATE INDEX          blocks writes, not reads
+    SHARE UPDATE EXCLUSIVE   VACUUM, ANALYZE, VALIDATE CONSTRAINT,
+                             CREATE INDEX CONCURRENTLY   blocks neither
+    ACCESS EXCLUSIVE         ALTER TABLE, DROP, TRUNCATE   blocks everything
+

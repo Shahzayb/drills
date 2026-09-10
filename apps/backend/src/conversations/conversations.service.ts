@@ -21,6 +21,9 @@ interface ConversationRow {
   version: number;
   created_at: Date;
   updated_at: Date;
+  /** Card 16. When this conversation last had a message — not the same thing as
+   *  updated_at, which every write to the row moves. */
+  last_message_at: Date;
   /**
    * The sort key rendered by *Postgres*, selected only on the keyset arm.
    *
@@ -94,6 +97,14 @@ export interface ConversationSummary {
   version: number;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Card 16. When this conversation last had a message, which is NOT
+   * `updatedAt`: an assign or a status change moves `updatedAt` and leaves this
+   * alone. Read-only here — nothing sorts by it, because the index that would
+   * make that cheap is priced and rejected in
+   * plans/2026-09-10_drill-16-zero-downtime-migration.md.
+   */
+  lastMessageAt: string;
 }
 
 /** The list's richer shape — everything ConversationSummary has, plus what
@@ -234,6 +245,7 @@ const toSummary = (row: ConversationRow): ConversationSummary => ({
   version: row.version,
   createdAt: row.created_at.toISOString(),
   updatedAt: row.updated_at.toISOString(),
+  lastMessageAt: row.last_message_at.toISOString(),
 });
 
 const toItem = (
@@ -529,7 +541,7 @@ export class ConversationsService {
     const [rows, count] = await Promise.all([
       tx.query<ConversationRow>(
         `SELECT c.id, c.status, c.assignee_id, c.version,
-                c.created_at, c.updated_at
+                c.created_at, c.updated_at, c.last_message_at
                 ${this.cursorKeyColumn(paging, sortColumn)}
            FROM conversations c
           WHERE ${paging.where}
@@ -602,7 +614,8 @@ export class ConversationsService {
     const [rows, count] = await Promise.all([
       tx.query<ConversationWithAssigneeRow>(
         `SELECT c.id, c.status, c.assignee_id, c.version,
-                u.name AS assignee_name, c.created_at, c.updated_at
+                u.name AS assignee_name, c.created_at, c.updated_at,
+                c.last_message_at
                 ${this.cursorKeyColumn(paging, sortColumn)}
            FROM conversations c
            LEFT JOIN memberships m ON m.id = c.assignee_id
@@ -852,7 +865,8 @@ export class ConversationsService {
   async get(orgId: string, id: string): Promise<ConversationSummary> {
     const result = await this.tenants.withOrg(orgId, (tx) =>
       tx.query<ConversationRow>(
-        `SELECT id, status, assignee_id, version, created_at, updated_at
+        `SELECT id, status, assignee_id, version, created_at, updated_at,
+                last_message_at
            FROM conversations
           WHERE id = $1`,
         [id],
@@ -879,7 +893,8 @@ export class ConversationsService {
         `UPDATE conversations
             SET status = $2, version = version + 1, updated_at = now()
           WHERE id = $1
-      RETURNING id, status, assignee_id, version, created_at, updated_at`,
+      RETURNING id, status, assignee_id, version, created_at, updated_at,
+                last_message_at`,
         [id, status],
       ),
     );
@@ -1057,7 +1072,8 @@ export class ConversationsService {
               updated_at  = now()
         WHERE id = $1
           ${guard}
-    RETURNING id, status, assignee_id, version, created_at, updated_at`,
+    RETURNING id, status, assignee_id, version, created_at, updated_at,
+              last_message_at`,
       params,
     );
 
@@ -1092,7 +1108,8 @@ export class ConversationsService {
   ): Promise<ConversationSummary> {
     const { rows } = await tx.query<ConversationWithAssigneeRow>(
       `SELECT c.id, c.status, c.assignee_id, c.version,
-              u.name AS assignee_name, c.created_at, c.updated_at
+              u.name AS assignee_name, c.created_at, c.updated_at,
+              c.last_message_at
          FROM conversations c
          LEFT JOIN memberships m ON m.id = c.assignee_id
          LEFT JOIN users u       ON u.id = m.user_id
@@ -1117,7 +1134,8 @@ export class ConversationsService {
               version     = version + 1,
               updated_at  = now()
         WHERE id = $1
-    RETURNING id, status, assignee_id, version, created_at, updated_at`,
+    RETURNING id, status, assignee_id, version, created_at, updated_at,
+              last_message_at`,
       [id, assigneeId],
     );
 
@@ -1143,7 +1161,8 @@ export class ConversationsService {
   ): Promise<ConflictException | NotFoundException> {
     const { rows } = await tx.query<ConversationWithAssigneeRow>(
       `SELECT c.id, c.status, c.assignee_id, c.version,
-              u.name AS assignee_name, c.created_at, c.updated_at
+              u.name AS assignee_name, c.created_at, c.updated_at,
+              c.last_message_at
          FROM conversations c
          LEFT JOIN memberships m ON m.id = c.assignee_id
          LEFT JOIN users u       ON u.id = m.user_id

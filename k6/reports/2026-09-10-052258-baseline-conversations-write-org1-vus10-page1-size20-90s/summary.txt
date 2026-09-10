@@ -1,0 +1,11 @@
+
+  name=baseline org=1 rate=50.00/s maxvus=200 warmup=20s measured=90s prefix=k6-baseline
+  measured requests : 4500
+  errors            : 4500 (0.00%)
+  p50 / p95 / p99   : 3.88 / 6.91 / 8.85 ms
+  min / avg / max   : 0.76 / 3.89 / 27.33 ms
+  throughput        : 50.00 req/s of 50.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 3.80  p95 6.90  p99 8.67 ms
+
+RESULT,baseline,1,200,50,k6-baseline,3.88,6.91,8.85,50.00,4500

@@ -1,0 +1,59 @@
+schema safe
+  ORG_ID               1                            (default)
+  SHAPE                backfill                     (default)
+  COLUMN               last_message_at              (default)
+  BATCH                10000                        (default)
+  PAUSE_MS             50                           (default)
+  SCAN                 keyset                       (default)
+  SAMPLE_MS            250                          (default)
+  WAIT                 25                           (env)
+  ABORT_AFTER          0                            (default)
+  BATCHES              1000,10000,100000            (default)
+  ROWS                 200000                       (default)
+  ONLY                 (none)                       (default)
+
+  server arms  {"listStrategy":"batched","keysetTiebreak":"on","assign":"optimistic","searchStrategy":"fts","idempotency":"both","onConflict":"update","idempotencyTtlSeconds":"86400","quota":"atomic","quotaMaxRetries":"20","lastMessage":"write","import":"stream","importBatchRows":"1000","importOnFail":"resume","queryCounter":"on","logLevel":"info","tracing":"off"}
+
+  waiting 25s so the load has a measured window open...
+
+┌─────────┬────────────────────────────────────────────┬────────────────────────────┬────────────┐
+│ (index) │ step                                       │ lock                       │ ms         │
+├─────────┼────────────────────────────────────────────┼────────────────────────────┼────────────┤
+│ 0       │ 'ADD COLUMN + SET DEFAULT'                 │ 'ACCESS EXCLUSIVE (µs)'    │ '6.86'     │
+│ 1       │ 'backfill, 10,000-row batches, 50ms pause' │ 'ROW EXCLUSIVE, per batch' │ '83461.34' │
+│ 2       │ 'ADD CONSTRAINT ... NOT VALID'             │ 'ACCESS EXCLUSIVE (µs)'    │ '1012.40'  │
+│ 3       │ 'VALIDATE CONSTRAINT'                      │ 'SHARE UPDATE EXCLUSIVE'   │ '310.29'   │
+└─────────┴────────────────────────────────────────────┴────────────────────────────┴────────────┘
+
+  84802.86ms end to end, and the longest ACCESS EXCLUSIVE lock in it
+  was 1012.40ms.
+
+  backfill
+    batches           : 252 of 10,000
+    rows updated      : 2,501,766
+    wall / work / paused: 83461.11 / 70562.53 / 12550 ms
+    rows/s (work only): 35454.60
+    first / last / slowest batch: 229.48 / 0.76 / 763.70 ms
+
+  pg_locks: 337 samples, 4 of them with a queue
+  worst sample at +83654.66ms — 1 backend(s) waiting
+
+┌─────────┬──────┬────────────────────────────┬─────────┬───────────────────────┬────────────────┬────────────────────────────────────────────────────────────────────────┐
+│ (index) │ pid  │ mode                       │ granted │ wait                  │ held/waited ms │ query                                                                  │
+├─────────┼──────┼────────────────────────────┼─────────┼───────────────────────┼────────────────┼────────────────────────────────────────────────────────────────────────┤
+│ 0       │ 2598 │ 'ShareUpdateExclusiveLock' │ true    │ 'Timeout/VacuumDelay' │ '39820.22'     │ 'autovacuum: VACUUM ANALYZE public.conversations'                      │
+│ 1       │ 2492 │ 'AccessExclusiveLock'      │ false   │ 'Lock/relation'       │ '173.81'       │ 'ALTER TABLE conversations ADD CONSTRAINT conversations_last_message_' │
+└─────────┴──────┴────────────────────────────┴─────────┴───────────────────────┴────────────────┴────────────────────────────────────────────────────────────────────────┘
+
+  the lock  : ShareUpdateExclusiveLock
+  it blocked: 1 backend(s) queued for AccessExclusiveLock
+  longest wait observed: 938.30ms
+
+  last_message_at_safe: 0 NULLs left, constraint validated: true
+
+  heap 552.3MB -> 552.3MB   n_dead_tup 0 -> 2,499,964
+  (the same garbage the naive arm made — batching changes the LOCK, not
+   the amount of rewriting.)
+
+  cleanup: dropped last_message_at_safe, VACUUM 454.37ms, 552.3MB -> 552.3MB
+
