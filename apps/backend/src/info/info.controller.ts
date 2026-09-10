@@ -9,6 +9,7 @@ import { SEARCH_STRATEGY } from '../search/search.service';
 import {
   IDEMPOTENCY,
   IDEMPOTENCY_TTL_SECONDS,
+  LAST_MESSAGE,
   ON_CONFLICT,
   QUOTA,
 } from '../ingest/ingest.service';
@@ -43,6 +44,7 @@ export interface InfoResponse {
     idempotencyTtlSeconds: string;
     quota: string;
     quotaMaxRetries: string;
+    lastMessage: string;
     import: string;
     importBatchRows: string;
     importOnFail: string;
@@ -89,6 +91,7 @@ export class InfoController {
         idempotencyTtlSeconds: String(IDEMPOTENCY_TTL_SECONDS),
         quota: QUOTA,
         quotaMaxRetries: String(QUOTA_MAX_RETRIES),
+        lastMessage: LAST_MESSAGE,
         import: IMPORT,
         importBatchRows: String(IMPORT_BATCH_ROWS),
         importOnFail: IMPORT_ON_FAIL,
