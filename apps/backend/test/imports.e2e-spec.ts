@@ -214,6 +214,32 @@ describe('POST /imports (e2e)', () => {
       expect(rows[0].message).toBe('line one, with a comma\nline two');
     });
 
+    /**
+     * Card 16. An import carries history, so the row's last message did not
+     * arrive at import time — it arrived whenever the CSV says. Leaning on the
+     * column's `DEFAULT now()` here would stamp a 2024 conversation with
+     * today's date and nothing would ever say so.
+     *
+     * The CSV's own updated_at is the value, which is also what the seed does
+     * and what the backfill computes for rows that predate the column.
+     */
+    it('takes last_message_at from the CSV, not from the wall clock', async () => {
+      const { rows } = await tenants.withOrg(orgId, (tx) =>
+        tx.query<{ last_message_at: Date; updated_at: Date }>(
+          `SELECT last_message_at, updated_at FROM conversations
+            WHERE provider_event_id = $1`,
+          ['import:happy-5'],
+        ),
+      );
+
+      expect(rows[0].last_message_at.toISOString()).toBe(
+        '2024-03-05T14:15:00.000Z',
+      );
+      expect(rows[0].last_message_at.getTime()).toBe(
+        rows[0].updated_at.getTime(),
+      );
+    });
+
     // Drill 12's partial unique index, doing a job it was not built for. This
     // is what makes "restart from row zero" a correct answer.
     it('writes nothing new when the same file is imported again', async () => {

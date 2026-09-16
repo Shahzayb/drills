@@ -35,6 +35,10 @@ export const BASE_URL = __ENV.BASE_URL || 'http://nest_server:3002';
 export const NAME = __ENV.NAME || '';
 export const ORG_ID = __ENV.ORG_ID || '1';
 export const VUS = Number(__ENV.VUS || '10');
+// Drill 16. Requests per second a constant-arrival-rate script offers,
+// independent of how long any of them takes. VUS still bounds how many can be
+// in flight; a script using this one declares its own preAllocatedVUs/maxVUs.
+export const RATE = Number(__ENV.RATE || '50');
 export const WARMUP = __ENV.WARMUP || '20s';
 export const DURATION = __ENV.DURATION || '60s';
 export const PAGE = Number(__ENV.PAGE || '1');
@@ -64,6 +68,11 @@ const SUMMARY_OUT = __ENV.SUMMARY_OUT;
 const MEASURED_DURATION = 'http_req_duration{scenario:measure}';
 const MEASURED_REQS = 'http_reqs{scenario:measure}';
 const MEASURED_FAILED = 'http_req_failed{scenario:measure}';
+// Drill 16. Iterations the executor wanted to start and could not, because
+// every allocated VU was still parked on an open request. It exists ONLY for an
+// arrival-rate executor, so the threshold that declares it is added only for
+// one — a threshold naming a metric k6 never created fails the whole run.
+const MEASURED_DROPPED = 'dropped_iterations{scenario:measure}';
 
 /**
  * What handleSummary is handed. @types/k6 types `Options` but not this, and the
@@ -73,6 +82,17 @@ const MEASURED_FAILED = 'http_req_failed{scenario:measure}';
 export interface SummaryData {
   metrics: Record<string, { values: Record<string, number> }>;
 }
+
+/**
+ * The keys a k6 Rate sub-metric carries, and the trap in them.
+ *
+ * `http_req_failed` is a Rate whose observations are "did this request fail?",
+ * so on THAT metric `passes` counts the requests that FAILED and `fails` counts
+ * the ones that were fine. Reading `fails` prints the success count under the
+ * word "errors" — a baseline of 4,500 clean requests reported as 4,500 errors
+ * at 0.00%, which is how this was caught.
+ */
+type FailedValues = { rate?: number; passes?: number };
 
 /** What handleSummary returns: stdout, plus a file per path. */
 type SummaryOutput = Record<string, string>;
@@ -104,6 +124,11 @@ type MeasureScenario = Scenario & {
   duration?: string;
   vus?: number;
   stages?: Stage[];
+  /** constant-arrival-rate only. Iterations started per `timeUnit`. */
+  rate?: number;
+  timeUnit?: string;
+  maxVUs?: number;
+  preAllocatedVUs?: number;
 };
 
 /** The default shape: flat concurrency for a fixed window. */
@@ -124,12 +149,36 @@ const flat = (): MeasureScenario =>
  * and is not, which is the defect this whole harness exists to prevent.
  */
 function shapeOf(measure: MeasureScenario) {
+  // OPEN MODEL, and it needs its own branch rather than falling through to the
+  // `vus` default below. An arrival-rate scenario has no `vus` key at all, so
+  // the fallback would print `vus=10` over a run whose whole subject is offered
+  // load — a summary that looks right and is not, which is the defect this
+  // module's header calls out. Drill 16.
+  if (measure.rate !== undefined) {
+    if (!measure.duration) {
+      throw new Error(
+        `an arrival-rate measure scenario needs a duration — throughput is ` +
+          `reported per measured second and there is nothing to divide by`,
+      );
+    }
+    return {
+      seconds: seconds(measure.duration),
+      duration: measure.duration,
+      // What was ALLOCATED, not what was used. Under a lock every VU is parked
+      // on an open request, and the gap between this and the achieved rate is
+      // the dropped_iterations count summary() prints.
+      vus: measure.maxVUs ?? measure.preAllocatedVUs ?? VUS,
+      rate: measure.rate / seconds(measure.timeUnit ?? '1s'),
+    };
+  }
+
   if (measure.stages) {
     const total = measure.stages.reduce((s, st) => s + seconds(st.duration), 0);
     return {
       seconds: total,
       duration: `${total}s`,
       vus: Math.max(...measure.stages.map((s) => s.target)),
+      rate: undefined,
     };
   }
   if (!measure.duration) {
@@ -142,11 +191,18 @@ function shapeOf(measure: MeasureScenario) {
     seconds: seconds(measure.duration),
     duration: measure.duration,
     vus: measure.vus ?? VUS,
+    rate: undefined,
   };
 }
 
 /** The warm-up mirrors the measured stage, shortened and thrown away. */
 function warmupFor(measure: MeasureScenario): MeasureScenario {
+  // The arrival-rate warm-up mirrors the shape rather than flattening to VUs:
+  // an open-model run whose warm-up was closed-model would open the pool under
+  // a different regime than the one being measured.
+  if (measure.rate !== undefined) {
+    return { ...measure, duration: WARMUP, gracefulStop: '0s' };
+  }
   // A stages executor has no single duration, so its warm-up is a flat hold at
   // the peak the run will reach — enough to open the pool and warm the JIT.
   if (measure.stages) {
@@ -232,6 +288,9 @@ export function scenario({
     ],
 
     thresholds: {
+      // A declaration, not an assertion, and conditional for the reason given
+      // where MEASURED_DROPPED is defined.
+      ...(SHAPE.rate !== undefined ? { [MEASURED_DROPPED]: ['count>=0'] } : {}),
       // Policy, so the script owns it. A run containing errors is not a
       // baseline — and is exactly what a stress test is looking for. A crossed
       // threshold exits 99 and scripts/load.ts propagates it, so a stress run
@@ -306,6 +365,21 @@ export function summary(
   const count = data.metrics[MEASURED_REQS].values.count;
   const overall = data.metrics.http_req_duration.values;
 
+  // Requests that were never sent. On a closed-model run there is no such
+  // thing — a blocked VU simply sends less — but on an arrival-rate run this is
+  // where an outage actually shows up: latency percentiles only describe
+  // requests that HAPPENED, and a stalled server's worst damage is the traffic
+  // it never got to answer. Drill 16.
+  const dropped = data.metrics[MEASURED_DROPPED]?.values.count ?? 0;
+
+  // The error rate, PRINTED rather than only enforced. It has been a threshold
+  // since drill 05 and the value has never appeared in a summary, so "zero
+  // errors" was a claim about an exit code rather than a recorded number — and
+  // drill 16's whole deliverable is one arm with errors beside one without.
+  // handleSummary REPLACES k6's own end-of-test block, so if this file does not
+  // print it, nothing does.
+  const failed: FailedValues = data.metrics[MEASURED_FAILED]?.values ?? {};
+
   // NOT the counter's own rate. k6 divides a counter's rate by the *whole* run
   // duration, warm-up included — 80s here, not 60s — which understates the
   // measured phase by 25%. Throughput is per measured second or it is wrong.
@@ -315,11 +389,15 @@ export function summary(
 
   const report = [
     '',
-    `  ${NAME ? `name=${NAME} ` : ''}org=${ORG_ID} vus=${SHAPE.vus} warmup=${WARMUP} measured=${SHAPE.duration} ${params}`,
+    `  ${NAME ? `name=${NAME} ` : ''}org=${ORG_ID} ${SHAPE.rate !== undefined ? `rate=${n(SHAPE.rate)}/s maxvus=` : 'vus='}${SHAPE.vus} warmup=${WARMUP} measured=${SHAPE.duration} ${params}`,
     `  measured requests : ${count}`,
+    `  errors            : ${failed.passes ?? 0} (${n((failed.rate ?? 0) * 100)}%)`,
     `  p50 / p95 / p99   : ${n(v.med)} / ${n(v['p(95)'])} / ${n(v['p(99)'])} ms`,
     `  min / avg / max   : ${n(v.min)} / ${n(v.avg)} / ${n(v.max)} ms`,
-    `  throughput        : ${n(rps)} req/s`,
+    `  throughput        : ${n(rps)} req/s${SHAPE.rate !== undefined ? ` of ${n(SHAPE.rate)} offered` : ''}`,
+    ...(SHAPE.rate !== undefined
+      ? [`  dropped           : ${dropped} iterations never started`]
+      : []),
     // Printed side by side so warm-up exclusion is visible rather than claimed.
     // If these two lines are identical, the exclusion is not working.
     `  (incl. warm-up)   : p50 ${n(overall.med)}  p95 ${n(overall['p(95)'])}  p99 ${n(overall['p(99)'])} ms`,

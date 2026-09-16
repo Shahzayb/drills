@@ -460,6 +460,10 @@ export class ImportsService {
    * whose timestamp does not parse raises 22007 from the database rather than
    * being silently coerced in JavaScript, which is what makes the poisoned-file
    * experiment a real failure instead of a simulated one.
+   *
+   * `last_message_at` takes the CSV's own `updated_at` rather than the column
+   * default. A historical export imported today did not have its last message
+   * today, and `DEFAULT now()` would say it did. Card 16.
    */
   private async insertConversations(
     tx: TenantQuery,
@@ -480,14 +484,17 @@ export class ImportsService {
         row.created_at,
         row.updated_at,
       );
-      return `($1::bigint, $${base + 1}, $${base + 2}, $${base + 3}::timestamptz, $${base + 4}::timestamptz)`;
+      // last_message_at reuses updated_at's placeholder rather than binding a
+      // fifth parameter, so the arity stays at four and the 16,383-row ceiling
+      // above is unchanged. See card 16.
+      return `($1::bigint, $${base + 1}, $${base + 2}, $${base + 3}::timestamptz, $${base + 4}::timestamptz, $${base + 4}::timestamptz)`;
     });
 
     const { rows: landed } = await tx.query<{
       id: string;
       provider_event_id: string;
     }>(
-      `INSERT INTO conversations (org_id, status, provider_event_id, created_at, updated_at)
+      `INSERT INTO conversations (org_id, status, provider_event_id, created_at, updated_at, last_message_at)
        VALUES ${values.join(', ')}
        ON CONFLICT (org_id, provider_event_id) WHERE provider_event_id IS NOT NULL
          DO NOTHING

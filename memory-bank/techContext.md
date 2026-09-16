@@ -30,6 +30,18 @@ The UI half is `app/conversations/actions.ts` — a file-level `'use server'` Se
 
 Drill 15 adds the CSV import. `import_jobs` (`1788912000000_import-jobs.js`, RLS'd, `(org_id, created_at DESC)`) carries `rows_read` **and** `resume_row` as separate columns on purpose: `rows_read` is what the parser emitted, `resume_row` is what a transaction committed, and only the second may be trusted by a retry because it is written by the same transaction as the rows it counts. `POST /imports` takes raw `text/csv` — Nest registers body parsers for `json`/`urlencoded` only, so the request arrives unconsumed and is piped to `/tmp/imports/<jobId>.csv` 64KB at a time — inserts the job row, and answers **202** with a job id. `@OrgId()`, not the api key: an import is a customer action. Three arms: `IMPORT` (`buffer`|`stream`, default `stream`), `IMPORT_BATCH_ROWS` (1000) and `IMPORT_ON_FAIL` (`resume`|`restart`, default `resume`). `buffer` is the permanent red arm and answers 200 only when the whole file has landed. The worker is `pipeline(createReadStream, csv-parse's parse(), a batching Writable)`; **backpressure is the awaited `flush()` inside `_write` and nothing else**. Each batch is one `withOrg` transaction of three statements, the third being the progress write — so reporting progress is free. It runs inside its own `runWithRequestContext({ requestId: 'import-<jobId>', … })`, or a million statements are charged to the upload request that made one. An imported conversation reuses drill 12's `provider_event_id` as `import:<external_id>`, which is what makes restart-from-zero correct. `csv-parse` is the first new runtime dependency since drill 06. Numbers: `plans/2026-09-09_drill-15-streaming-csv-import.md`.
 
+Drill 16 adds `conversations.last_message_at`, and it arrives in **two** migrations with a script
+between them. `1788998400000_conversations-last-message-at.js` adds it nullable and then, as a
+SEPARATE statement, `ALTER COLUMN … SET DEFAULT now()` — one statement would store the default in
+`pg_attribute.attmissingval` and stamp all 2.5M existing rows with the migration's own clock, in
+1.44ms, with nothing to say it had. `1789084800000_…-not-null.js` carries `pgm.noTransaction()` and
+is two statements: `ADD CONSTRAINT … NOT NULL last_message_at NOT VALID` behind a
+`SET lock_timeout = '3s'`, then `VALIDATE CONSTRAINT`. The backfill between them is
+`pnpm db:schema backfill`, not a migration. `LAST_MESSAGE` (`write`|`skip`, default `write`) is the
+red arm: `skip` writes NULL from `POST /ingest` and fails 15 tests. `lastMessageAt` is on
+`ConversationSummary` and is deliberately NOT in the `sort` allowlist. Numbers:
+`plans/2026-09-10_drill-16-zero-downtime-migration.md`.
+
 `app/imports/page.tsx` is the UI half and is zero application JavaScript: a job table and a `<meta http-equiv="refresh" content="2">` rendered **only while a job is running**, so the page stops polling on its own. Uploads go through `app/api/imports/route.ts`, a Route Handler that pipes `request.body` on with `duplex: 'half'` for `text/csv` and falls back to `request.formData()` for a browser file input — which buffers, and the page says so. A Server Action was rejected: Next buffers a Server Action's body and caps it at `serverActions.bodySizeLimit`, 1MB by default.
 
 `src/observability` owns request correlation and query counting. One id (`x-request-id`) is generated or accepted at the Next edge and threads every layer via `AsyncLocalStorage`; `PostgresService.query()` appends it as a trailing `/* rid=… */`. Both apps log structured JSON via pino, every line carrying `time`/`level`/`svc`/`msg`/`rid` (`durMs`/`status` named consistently). `LOG_LEVEL` is per-service in `docker-compose.yml`, shell first.
@@ -69,7 +81,7 @@ Seeding is `apps/backend/db/seed.mts`.
 - `db:bench` — `COPY` vs `INSERT` loop, and faker-per-row vs the template corpus.
 - Fixed RNG seed: two runs produce byte-identical data. `--scale` is the only flag.
 
-Load testing is k6 in a container on the Compose network (`test` profile): `pnpm load list --org 150` runs one measurement, `pnpm load search` runs drill 11's. `scripts/load.ts` is the runner — a knob catalog, `parseArgs`, generated `-e` flags, `--help` per script, same shape as `scripts/measure.ts`. Knobs are `ORG_ID`/`VUS`/`WARMUP`/`DURATION`/`BASE_URL`/`NAME`/`P95_BUDGET_MS` for both, plus `PAGE`/`PAGE_SIZE` for list and `Q`/`PAGE_SIZE` for search; each is a `--flag` or an env var, and the two forms produce identical records. `pnpm load:baseline` is an alias for `pnpm load list`, because the plans cite it. No sweep script — the method (vacuum, settle, 3 runs per org in fixed order) is written in `plans/2026-08-13_drill-05-load-test-baseline.md` and run by hand. A run leaves one directory under `k6/reports/` holding `dashboard.html` and `summary.txt`; **the HTML is gitignored** (170KB/run) and every cited number is in the ~300-byte summary. The run directory's name **is** the only index, so a run's `NAME` has to describe its arm well enough to stand alone. The measurement method — warm-up/measure split, tagged sub-metrics, thresholds, p99 arithmetic — lives once in `k6/lib/scenario.ts`; a script in `k6/` is a URL and one summary line, so the two scripts are the same experiment by construction. **Their basenames do not change**: ~60 recorded report directories are named after them, and `scripts/load.ts` strips the extension when building that name.
+Load testing is k6 in a container on the Compose network (`test` profile): `pnpm load list --org 150` runs one measurement, `pnpm load search` runs drill 11's, `pnpm load write` runs drill 16's — the first script here that is an OPEN model (`constant-arrival-rate`, knob `RATE`) rather than fixed concurrency, because a closed-model run cannot show a lock outage: blocked VUs simply stop sending. `k6/lib/scenario.ts` grew an arrival-rate branch in `shapeOf`/`warmupFor`, a conditional `dropped_iterations` threshold (the metric does not exist for a fixed-VU executor, and a threshold naming a metric k6 never created fails the whole run), and an `errors` line in every summary. The flat path is byte-identical, so the ~60 recorded runs stay comparable. `scripts/load.ts` is the runner — a knob catalog, `parseArgs`, generated `-e` flags, `--help` per script, same shape as `scripts/measure.ts`. Knobs are `ORG_ID`/`VUS`/`WARMUP`/`DURATION`/`BASE_URL`/`NAME`/`P95_BUDGET_MS` for both, plus `PAGE`/`PAGE_SIZE` for list and `Q`/`PAGE_SIZE` for search; each is a `--flag` or an env var, and the two forms produce identical records. `pnpm load:baseline` is an alias for `pnpm load list`, because the plans cite it. No sweep script — the method (vacuum, settle, 3 runs per org in fixed order) is written in `plans/2026-08-13_drill-05-load-test-baseline.md` and run by hand. A run leaves one directory under `k6/reports/` holding `dashboard.html` and `summary.txt`; **the HTML is gitignored** (170KB/run) and every cited number is in the ~300-byte summary. The run directory's name **is** the only index, so a run's `NAME` has to describe its arm well enough to stand alone. The measurement method — warm-up/measure split, tagged sub-metrics, thresholds, p99 arithmetic — lives once in `k6/lib/scenario.ts`; a script in `k6/` is a URL and one summary line, so the two scripts are the same experiment by construction. **Their basenames do not change**: ~60 recorded report directories are named after them, and `scripts/load.ts` strips the extension when building that name.
 
 Observability: `pnpm logs:trace <rid>` reconstructs one request across all services. `db:log:on`/`db:log:off`/`db:log:status` toggle Postgres statement logging at runtime, off by default. `db:activity` shows `pg_stat_activity`. `trace:on`/`trace:off` start and stop the collector and Jaeger together with the sampler env var, since a set endpoint with nothing listening is a retry loop; `trace:logs` is the collector's stdout. `db:stats:on`/`db:stats`/`db:stats:reset` drive `pg_stat_statements` (`db:stats` prints top statements by `calls` and by `mean_exec_time` side by side — the orderings diverge on purpose, since an N+1 tops `calls` but is invisible on `mean_exec_time`).
 
@@ -81,7 +93,20 @@ Observability: `pnpm logs:trace <rid>` reconstructs one request across all servi
 
 `db:import <gen|fire|bench|resume>` is drill 15's. `gen` writes a deterministic CSV of `MB` megabytes into `/tmp/import-files`, optionally poisoned at a row with an unparseable timestamp so the failure is Postgres's `22007` rather than an invented exception. `fire` uploads one through `POST /imports` and **asserts six things, exiting 1 on any** — including that the response arrived before the work finished and that peak app RSS stayed under 512MB — and it treats a transport failure as a result rather than an exception, reading the job state straight out of Postgres, because the buffered arm kills the API mid-upload. `bench` walks the batch ladder in raw SQL on a scratch table, per-row against 100/1000/5000/10000/20000 against `COPY`, for the reason `db:claim bench` states. `resume` poisons a file, fails on it, retries, then re-uploads the fixed file. **It reports two memory numbers that disagree on purpose:** the app's own `process.memoryUsage.rss()` off the job row, and `/sys/fs/cgroup/memory.current`, which includes reclaimable page cache from reading the file and therefore sits near the 1g limit on every arm.
 
-`db:test:naive` runs the e2e suite with `LIST_STRATEGY=naive`, expected to fail **two** query-budget assertions. `db:test:notiebreak` runs it with `KEYSET_TIEBREAK=off` and is expected to fail **one**, the tie-block walk. `db:test:like` fails **one**, the stemming assertion. Drill 12 adds four more: `db:test:constraint` and `db:test:donothing` are expected **green** (they are the card's DONE WHEN as a test), `db:test:redis` fails **one** on purpose — a concurrent duplicate gets 202 instead of a conversation id, which is the failure mode the constraint does not have — and `db:test:noidem` fails **three**. Drill 13 adds `db:test:rmw` (fails **two**), `db:test:locking` and `db:test:serializable` (green). Drill 14 adds `db:test:lww` (fails **four** — every assertion in the concurrent block) and `db:test:pessimistic` (green), plus a required red run on the UI half: `ASSIGN=lww … && pnpm test:ui` fails the conflict test. Drill 15 adds `db:test:buffer` (`IMPORT=buffer`), which fails **four**, and `db:test:restart` (`IMPORT_ON_FAIL=restart`), which is expected **green** — a correct answer that is merely slower. Backend suite is 131 tests; Playwright is 3 more, outside it.
+`db:schema <naive|safe|backfill|locks|bench|index>` is drill 16's, and `backfill` is the only
+subcommand that is also an operation — the step you run once between the two migrations, against the
+real column. `naive` and `safe` work on a SCRATCH column (`last_message_at_naive` /
+`last_message_at_safe`) that each run adds and drops, so the two arms differ only in the sequencing
+of statements, every run starts from 2.5M NULLs, and the shipped column is never at risk; the lock
+is on the table, so the blocking behaviour is identical. Both open a SECOND connection that samples
+`pg_locks` joined to `pg_stat_activity` every `SAMPLE_MS` — the session running DDL is inside that
+statement and cannot report on itself. `WAIT` is how the DDL is landed inside a k6 measured window
+launched from another terminal; `ABORT_AFTER` cancels the naive transaction mid-UPDATE. `locks` is
+two live sessions and a chosen interleaving, the shape `db:storm race` already uses. `bench` walks
+`BATCHES` × `SCAN` (`keyset`|`isnull`) and reads the plan off `EXPLAIN` on the statement the
+backfill actually runs, VACUUMing between cells. `index` is the stretch and ships no index.
+
+`db:test:naive` runs the e2e suite with `LIST_STRATEGY=naive`, expected to fail **two** query-budget assertions. `db:test:notiebreak` runs it with `KEYSET_TIEBREAK=off` and is expected to fail **one**, the tie-block walk. `db:test:like` fails **one**, the stemming assertion. Drill 12 adds four more: `db:test:constraint` and `db:test:donothing` are expected **green** (they are the card's DONE WHEN as a test), `db:test:redis` fails **one** on purpose — a concurrent duplicate gets 202 instead of a conversation id, which is the failure mode the constraint does not have — and `db:test:noidem` fails **three**. Drill 13 adds `db:test:rmw` (fails **two**), `db:test:locking` and `db:test:serializable` (green). Drill 14 adds `db:test:lww` (fails **four** — every assertion in the concurrent block) and `db:test:pessimistic` (green), plus a required red run on the UI half: `ASSIGN=lww … && pnpm test:ui` fails the conflict test. Drill 15 adds `db:test:buffer` (`IMPORT=buffer`), which fails **four**, and `db:test:restart` (`IMPORT_ON_FAIL=restart`), which is expected **green** — a correct answer that is merely slower. Drill 16 adds `db:test:skiplast` (`LAST_MESSAGE=skip`), which fails **15** across two suites. Backend suite is 136 tests; Playwright is 3 more, outside it.
 
 Formatting is root Prettier: `pnpm format`/`format:check`, resolved per file nearest-wins (backend keeps its own `.prettierrc`; both apps' ESLint configs untouched). `.prettierignore` excludes `*.md` (prose is hand-wrapped; Prettier would pad tables to a uniform width) and `k6/reports` (machine-written).
 
@@ -160,6 +185,63 @@ Root, via Turborepo: `pnpm dev`/`build`/`lint`/`typecheck`/`test`, plus `dev:bac
 - **A streaming import's memory is bounded by the awaited write, not by the streams.** Deleting the `await` inside a `Writable`'s `_write` makes the buffer accept every row, the parser never pauses, and the file is in memory again with extra steps. The test is doubling the file and watching peak RSS.
 - **`ANALYZE` and `VACUUM` do different jobs, and benchmarks right after a seed measure the wrong one** — only `VACUUM` sets the visibility map, and index-only scans are illegal without it. `count(*)` on `conversations`: 60ms seq scan right after seeding, 27ms index-only once vacuumed.
 
+**Locks and DDL**
+
+- **A lock is released by COMMIT, not by the statement that took it.** node-pg-migrate wraps each
+  migration in one transaction, so the ACCESS EXCLUSIVE that `ALTER TABLE ADD COLUMN` takes in 1ms
+  is held until the last statement in the file commits. Measured on 2.5M rows: 74,722ms held, 10
+  backends (the whole pool) queued for `RowExclusiveLock`, 76.73% of writes failed.
+- **`pgm.noTransaction()` is mandatory when a migration mixes ACCESS EXCLUSIVE with a long scan.**
+  `ADD CONSTRAINT … NOT VALID` then `VALIDATE CONSTRAINT` inside one transaction reinstates exactly
+  the outage the split exists to avoid. It gives up atomicity, so every statement has to be safe to
+  re-run.
+- **Postgres grants locks first come first served, so a WAITING ACCESS EXCLUSIVE blocks everything
+  behind it.** `ADD CONSTRAINT … NOT VALID` is a catalog write that should take microseconds; it
+  measured **1,006ms and 1,012ms on two runs**, queued behind `autovacuum: VACUUM ANALYZE
+  public.conversations` — which the backfill's own 2.5M dead tuples had just triggered. Hence
+  `SET lock_timeout = '3s'` around that statement in migration 016. `VALIDATE` needs no guard:
+  SHARE UPDATE EXCLUSIVE does not conflict with ACCESS SHARE or ROW EXCLUSIVE.
+- **`NOT VALID` means "the existing rows are unchecked", not "this is not enforced".** `attnotnull`
+  is set immediately and a new NULL insert raises 23502 straight away; only `VALIDATE` looks at what
+  was already there. Measured all four states in `pnpm db:schema locks` / the schema spec.
+- **`ADD CONSTRAINT … NOT NULL <col> NOT VALID` is Postgres 18.** A not-null constraint only became
+  a first-class catalog object (`contype = 'n'`) there. On 17 and earlier the recipe is a CHECK
+  constraint as a proxy, then `SET NOT NULL` — which skips its scan since PG 12 *only* if a
+  VALIDATED CHECK proves no NULL can be present.
+- **`ADD COLUMN` with a NON-VOLATILE default is catalog-only and can be silently wrong.** PG 11+
+  evaluates it once into `pg_attribute.attmissingval`. `now()` is STABLE and qualifies, so
+  `ADD COLUMN … NOT NULL DEFAULT now()` finishes in **1.44ms** and leaves **one distinct value
+  across 2,505,787 rows**. `clock_timestamp()` is VOLATILE, does not qualify, and rewrites the whole
+  table in 2,827ms. Setting the default as a SEPARATE `ALTER COLUMN … SET DEFAULT` applies to future
+  inserts only, which is the shape migration 015 ships.
+- **A table rewrite compacts the heap.** The volatile-default arm took `conversations` from 552MB to
+  276MB — a `VACUUM FULL` nobody asked for, under ACCESS EXCLUSIVE.
+- **Batching changes the LOCK, not the garbage.** Both arms left ~2.5M dead tuples. `DROP COLUMN`
+  reclaims nothing (catalog-only), so a run that skips its VACUUM leaves the heap permanently
+  larger for every later baseline.
+- **A cancelled migration still costs everything except the result.** `--abort-after 15` rolled back
+  cleanly and left 568,382 dead tuples and the heap up 275.9MB → 338.5MB, for 15s of total outage.
+- **A `CREATE INDEX` that "let the write through" can still have multiplied its latency by 478.**
+  Measured: 631.44ms against 1.32ms under CONCURRENTLY. Probe the LATENCY, not the outcome.
+- **`CREATE INDEX CONCURRENTLY` waits on REAL transaction ids, not virtual ones.** An
+  idle-in-transaction session that has only read does not block it; one that has INSERTed parks the
+  build at `wait_event_type=Lock, wait_event=virtualxid, state=active` indefinitely.
+- **`EXTRACT(epoch …)` returns numeric, which `pg` hands back as a string**, same as bigint. Cast
+  `::float8` before JavaScript does arithmetic on it.
+- **There is no `max(uuid)` aggregate.** A keyset cursor over a uuid PK needs
+  `ORDER BY id DESC LIMIT 1`.
+- **A batch size big enough flips the query plan.** The backfill's per-batch statement uses a Nested
+  Loop over `conversations_pkey` at 1,000 rows and a Hash Semi Join whose inner side is a **seq scan
+  of all 2.5M rows** at 100,000 — 134,001 rows/s against 83,044, and 15.06ms against 1,140.18ms in
+  an isolated `EXPLAIN`. 10,000 sits on the boundary and the planner does not choose the same way
+  twice. Check the plan at your batch size.
+- **`WHERE col IS NULL … LIMIT n` is OFFSET wearing a hat.** With no index on the column every batch
+  re-walks the primary key past the rows it already filled: **+478%** from first batch to last, over
+  200 batches, against **-73%** for a keyset cursor. Invisible at two batches, which is why a short
+  bench can miss it.
+- **A backfill is an operation, not a migration.** node-pg-migrate holds a session advisory lock for
+  the whole run, so a 75-second backfill inside one blocks every other deploy.
+
 **Query plans and indexes**
 
 - **DDL is transactional in Postgres, which makes an index an experiment.** `SAVEPOINT` → `CREATE`/`DROP INDEX` → `EXPLAIN` → `ROLLBACK TO SAVEPOINT` prices an index before any migration commits to it, and reproduces a "before the index" plan long after the migration landed. `CREATE INDEX CONCURRENTLY` is the one form that cannot do this — it can't run in a transaction at all.
@@ -192,6 +274,20 @@ Root, via Turborepo: `pnpm dev`/`build`/`lint`/`typecheck`/`test`, plus `dev:bac
 **k6**
 
 - **The k6 image is pinned (`grafana/k6:2.1.0`), and that is load-bearing.** A baseline is only comparable to a re-run of itself; `:latest` swaps the instrument between the `before` and the `after` without saying so.
+- **`http_req_failed`'s `passes` counts the FAILURES.** It is a Rate over "did this request fail?",
+  so `fails` is the success count. Reading the wrong one reported a clean 4,500-request baseline as
+  "4,500 errors (0.00%)".
+- **`handleSummary` REPLACES k6's end-of-test block.** Anything it does not print is not printed:
+  this repo recorded no error count in any run from drill 05 to drill 16, so "zero errors" was a
+  claim about an exit code rather than a number.
+- **A closed-model run cannot measure an outage.** Fixed VUs stop sending when the server stalls and
+  the summary reports a few slow requests, saying nothing about the traffic a real service would
+  have received meanwhile. `constant-arrival-rate` keeps offering, and the requests it cannot start
+  land in `dropped_iterations` — a metric that exists ONLY for arrival-rate executors, so a
+  threshold naming it fails a fixed-VU run outright.
+- **Flat percentiles are a client timeout, not a database.** The naive arm's p50/p95/p99 were
+  2001/2003/2005ms, which is `connectionTimeoutMillis: 2000` on the `pg` pool; the 60,001ms max is
+  k6's own default HTTP timeout.
 - **k6 will not compute a tagged sub-metric unless a threshold names it.** `http_req_duration{scenario:measure}` is `undefined` in `handleSummary` without a threshold on that exact string — hence two thresholds that can never fail (`max>=0`, `count>0`), which look like dead code but are what the warm-up exclusion depends on.
 - **k6's default summary stops at p(95).** p99 needs an explicit `summaryTrendStats`.
 - **A k6 counter's `rate` is divided by the whole run duration, warm-up included** — throughput for a measured phase is `count / measuredSeconds` or it's understated (25% here).

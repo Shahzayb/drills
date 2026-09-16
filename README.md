@@ -26,6 +26,7 @@ orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose
 | 13 | Lost updates | A counter read-and-written in code lost 89 of 100 increments; three fixes, one shipped. |
 | 14 | Optimistic locking | Fifty agents claimed one ticket and all fifty were told yes; a version check leaves exactly one winner, and the losing browser corrects itself without reloading. |
 | 15 | Streaming a 200MB import | The obvious version runs out of memory in under three seconds; streaming it keeps memory flat whether the file is 20MB or 400MB, and a failure half way through says exactly where it stopped. |
+| 16 | Zero-downtime schema change | The obvious migration locked the table for 75 seconds and failed 77% of writes; the same work, split across four transactions, failed none of them. |
 
 Current state and what's open live in `memory-bank/progress.md`; every decision and
 number is one row in `memory-bank/history.md`, with the full reasoning in `plans/`.

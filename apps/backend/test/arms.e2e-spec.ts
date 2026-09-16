@@ -70,6 +70,7 @@ describe('GET /info arms (e2e)', () => {
         ? process.env.QUOTA
         : 'atomic',
       quotaMaxRetries: process.env.QUOTA_MAX_RETRIES || '20',
+      lastMessage: process.env.LAST_MESSAGE === 'skip' ? 'skip' : 'write',
       import: process.env.IMPORT === 'buffer' ? 'buffer' : 'stream',
       importBatchRows: process.env.IMPORT_BATCH_ROWS || '1000',
       importOnFail:

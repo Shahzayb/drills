@@ -364,6 +364,84 @@ const INSTRUMENTS: Record<string, Instrument> = {
     ],
   },
 
+  schema: {
+    file: 'db/schema.mts',
+    blurb:
+      'a required column on 2.5M live rows: the lock, the backfill, the index (drill 16)',
+    subcommands: {
+      naive: 'the whole migration in one transaction — timed, and watched',
+      safe: 'the same result in four steps, none of them blocking',
+      backfill: "the real column's one-time backfill, resumable",
+      locks: 'two live sessions: which lock, held how long, blocking what',
+      bench: 'the batch ladder, and the scan shape inside it',
+      index: 'CREATE INDEX vs CONCURRENTLY, and the failures CIC has alone',
+    },
+    knobs: [
+      { flag: 'org', env: 'ORG_ID', def: '1', help: 'labels the report' },
+      {
+        flag: 'shape',
+        env: 'SHAPE',
+        def: 'backfill',
+        help: 'naive: backfill | rewrite | fastwrong',
+      },
+      {
+        flag: 'column',
+        env: 'COLUMN',
+        def: 'last_message_at',
+        help: 'the column to fill; naive/safe suffix it',
+      },
+      { flag: 'batch', env: 'BATCH', def: '1000', help: 'rows per batch' },
+      {
+        flag: 'pause-ms',
+        env: 'PAUSE_MS',
+        def: '10',
+        help: 'pause between batches',
+      },
+      {
+        flag: 'scan',
+        env: 'SCAN',
+        def: 'keyset',
+        help: 'keyset | isnull — how a batch is chosen',
+      },
+      {
+        flag: 'sample-ms',
+        env: 'SAMPLE_MS',
+        def: '250',
+        help: 'pg_locks sampling interval',
+      },
+      {
+        flag: 'wait',
+        env: 'WAIT',
+        def: '0',
+        help: 'seconds to wait before the DDL, to land inside a k6 window',
+      },
+      {
+        flag: 'abort-after',
+        env: 'ABORT_AFTER',
+        def: '0',
+        help: 'naive: cancel the transaction after N seconds',
+      },
+      {
+        flag: 'batches',
+        env: 'BATCHES',
+        def: '1000,10000,100000',
+        help: 'bench: the batch-size ladder',
+      },
+      {
+        flag: 'rows',
+        env: 'ROWS',
+        def: '200000',
+        help: 'bench: rows backfilled per cell',
+      },
+      {
+        flag: 'only',
+        env: 'ONLY',
+        def: '(all)',
+        help: 'bench/index: substring filter over cell labels',
+      },
+    ],
+  },
+
   bench: {
     file: 'db/bench-copy.mts',
     blurb: 'INSERT vs multi-row INSERT vs COPY, on a scratch table',

@@ -174,6 +174,78 @@ describe('core schema (e2e)', () => {
     );
   });
 
+  /**
+   * Card 16. Three catalog facts, and each one is the evidence for a different
+   * claim the migration makes.
+   *
+   * `attnotnull` says the column is required. `convalidated` says the existing
+   * rows were checked — an unvalidated constraint is still enforced for new
+   * writes, so without this assertion a migration that never finished its
+   * VALIDATE would look identical. The default is what lets ~18 other INSERT
+   * sites in this repo stay untouched.
+   *
+   * `contype = 'n'` is Postgres 18: a not-null constraint became a first-class
+   * catalog object there, which is what allows it to be added NOT VALID. On 17
+   * and earlier the same recipe goes through a CHECK constraint and this
+   * assertion would read 'c'.
+   */
+  it('made last_message_at required the cheap way, and validated it', async () => {
+    const constraint = await db.query<{
+      contype: string;
+      convalidated: boolean;
+    }>(
+      `SELECT contype, convalidated FROM pg_constraint
+        WHERE conrelid = 'conversations'::regclass
+          AND conname = 'conversations_last_message_at_not_null'`,
+    );
+
+    expect(constraint.rows).toHaveLength(1);
+    expect(constraint.rows[0].contype).toBe('n');
+    expect(constraint.rows[0].convalidated).toBe(true);
+
+    const column = await db.query<{
+      attnotnull: boolean;
+      default_expr: string | null;
+    }>(
+      `SELECT a.attnotnull,
+              pg_get_expr(d.adbin, d.adrelid) AS default_expr
+         FROM pg_attribute a
+         LEFT JOIN pg_attrdef d
+                ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+        WHERE a.attrelid = 'conversations'::regclass
+          AND a.attname = 'last_message_at'`,
+    );
+
+    expect(column.rows[0].attnotnull).toBe(true);
+    expect(column.rows[0].default_expr).toBe('now()');
+  });
+
+  /**
+   * The other half: a required column is only required if something rejects the
+   * row that omits it. 23502 is not_null_violation.
+   *
+   * Inside `withOrg`, because `conversations` is RLS'd and an unscoped insert is
+   * refused with 42501 before the column is ever looked at — the constraint
+   * would go untested and the test would still be green if it asserted less.
+   */
+  it('rejects a conversation with a null last_message_at', async () => {
+    expect.assertions(2);
+
+    try {
+      await tenants.withOrg(ids.org!, (tx) =>
+        tx.query(
+          `INSERT INTO conversations (org_id, status, provider_event_id, last_message_at)
+           VALUES ($1::bigint, 'open', $2, NULL)`,
+          [ids.org, `${tag}-null-last-message`],
+        ),
+      );
+    } catch (error) {
+      const pgError = error as { code?: string; column?: string };
+      expect(pgError.code).toBe('23502');
+      expect(pgError.column).toBe('last_message_at');
+    }
+  });
+
   it('surfaces a CHECK violation as an identifiable pg error', async () => {
     // The STRETCH. A naive insert of a plan that is not in the CHECK list has to
     // come back as something an API layer can act on — not a 500 with a string.

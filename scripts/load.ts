@@ -50,6 +50,12 @@ interface Script {
 const COMMON: Knob[] = [
   { flag: 'org', env: 'ORG_ID', def: '1', help: 'which org to hit' },
   { flag: 'vus', env: 'VUS', def: '10', help: 'concurrent virtual users' },
+  {
+    flag: 'rate',
+    env: 'RATE',
+    def: '50',
+    help: 'requests/s offered, arrival-rate scripts only',
+  },
   { flag: 'warmup', env: 'WARMUP', def: '20s', help: 'discarded first phase' },
   { flag: 'duration', env: 'DURATION', def: '60s', help: 'measured phase' },
   { flag: 'name', env: 'NAME', def: '', help: 'labels the run and its report' },
@@ -86,6 +92,20 @@ const SCRIPTS: Record<string, Script> = {
     knobs: [
       { flag: 'q', env: 'Q', def: 'export', help: 'the search term' },
       { flag: 'page-size', env: 'PAGE_SIZE', def: '20', help: 'rows per page' },
+    ],
+  },
+
+  write: {
+    file: 'conversations-write.ts',
+    blurb:
+      'POST /ingest at a steady arrival rate, during a migration (drill 16)',
+    knobs: [
+      {
+        flag: 'api-key',
+        env: 'API_KEY',
+        def: '',
+        help: 'from `pnpm db:storm key` — the run 401s without it',
+      },
     ],
   },
 

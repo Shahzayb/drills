@@ -442,8 +442,14 @@ function* conversationLines(
       rnd() < 0.2
         ? '\\N'
         : String(memStart[org] + ((rnd() * memCount[org]) | 0));
+    // last_message_at repeats updated_at, and here that is exact rather than an
+    // approximation: this seed BUILDS updated_at as the last message's
+    // timestamp (see planConversations). That equality is what makes
+    // `pnpm db:schema backfill` checkable — the backfill recomputes
+    // max(messages.created_at) and has to land on the same value. Card 16.
+    const lastMessage = stampSecond(updated[i]);
     batch.push(
-      `${uuidHex(uuidBuf, i * 16)}\t${org}\t${closed[i] ? 'closed' : 'open'}\t${assignee}\t${stamp(created[i])}\t${stampSecond(updated[i])}`,
+      `${uuidHex(uuidBuf, i * 16)}\t${org}\t${closed[i] ? 'closed' : 'open'}\t${assignee}\t${stamp(created[i])}\t${lastMessage}\t${lastMessage}`,
     );
     if (batch.length === COPY_BATCH) {
       yield batch.join('\n') + '\n';
@@ -716,7 +722,7 @@ async function main() {
     'copy conversations',
     () =>
       copyInto(
-        'COPY conversations (id, org_id, status, assignee_id, created_at, updated_at) FROM STDIN',
+        'COPY conversations (id, org_id, status, assignee_id, created_at, updated_at, last_message_at) FROM STDIN',
         conversationLines(
           plan,
           structure.memStart,
