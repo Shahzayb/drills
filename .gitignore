@@ -15,3 +15,5 @@ k6/reports/**/*.html
 
 # Machine-readable run dumps beside each k6 report. summary.txt is what stays.
 k6/reports/**/run.json
+# Card 17 screenshots beside each ui:paint report. The SVG and text stay.
+apps/frontend/perf/reports/**/*.png
