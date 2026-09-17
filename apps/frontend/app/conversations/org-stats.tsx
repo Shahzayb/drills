@@ -73,6 +73,10 @@ export function OrgStatsFallback() {
     >
       <p>inbox pulse · computing over every message in the org…</p>
       <p>the list below did not wait for this</p>
+      {/* Three lines because the widget is three lines. Two, and the table
+          under it moved 18px when the swap landed — visible as a jump between
+          the fcp.png and loaded.png that `pnpm ui:paint` writes. */}
+      <p className="font-mono">aggregate running on the API…</p>
     </div>
   );
 }
