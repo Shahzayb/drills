@@ -5,7 +5,7 @@
 pnpm workspace monorepo (`apps/*`, `packages/*`) under Turborepo. `packages/` is empty.
 
 - `apps/backend` — NestJS (TypeScript), port `3002`. Jest for unit + e2e.
-- `apps/frontend` — Next.js 16 (App Router, React 19, Tailwind v4), port `3001`. Playwright since drill 14, host-run against the container (`pnpm test:ui`), covering the assign conflict and nothing else.
+- `apps/frontend` — Next.js 16 (App Router, React 19, Tailwind v4), port `3001`. Playwright since drill 14, host-run against the container (`pnpm test:ui`), covering the assign conflict and, since drill 17, the streamed stats widget. `apps/frontend/perf/` holds `pnpm ui:paint`, the browser-side measurement instrument.
 - Postgres 18 and Redis 8, alpine, alongside both apps under Docker Compose.
 
 Two `@Global()` chokepoint modules, one per data store, client private in both. `src/postgres` owns the `pg` `Pool`; every read goes through its `query()`, so later drills have one place to hook timing/tracing/pool metrics. `src/redis` owns the ioredis client and grows a method per command. No ORM: hand-written SQL run by node-pg-migrate. Every tenant-owned row carries `org_id` directly; several indexes are deliberately missing. Reasoning: `plans/2026-08-07_drill-02-schema-and-migrations.md`.
@@ -41,6 +41,30 @@ is two statements: `ADD CONSTRAINT … NOT NULL last_message_at NOT VALID` behin
 red arm: `skip` writes NULL from `POST /ingest` and fails 15 tests. `lastMessageAt` is on
 `ConversationSummary` and is deliberately NOT in the `sort` allowlist. Numbers:
 `plans/2026-09-10_drill-16-zero-downtime-migration.md`.
+
+Drill 17 adds `GET /messages/stats` on `SearchController` — one statement, `@QueryBudget(1)`,
+inside `TenantDb.withOrg` with the explicit `m.org_id = $1`: `count(*)`, two `count(*) FILTER
+(WHERE m.tsv @@ to_tsquery('english', <lexicon>))` for a crude sentiment split, a 90-day count,
+`avg(length(message))` and `max(created_at)`. **Slow for the whale on purpose and by design of
+drill 02** — `messages.org_id` has no index, so org 1 is a Parallel Seq Scan reading 663k of
+the heap's 667k blocks (5.1GB) per request, 2.3–3.2s; org 150 is a Bitmap Heap Scan through
+`messages_org_tsv_idx` (btree_gin serves `org_id = $1` alone) in 9ms. Nothing caches it. The
+response says `method: 'lexicon'` because it is two word lists, not sentiment analysis. The
+lexicons are stems (`fail`, not `failing`) because that is what the tsvector holds. Numbers:
+`plans/2026-09-17_drill-17-streaming-inbox-suspense.md`.
+
+The UI half is `app/conversations/org-stats.tsx` — two Server Components, `OrgStats` (awaits
+a promise prop, `data-stats`) and `OrgStatsFallback` (`data-stats-fallback`, deliberately the
+same three lines tall, or the table jumps 18px on swap). `page.tsx` reads `?stats=stream|
+blocking|off` (default `stream`, carried by `linkTo()` like `mode`), **starts
+`fetchOrgStats()` before it awaits the list** and hands the promise down, and renders the two
+arms with exactly one `<Suspense>` wrapper of difference. The list is still awaited in the
+page body, so it is in the shell; there is no `loading.tsx` because a page-level fallback would
+put the list behind a spinner too. `page_render` logs `stats` and `statsMs`, and the two arms
+report the same `totalMs` — streaming moves where the wait is felt, not how long the query
+runs. `conversation-list.tsx` gains a client-side substring filter over the loaded rows
+(`data-filter`, "N of M loaded match") and the comment naming the three reasons it is a
+Client Component. `/health` reports `mode: process.env.NODE_ENV`.
 
 `app/imports/page.tsx` is the UI half and is zero application JavaScript: a job table and a `<meta http-equiv="refresh" content="2">` rendered **only while a job is running**, so the page stops polling on its own. Uploads go through `app/api/imports/route.ts`, a Route Handler that pipes `request.body` on with `duplex: 'half'` for `text/csv` and falls back to `request.formData()` for a browser file input — which buffers, and the page says so. A Server Action was rejected: Next buffers a Server Action's body and caps it at `serverActions.bodySizeLimit`, 1MB by default.
 
@@ -106,11 +130,32 @@ two live sessions and a chosen interleaving, the shape `db:storm race` already u
 `BATCHES` × `SCAN` (`keyset`|`isnull`) and reads the plan off `EXPLAIN` on the statement the
 backfill actually runs, VACUUMing between cells. `index` is the stretch and ships no index.
 
-`db:test:naive` runs the e2e suite with `LIST_STRATEGY=naive`, expected to fail **two** query-budget assertions. `db:test:notiebreak` runs it with `KEYSET_TIEBREAK=off` and is expected to fail **one**, the tie-block walk. `db:test:like` fails **one**, the stemming assertion. Drill 12 adds four more: `db:test:constraint` and `db:test:donothing` are expected **green** (they are the card's DONE WHEN as a test), `db:test:redis` fails **one** on purpose — a concurrent duplicate gets 202 instead of a conversation id, which is the failure mode the constraint does not have — and `db:test:noidem` fails **three**. Drill 13 adds `db:test:rmw` (fails **two**), `db:test:locking` and `db:test:serializable` (green). Drill 14 adds `db:test:lww` (fails **four** — every assertion in the concurrent block) and `db:test:pessimistic` (green), plus a required red run on the UI half: `ASSIGN=lww … && pnpm test:ui` fails the conflict test. Drill 15 adds `db:test:buffer` (`IMPORT=buffer`), which fails **four**, and `db:test:restart` (`IMPORT_ON_FAIL=restart`), which is expected **green** — a correct answer that is merely slower. Drill 16 adds `db:test:skiplast` (`LAST_MESSAGE=skip`), which fails **15** across two suites. Backend suite is 136 tests; Playwright is 3 more, outside it.
+`pnpm ui:paint` is drill 17's instrument and the first browser-side one: `apps/frontend/perf/
+paint.mts`, host-run Playwright driving Chromium over CDP against the **production build**
+(`pnpm docker:up:prod`; it reads `/health`'s `mode` and refuses `development` unless
+`--allow-dev`, because dev chunks carry HMR and are unminified). Knobs `--org`/`ORG_ID`,
+`--rounds`/`ROUNDS` (5), `--warmup`/`WARMUP` (1, discarded), `--arms`/`ARMS`
+(`off,blocking,stream`, interleaved per round), `--page-size`, `--url`/`FRONTEND_URL`,
+`--name`; a flag beats the env beats the default and the header says which. Each load is a
+fresh context; `Network.*` and `Page.lifecycleEvent` give TTFB (`receiveHeadersEnd`), every
+document `dataReceived` chunk, FCP, DCL and load on one monotonic clock, and a
+`MutationObserver` from `addInitScript` stamps when the first row, the fallback and the
+widget attach — converted onto the CDP clock through the document request's `wallTime`. It
+also sums external script transfer bytes and splits inline `<script>` bytes into the
+`self.__next_f.push` RSC payload and the rest. Writes `apps/frontend/perf/reports/<stamp>[-name]-
+paint-org<n>-size<n>/` with `summary.txt`, `run.json`, `waterfall.svg` (last round; document
+bar with chunk ticks, resource rows, FCP/widget/load markers) and `<arm>-fcp.png` /
+`<arm>-loaded.png` (gitignored). `pnpm db:search aggregate` is the query's side: the shipped
+statement as `app_user`, default vs `max_parallel_workers_per_gather = 0` vs `enable_seqscan
+= off`, buffers hit/read, the full plan.
+
+`db:test:naive` runs the e2e suite with `LIST_STRATEGY=naive`, expected to fail **two** query-budget assertions. `db:test:notiebreak` runs it with `KEYSET_TIEBREAK=off` and is expected to fail **one**, the tie-block walk. `db:test:like` fails **one**, the stemming assertion. Drill 12 adds four more: `db:test:constraint` and `db:test:donothing` are expected **green** (they are the card's DONE WHEN as a test), `db:test:redis` fails **one** on purpose — a concurrent duplicate gets 202 instead of a conversation id, which is the failure mode the constraint does not have — and `db:test:noidem` fails **three**. Drill 13 adds `db:test:rmw` (fails **two**), `db:test:locking` and `db:test:serializable` (green). Drill 14 adds `db:test:lww` (fails **four** — every assertion in the concurrent block) and `db:test:pessimistic` (green), plus a required red run on the UI half: `ASSIGN=lww … && pnpm test:ui` fails the conflict test. Drill 15 adds `db:test:buffer` (`IMPORT=buffer`), which fails **four**, and `db:test:restart` (`IMPORT_ON_FAIL=restart`), which is expected **green** — a correct answer that is merely slower. Drill 16 adds `db:test:skiplast` (`LAST_MESSAGE=skip`), which fails **15** across two suites. Drill 17 adds a red run on the UI half: `E2E_STATS=blocking pnpm test:ui` fails **one** —
+the fallback markup never exists in a blocking document. Backend suite is 140 tests;
+Playwright is 4 more, outside it.
 
 Formatting is root Prettier: `pnpm format`/`format:check`, resolved per file nearest-wins (backend keeps its own `.prettierrc`; both apps' ESLint configs untouched). `.prettierignore` excludes `*.md` (prose is hand-wrapped; Prettier would pad tables to a uniform width) and `k6/reports` (machine-written).
 
-Root, via Turborepo: `pnpm dev`/`build`/`lint`/`typecheck`/`test`, plus `dev:backend`/`dev:frontend`. For single-app work, run from that app's directory. Backend adds `start:dev`, `test:cov`, `test:e2e`; one file via `pnpm exec jest <path>`, by name with `-t`.
+Root, via Turborepo: `pnpm dev`/`build`/`lint`/`typecheck`/`test`, plus `dev:backend`/`dev:frontend`. `pnpm typecheck` also runs the frontend's `tsc --noEmit`, because `perf/paint.mts` needs `lib: dom` and the root config has `types: ["node"]` only. `pnpm docker:up:prod` builds and serves both apps in production mode; it is what any browser-side number has to be taken against. For single-app work, run from that app's directory. Backend adds `start:dev`, `test:cov`, `test:e2e`; one file via `pnpm exec jest <path>`, by name with `-t`.
 
 ## Constraints and gotchas
 
@@ -166,6 +211,7 @@ Root, via Turborepo: `pnpm dev`/`build`/`lint`/`typecheck`/`test`, plus `dev:bac
 - **SQL functions default to `PARALLEL UNSAFE`, and a policy calling one makes every query on that table serial.** Measured on the whale: `count(*)` 42.7 → 108.0ms, list page 1 88.9 → 214.7ms — **2.4x, from one missing word**. `STABLE` matters separately: it folds the policy into a `One-Time Filter` (once per scan, not per row) and keeps the index-only scan.
 - **RLS turns index conditions into filters for every non-leakproof operator.** `ts_match_vq` (`@@`), `textlike` (`LIKE`) and `texticlike` (`ILIKE`) are all `proleakproof = f`, and on a table with a policy the planner will not build an index path at all — `SET enable_seqscan = off` still picks the seq scan, marked `Disabled: true`. Only `@@` is fixed (migration 007); the btree and trigram candidates in `db:search indexes` are unreachable for this reason, not because they are bad indexes.
 - **`ALTER FUNCTION ... LEAKPROOF` does not survive `pg_dump`/restore or a major-version upgrade.** The symptom is search silently becoming 100x slower. Nothing warns.
+- **A `count(*)` inside the scope counts one tenant.** `SELECT count(*) FROM messages` under `app.org_id = 1` returned 3,995,594 and reported the whale as 100% of the table. Any "of the whole table" number has to be read as the owner.
 - **`pg_stats` hides every row for an RLS-enabled table from anyone who is not its owner** — no error, just an empty result. Reading it as `app_user` looks exactly like a table with no statistics collected.
 
 **Full-text search**
@@ -244,6 +290,8 @@ Root, via Turborepo: `pnpm dev`/`build`/`lint`/`typecheck`/`test`, plus `dev:bac
 
 **Query plans and indexes**
 
+- **A 5GB seq scan against 128MB of `shared_buffers` is I/O, and parallel workers do not fix I/O.** The widget's aggregate reads 663k of 667k blocks per request; `max_parallel_workers_per_gather = 2` was worth 0% on one run and 28% on the next. `hit/read` on the scan node is the number that says which resource is the wall. JIT compiles 23 functions for ~235ms of every such request.
+- **btree_gin makes a `gin (org_id, tsv)` index answer `org_id = $1` alone.** Org 150's aggregate is a Bitmap Heap Scan of 3,161 blocks through `messages_org_tsv_idx` at 9ms; the planner declines the same path at the whale's 40% selectivity and is right to.
 - **DDL is transactional in Postgres, which makes an index an experiment.** `SAVEPOINT` → `CREATE`/`DROP INDEX` → `EXPLAIN` → `ROLLBACK TO SAVEPOINT` prices an index before any migration commits to it, and reproduces a "before the index" plan long after the migration landed. `CREATE INDEX CONCURRENTLY` is the one form that cannot do this — it can't run in a transaction at all.
 - **`CREATE INDEX CONCURRENTLY` needs `pgm.noTransaction()` and gives up atomicity for it.** A failed build leaves `indisvalid = false`: invisible to the planner, still maintained on every write. Find one with `SELECT indexrelid::regclass, indisvalid FROM pg_index WHERE NOT indisvalid;`.
 - **"Equality columns before range columns" assumes the equality is always present.** An *optional* equality wedged between the tenant key and the sort key makes the index unusable for every query that omits it: inside one org, `(org_id, status, updated_at)` is ordered by `status` first, so the unfiltered page's rows sit in two disjoint index ranges and Postgres (no skip scan) falls back to a seq scan — 113ms with the index right there.
@@ -309,6 +357,13 @@ Root, via Turborepo: `pnpm dev`/`build`/`lint`/`typecheck`/`test`, plus `dev:bac
 - Next 16 does **not** cache `fetch` by default, and `cacheComponents` is off here on purpose — a later card is about caching.
 - `params`/`searchParams` are Promises and must be awaited. `PageProps<'/route'>`/`LayoutProps<'/'>` are globally available generated types.
 - **Next 16 renamed `middleware.ts` to `proxy.ts`** (export `proxy`, Node runtime by default). `NextResponse.next({ request: { headers } })` is what the *app* sees via `headers()`; `next({ headers })` is what the *browser* sees.
+- **A `<Suspense>` boundary changes what the document waits for, not how long the query runs.** The whale's widget lands at 1,346ms blocking and 1,333ms streamed; `page_render.totalMs` is 1,334 vs 1,322ms. TTFB went 1,335 → 13ms and JS bytes did not move by one byte.
+- **An `await` in the page body is in the shell.** Everything awaited before the page returns JSX blocks the first byte, Suspense or not. Start the slow fetch above the list's `await`, pass the promise down, and `await` it inside the boundary — started inside the child it begins only after the shell resolves.
+- **Streaming ships the fallback's DOM plus an inline swap.** `<template id="B:0">` marks the boundary, `<div hidden id="S:0">` carries the resolved HTML in a later chunk, and an 845-byte `$RC` script swaps them before any bundle loads. The rows also ship twice — once as `<tr>` markup, once as JSON props in `self.__next_f.push` (32.6KB against 51.9KB of `<tbody>`) — that is the seam's cost.
+- **A fallback of a different height than what replaces it moves everything below it.** Two lines against three was an 18px jump, visible only by comparing the FCP screenshot with the loaded one.
+- **Playwright's `goto` waits for `load`, and in a streamed document `load` fires after the last chunk.** A test of streaming has to use `waitUntil: 'commit'` or it observes the finished page.
+- **Chrome's `firstContentfulPaint` lifecycle event can arrive after `load` on a small page.** Anything keyed on it has to wait for it explicitly before tearing the context down.
+- **`next dev` is not a thing to measure bytes against.** 768KB of JS against the production build's 134KB, for the same page.
 
 **Logging and tracing**
 

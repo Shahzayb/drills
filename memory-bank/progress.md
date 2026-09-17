@@ -9,10 +9,11 @@ None.
 
 ## Next step
 
-Card 17 (streaming RSC) or SQ3 are drill 16's stated alternatives. Card 30 (the noisy-neighbour
-bulk import) has the path it needs — drill 15's worker is an in-process async function sharing the
-pool with every request, which is the mechanism card 30 exploits. Card 26 (the outbox) is still open
-from drill 12.
+Card 19 (entitlement cache) or SQ3 are drill 17's stated alternatives, and card 19 now has a
+victim: `GET /messages/stats` reads 5.1GB per request for the whale and nothing caches it. Card
+30 (the noisy-neighbour bulk import) has the path it needs — drill 15's worker is an in-process
+async function sharing the pool with every request. Card 26 (the outbox) is still open from
+drill 12.
 
 ## Active plan
 
@@ -23,7 +24,7 @@ None open — every plan file in `plans/` is shipped. `history.md` lists them wi
 `pnpm docker:up`, then `pnpm db:migrate` and `pnpm db:seed` — or `pnpm db:reset` for both.
 Every instrument and toggle is listed in `techContext.md` under Commands.
 
-`pnpm db:test` runs the e2e suite inside the container (136 tests). Nine arms are *expected* to
+`pnpm db:test` runs the e2e suite inside the container (140 tests). Nine arms are *expected* to
 fail, and a green run of any of them means the switch stopped switching: `pnpm db:test:naive`
 (`LIST_STRATEGY=naive`) fails **two** query-budget assertions, `pnpm db:test:notiebreak`
 (`KEYSET_TIEBREAK=off`) fails **one** — the tie-block walk, which returns 9 of 12 rows with no error
@@ -46,10 +47,18 @@ the point of it — restarting an import from row zero is slower and just as cor
 quota counter riding on it, because a NOT NULL constraint deployed ahead of the code that fills the
 column is not a degradation, it is a stop.
 
-`pnpm test:ui` runs the frontend's Playwright suite (3 tests) on the **host** against the running
-container. One-time setup: `pnpm exec playwright install chromium`. It also has a required red run —
+`pnpm test:ui` runs the frontend's Playwright suite (4 tests) on the **host** against the running
+container. One-time setup: `pnpm exec playwright install chromium`. It has two required red runs —
 `ASSIGN=lww docker compose up -d nest_server && pnpm test:ui` fails the conflict test, because the
-losing browser is never told anything.
+losing browser is never told anything, and `E2E_STATS=blocking pnpm test:ui` fails the streaming
+test, because a blocking document never contains the fallback. Drill 17's tests load the whale's
+inbox, which now runs a 5GB scan per page view; each `goto` waits for that stream to finish.
+
+`pnpm ui:paint` needs the **production build**: `COMPOSE_PROJECT_NAME=drills pnpm docker:up:prod`,
+then `pnpm docker:up` to come back. It refuses a dev server without `--allow-dev`. The whale's
+aggregate ranged 1.3–3.5s across one session depending on the VM's page cache, so a before/after
+is one sitting, interleaved — the instrument does that itself — and cross-sitting absolutes are
+not comparable. Add `?stats=off` to any `/conversations` URL used to measure something else.
 
 `pnpm db:import` writes into `/tmp` inside the container, and **recreating the container wipes it** —
 both the generated CSVs and the API's own spooled uploads. `docker compose restart nest_server`
@@ -98,7 +107,7 @@ or after a `VACUUM`.
 
 ## Known issues
 
-**Drill 16 added six (30-35), and issue 29 is unchanged.**
+**Drill 17 added five (36-40).**
 
 1. Frontend coverage is one page and one flow. Drill 14 gave it a test runner (Playwright,
    `pnpm test:ui`) and three tests, all about the assign conflict. The Route Handler, load-more,
@@ -208,6 +217,24 @@ or after a `VACUUM`.
    defect in the one place `k6/lib/scenario.ts` does not reach, and the directory name is the only
    index those runs have. Adding `rate` to the name would rename every future directory for every
    script, which is why it was named rather than done.
+36. **The inbox widget costs a 5GB scan per page view and nothing caches it.** `GET /messages/stats`
+   reads 663k of the heap's 667k blocks for the whale on every load of `/conversations`, streamed
+   or not — `page_render.totalMs` is the same 1.3s on both arms. Ten people opening the inbox is
+   ten concurrent scans of one heap against 128MB of `shared_buffers`, which drill 11 measured as
+   the thing that turns 11x into 395x. Card 19 is the cache; until then the widget is a cost the
+   user does not see and the server does.
+37. **The sentiment is two word lists.** `negative`/`positive` are stems matched against the
+   tsvector, and "Sorry about that, fixed" counts on both sides. The response says
+   `method: 'lexicon'` and the widget says "not sentiment analysis"; nothing stops a reader
+   putting the number on a slide.
+38. **`Number(row.messages)` caps the widget at 2^53**, same as issues 14 and 27.
+39. **The `?stats=` arm is state a user can reach.** `?stats=blocking` is a link on the page,
+   and it is the deliberately slow version. A real product would not ship the before arm on a
+   URL; this repo does, because the A/B has to run in one process.
+40. **`ui:paint` draws the last round, not the median round.** The waterfall and the screenshots
+   describe one load so they agree with each other, and that load is whichever came last — on the
+   whale run it was the fastest of the five (1,297ms against a 1,333ms median). The table is the
+   number; the picture is the shape.
 
 ## Releases
 
@@ -221,6 +248,7 @@ or after a `VACUUM`.
 | [drill/14](https://github.com/Shahzayb/drills/releases/tag/drill/14) | 0.14.0 | none (no open issues to attach) | Optimistic locking on assignment: 50 agents claim one ticket and a version check leaves exactly one winner, with the losing browser converging on the truth without a reload. **Tagged on the branch before the merge**, at the request of the release, so `drill/14` points at `chore(release): 0.14.0` rather than at a merge commit the way `drill/13` does. `--generate-notes` produced only a changelog link for that reason — there was no merged PR to attribute commits to — so the body was written by hand. |
 | [drill/15](https://github.com/Shahzayb/drills/releases/tag/drill/15) | 0.15.0 | none (no open issues to attach) | Streaming CSV import: peak memory flat at ~120MB from a 20MB file to a 400MB one, against a naive version that dies in 2.63 seconds having written nothing. Tagged on the branch before the merge, the `drill/14` precedent. |
 | [drill/16](https://github.com/Shahzayb/drills/releases/tag/drill/16) | 0.16.0 | none (no open issues to attach) | Zero-downtime schema change: the naive migration held ACCESS EXCLUSIVE for 74.7s and failed 76.73% of writes; the same work in four transactions failed none and came in 21% *under* the baseline p99. Tagged on the branch before the merge, the `drill/14` precedent. |
+| [drill/17](https://github.com/Shahzayb/drills/releases/tag/drill/17) | 0.17.0 | none (no open issues to attach) | Streaming the inbox with Suspense: one boundary around a widget backed by a 5GB scan took the whale's TTFB from 1,335ms to 13ms and FCP from 1,388ms to 35ms, with JS bytes identical to the byte. Tagged on the branch before the merge, the `drill/14` precedent. |
 
 ## Preferences
 
