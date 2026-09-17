@@ -250,12 +250,22 @@ async function measure(
     // The picture of the fallback: taken the moment the browser first
     // painted, while the server is still writing the rest of the document.
     if (e.name === 'firstContentfulPaint' && screenshots) {
-      pending.push(page.screenshot({ path: `${screenshots}/${arm}-fcp.png` }));
+      pending.push(
+        page
+          .screenshot({ path: `${screenshots}/${arm}-fcp.png` })
+          .catch(() => undefined),
+      );
     }
   });
 
   const url = `${FRONTEND_URL}/conversations?org=${ORG_ID}&pageSize=${PAGE_SIZE}&stats=${arm}`;
   await page.goto(url, { waitUntil: 'load', timeout: 120_000 });
+  // `load` can beat the FCP lifecycle event on a page this small. Give it a
+  // moment, or the record has no first paint and the screenshot fires into a
+  // context that has already been closed.
+  for (let i = 0; i < 20 && !lifecycle.has('firstContentfulPaint'); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
   await Promise.all(pending);
   if (screenshots) {
     await page.screenshot({ path: `${screenshots}/${arm}-loaded.png` });
@@ -385,8 +395,8 @@ function medians(loads: Load[]) {
 // all-pairs; the aqua bar carries a direct label because its contrast is low.
 function waterfall(loads: Load[], org: string): string {
   const W = 1100;
-  const LEFT = 250;
-  const RIGHT = 30;
+  const LEFT = 270;
+  const RIGHT = 130;
   const ROW = 18;
   const HEAD = 60;
   const maxMs = Math.max(...loads.map((l) => l.loadMs ?? l.lastByteMs)) * 1.05;
@@ -398,7 +408,7 @@ function waterfall(loads: Load[], org: string): string {
     name
       .replace(/^https?:\/\/[^/]+/, '')
       .replace(/\?.*$/, '')
-      .slice(-42);
+      .slice(-38);
 
   const panels: string[] = [];
   let y = 40;

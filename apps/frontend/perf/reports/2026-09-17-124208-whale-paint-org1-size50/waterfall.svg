@@ -1,0 +1,213 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="946" viewBox="0 0 1100 946" class="viz-root">
+<style>
+  .viz-root { --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --grid: #e6e5e1;
+              --wait: #2a78d6; --download: #1baf7a; --widget: #eb6834; }
+  @media (prefers-color-scheme: dark) {
+    .viz-root { --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --grid: #333230;
+                --wait: #3987e5; --download: #199e70; --widget: #d95926; }
+  }
+  .bg { fill: var(--surface); }
+  text { font: 11px ui-sans-serif, system-ui, sans-serif; fill: var(--ink-2); }
+  .title { font-weight: 600; fill: var(--ink); font-family: ui-monospace, SFMono-Regular, monospace; }
+  .label, .value { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 10px; }
+  .axis { font-size: 10px; }
+  .grid { stroke: var(--grid); stroke-width: 1; }
+  .wait { fill: var(--wait); rx: 2; }
+  .download { fill: var(--download); rx: 2; }
+  .chunk { stroke: var(--ink); stroke-width: 1; }
+  .mark { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 3 3; }
+  .mark-widget { stroke: var(--widget); stroke-width: 2; }
+  .mark-label { font-size: 10px; fill: var(--ink); }
+  .legend { font-size: 10px; }
+</style>
+<rect class="bg" width="100%" height="100%"/>
+<text x="16" y="20" class="title">/conversations?org=1 — document chunks and resources, one load per arm (the last round). </text>
+<rect x="770" y="10" width="10" height="10" class="wait"/><text x="784" y="19" class="legend">waiting (TTFB)</text>
+<rect x="870" y="10" width="10" height="10" class="download"/><text x="884" y="19" class="legend">receiving</text>
+<line x1="960" x2="960" y1="9" y2="21" class="chunk"/><text x="966" y="19" class="legend">a chunk arrived</text>
+<line x1="270" x2="270" y1="30" y2="922" class="grid"/>
+<text x="270" y="936" class="axis" text-anchor="middle">0ms</text>
+<line x1="317.4" x2="317.4" y1="30" y2="922" class="grid"/>
+<text x="317.4" y="936" class="axis" text-anchor="middle">100ms</text>
+<line x1="364.7" x2="364.7" y1="30" y2="922" class="grid"/>
+<text x="364.7" y="936" class="axis" text-anchor="middle">200ms</text>
+<line x1="412.1" x2="412.1" y1="30" y2="922" class="grid"/>
+<text x="412.1" y="936" class="axis" text-anchor="middle">300ms</text>
+<line x1="459.5" x2="459.5" y1="30" y2="922" class="grid"/>
+<text x="459.5" y="936" class="axis" text-anchor="middle">400ms</text>
+<line x1="506.8" x2="506.8" y1="30" y2="922" class="grid"/>
+<text x="506.8" y="936" class="axis" text-anchor="middle">500ms</text>
+<line x1="554.2" x2="554.2" y1="30" y2="922" class="grid"/>
+<text x="554.2" y="936" class="axis" text-anchor="middle">600ms</text>
+<line x1="601.6" x2="601.6" y1="30" y2="922" class="grid"/>
+<text x="601.6" y="936" class="axis" text-anchor="middle">700ms</text>
+<line x1="649" x2="649" y1="30" y2="922" class="grid"/>
+<text x="649" y="936" class="axis" text-anchor="middle">800ms</text>
+<line x1="696.3" x2="696.3" y1="30" y2="922" class="grid"/>
+<text x="696.3" y="936" class="axis" text-anchor="middle">900ms</text>
+<line x1="743.7" x2="743.7" y1="30" y2="922" class="grid"/>
+<text x="743.7" y="936" class="axis" text-anchor="middle">1000ms</text>
+<line x1="791.1" x2="791.1" y1="30" y2="922" class="grid"/>
+<text x="791.1" y="936" class="axis" text-anchor="middle">1100ms</text>
+<line x1="838.4" x2="838.4" y1="30" y2="922" class="grid"/>
+<text x="838.4" y="936" class="axis" text-anchor="middle">1200ms</text>
+<line x1="885.8" x2="885.8" y1="30" y2="922" class="grid"/>
+<text x="885.8" y="936" class="axis" text-anchor="middle">1300ms</text>
+<line x1="933.2" x2="933.2" y1="30" y2="922" class="grid"/>
+<text x="933.2" y="936" class="axis" text-anchor="middle">1400ms</text>
+<text x="270" y="54" class="title">off      TTFB 11ms · FCP 35ms · list 18ms · widget — · last byte 14ms · load 53ms</text>
+<line x1="286.5" x2="286.5" y1="92" y2="298" class="mark"/>
+<text x="289.5" y="90" class="mark-label">FCP 35ms</text>
+<line x1="295.1" x2="295.1" y1="92" y2="298" class="mark"/>
+<text x="298.1" y="79" class="mark-label">load 53ms</text>
+<text x="262" y="112" class="label" text-anchor="end">document  ?stats=off</text>
+<rect x="270" y="103" width="5.399999999999977" height="10" class="wait"/>
+<rect x="275.4" y="103" width="1.2000000000000455" height="10" class="download"/>
+<line x1="276.6" x2="276.6" y1="101" y2="115" class="chunk"/>
+<text x="280.6" y="112" class="value">14ms · 10.4KB</text>
+<text x="262" y="130" class="label" text-anchor="end">7e433ab948586e-s.p.0r6juujl39pe6.woff2</text>
+<rect x="276.4" y="121" width="2" height="10" class="wait"/>
+<rect x="278.4" y="121" width="1" height="10" class="download"/>
+<text x="282.5" y="130" class="value">4ms · 22.9KB</text>
+<text x="262" y="148" class="label" text-anchor="end">a3a2e1cccd8315-s.p.0wgildi0cnwt9.woff2</text>
+<rect x="276.4" y="139" width="2.3000000000000114" height="10" class="wait"/>
+<rect x="278.7" y="139" width="1" height="10" class="download"/>
+<text x="282.8" y="148" class="value">5ms · 28.9KB</text>
+<text x="262" y="166" class="label" text-anchor="end">/_next/static/chunks/3n_mtspjf3i31.css</text>
+<rect x="276.4" y="157" width="2.400000000000034" height="10" class="wait"/>
+<rect x="278.8" y="157" width="1" height="10" class="download"/>
+<text x="283" y="166" class="value">5ms · 5.6KB</text>
+<text x="262" y="184" class="label" text-anchor="end">/_next/static/chunks/2gajeqpcnk_a_.js</text>
+<rect x="276.8" y="175" width="2.3000000000000114" height="10" class="wait"/>
+<rect x="279.1" y="175" width="1" height="10" class="download"/>
+<text x="283.2" y="184" class="value">5ms · 6.2KB</text>
+<text x="262" y="202" class="label" text-anchor="end">/_next/static/chunks/3dq1qq0j1kpy3.js</text>
+<rect x="276.8" y="193" width="2.3999999999999773" height="10" class="wait"/>
+<rect x="279.2" y="193" width="1" height="10" class="download"/>
+<text x="283.5" y="202" class="value">6ms · 9.8KB</text>
+<text x="262" y="220" class="label" text-anchor="end">/_next/static/chunks/2dfjxp56aurbf.js</text>
+<rect x="276.8" y="211" width="2.6999999999999886" height="10" class="wait"/>
+<rect x="279.5" y="211" width="2.3000000000000114" height="10" class="download"/>
+<text x="285.8" y="220" class="value">11ms · 70.4KB</text>
+<text x="262" y="238" class="label" text-anchor="end">/_next/static/chunks/3co9iys78z4bu.js</text>
+<rect x="276.8" y="229" width="3.3000000000000114" height="10" class="wait"/>
+<rect x="280.1" y="229" width="1.3999999999999773" height="10" class="download"/>
+<text x="285.5" y="238" class="value">10ms · 38.1KB</text>
+<text x="262" y="256" class="label" text-anchor="end">atic/chunks/turbopack-1yov9kovjbdcp.js</text>
+<rect x="276.8" y="247" width="3" height="10" class="wait"/>
+<rect x="279.8" y="247" width="1" height="10" class="download"/>
+<text x="283.9" y="256" class="value">7ms · 4.1KB</text>
+<text x="262" y="274" class="label" text-anchor="end">/_next/static/chunks/0ux5sz4273rhs.js</text>
+<rect x="276.8" y="265" width="3.3999999999999773" height="10" class="wait"/>
+<rect x="280.2" y="265" width="1" height="10" class="download"/>
+<text x="284.5" y="274" class="value">8ms · 4.0KB</text>
+<text x="262" y="292" class="label" text-anchor="end">/_next/static/chunks/0lfzt8bztswfa.js</text>
+<rect x="276.8" y="283" width="4.5" height="10" class="wait"/>
+<rect x="281.3" y="283" width="1" height="10" class="download"/>
+<text x="285.4" y="292" class="value">10ms · 2.4KB</text>
+<text x="270" y="348" class="title">blocking TTFB 1358ms · FCP 1388ms · list 1368ms · widget 1368ms · last byte 1364ms · load 1407ms</text>
+<line x1="927.5" x2="927.5" y1="386" y2="592" class="mark"/>
+<text x="930.5" y="384" class="mark-label">FCP 1388ms</text>
+<line x1="917.9" x2="917.9" y1="386" y2="592" class="mark-widget"/>
+<text x="920.9" y="373" class="mark-label">widget 1368ms</text>
+<line x1="936.7" x2="936.7" y1="386" y2="592" class="mark"/>
+<text x="939.7" y="362" class="mark-label">load 1407ms</text>
+<text x="262" y="406" class="label" text-anchor="end">document  ?stats=blocking</text>
+<rect x="270" y="397" width="643.1" height="10" class="wait"/>
+<rect x="913.1" y="397" width="3" height="10" class="download"/>
+<line x1="916.1" x2="916.1" y1="395" y2="409" class="chunk"/>
+<text x="920.1" y="406" class="value">1364ms · 10.9KB</text>
+<text x="262" y="424" class="label" text-anchor="end">7e433ab948586e-s.p.0r6juujl39pe6.woff2</text>
+<rect x="915.8" y="415" width="2.5" height="10" class="wait"/>
+<rect x="918.3" y="415" width="1" height="10" class="download"/>
+<text x="922.4" y="424" class="value">5ms · 22.9KB</text>
+<text x="262" y="442" class="label" text-anchor="end">a3a2e1cccd8315-s.p.0wgildi0cnwt9.woff2</text>
+<rect x="916" y="433" width="2.5" height="10" class="wait"/>
+<rect x="918.5" y="433" width="1" height="10" class="download"/>
+<text x="922.6" y="442" class="value">6ms · 28.9KB</text>
+<text x="262" y="460" class="label" text-anchor="end">/_next/static/chunks/3n_mtspjf3i31.css</text>
+<rect x="916" y="451" width="2.5" height="10" class="wait"/>
+<rect x="918.5" y="451" width="1" height="10" class="download"/>
+<text x="922.7" y="460" class="value">6ms · 5.6KB</text>
+<text x="262" y="478" class="label" text-anchor="end">/_next/static/chunks/2gajeqpcnk_a_.js</text>
+<rect x="916.5" y="469" width="2.6000000000000227" height="10" class="wait"/>
+<rect x="919.1" y="469" width="1" height="10" class="download"/>
+<text x="923.4" y="478" class="value">6ms · 6.2KB</text>
+<text x="262" y="496" class="label" text-anchor="end">/_next/static/chunks/3dq1qq0j1kpy3.js</text>
+<rect x="916.6" y="487" width="3.199999999999932" height="10" class="wait"/>
+<rect x="919.8" y="487" width="1" height="10" class="download"/>
+<text x="924" y="496" class="value">7ms · 9.8KB</text>
+<text x="262" y="514" class="label" text-anchor="end">/_next/static/chunks/2dfjxp56aurbf.js</text>
+<rect x="916.6" y="505" width="4.100000000000023" height="10" class="wait"/>
+<rect x="920.7" y="505" width="2" height="10" class="download"/>
+<text x="926.7" y="514" class="value">13ms · 70.4KB</text>
+<text x="262" y="532" class="label" text-anchor="end">/_next/static/chunks/3co9iys78z4bu.js</text>
+<rect x="916.6" y="523" width="3.2999999999999545" height="10" class="wait"/>
+<rect x="919.9" y="523" width="1.7000000000000455" height="10" class="download"/>
+<text x="925.6" y="532" class="value">10ms · 38.1KB</text>
+<text x="262" y="550" class="label" text-anchor="end">atic/chunks/turbopack-1yov9kovjbdcp.js</text>
+<rect x="916.6" y="541" width="3.6000000000000227" height="10" class="wait"/>
+<rect x="920.2" y="541" width="1" height="10" class="download"/>
+<text x="924.6" y="550" class="value">8ms · 4.1KB</text>
+<text x="262" y="568" class="label" text-anchor="end">/_next/static/chunks/0ux5sz4273rhs.js</text>
+<rect x="916.6" y="559" width="3.699999999999932" height="10" class="wait"/>
+<rect x="920.3" y="559" width="1" height="10" class="download"/>
+<text x="924.6" y="568" class="value">8ms · 4.0KB</text>
+<text x="262" y="586" class="label" text-anchor="end">/_next/static/chunks/0lfzt8bztswfa.js</text>
+<rect x="916.7" y="577" width="4" height="10" class="wait"/>
+<rect x="920.7" y="577" width="1" height="10" class="download"/>
+<text x="924.8" y="586" class="value">9ms · 2.4KB</text>
+<text x="270" y="642" class="title">stream   TTFB 12ms · FCP 34ms · list 17ms · widget 1297ms · last byte 1296ms · load 1300ms</text>
+<line x1="286.3" x2="286.3" y1="680" y2="886" class="mark"/>
+<text x="289.3" y="678" class="mark-label">FCP 34ms</text>
+<line x1="884.5" x2="884.5" y1="680" y2="886" class="mark-widget"/>
+<text x="887.5" y="678" class="mark-label">widget 1297ms</text>
+<line x1="885.8" x2="885.8" y1="680" y2="886" class="mark"/>
+<text x="888.8" y="667" class="mark-label">load 1300ms</text>
+<text x="262" y="700" class="label" text-anchor="end">document  ?stats=stream</text>
+<rect x="270" y="691" width="5.600000000000023" height="10" class="wait"/>
+<rect x="275.6" y="691" width="608.4" height="10" class="download"/>
+<line x1="276.6" x2="276.6" y1="689" y2="703" class="chunk"/>
+<line x1="884" x2="884" y1="689" y2="703" class="chunk"/>
+<text x="888" y="700" class="value">1296ms · 12.1KB</text>
+<text x="262" y="718" class="label" text-anchor="end">7e433ab948586e-s.p.0r6juujl39pe6.woff2</text>
+<rect x="276.5" y="709" width="2" height="10" class="wait"/>
+<rect x="278.5" y="709" width="1" height="10" class="download"/>
+<text x="282.6" y="718" class="value">5ms · 22.9KB</text>
+<text x="262" y="736" class="label" text-anchor="end">a3a2e1cccd8315-s.p.0wgildi0cnwt9.woff2</text>
+<rect x="276.5" y="727" width="2.1000000000000227" height="10" class="wait"/>
+<rect x="278.6" y="727" width="1" height="10" class="download"/>
+<text x="282.8" y="736" class="value">5ms · 28.9KB</text>
+<text x="262" y="754" class="label" text-anchor="end">/_next/static/chunks/3n_mtspjf3i31.css</text>
+<rect x="276.5" y="745" width="2.1999999999999886" height="10" class="wait"/>
+<rect x="278.7" y="745" width="1" height="10" class="download"/>
+<text x="282.8" y="754" class="value">5ms · 5.6KB</text>
+<text x="262" y="772" class="label" text-anchor="end">/_next/static/chunks/2gajeqpcnk_a_.js</text>
+<rect x="276.8" y="763" width="2.6999999999999886" height="10" class="wait"/>
+<rect x="279.5" y="763" width="1" height="10" class="download"/>
+<text x="283.7" y="772" class="value">6ms · 6.2KB</text>
+<text x="262" y="790" class="label" text-anchor="end">/_next/static/chunks/3dq1qq0j1kpy3.js</text>
+<rect x="276.8" y="781" width="3.099999999999966" height="10" class="wait"/>
+<rect x="279.9" y="781" width="1" height="10" class="download"/>
+<text x="284.1" y="790" class="value">7ms · 9.8KB</text>
+<text x="262" y="808" class="label" text-anchor="end">/_next/static/chunks/2dfjxp56aurbf.js</text>
+<rect x="276.8" y="799" width="4.399999999999977" height="10" class="wait"/>
+<rect x="281.2" y="799" width="1.900000000000034" height="10" class="download"/>
+<text x="287.1" y="808" class="value">13ms · 70.4KB</text>
+<text x="262" y="826" class="label" text-anchor="end">/_next/static/chunks/3co9iys78z4bu.js</text>
+<rect x="276.8" y="817" width="3.8999999999999773" height="10" class="wait"/>
+<rect x="280.7" y="817" width="1.1000000000000227" height="10" class="download"/>
+<text x="285.8" y="826" class="value">10ms · 38.1KB</text>
+<text x="262" y="844" class="label" text-anchor="end">atic/chunks/turbopack-1yov9kovjbdcp.js</text>
+<rect x="276.8" y="835" width="3.6999999999999886" height="10" class="wait"/>
+<rect x="280.5" y="835" width="1" height="10" class="download"/>
+<text x="284.6" y="844" class="value">8ms · 4.1KB</text>
+<text x="262" y="862" class="label" text-anchor="end">/_next/static/chunks/0ux5sz4273rhs.js</text>
+<rect x="276.8" y="853" width="4.099999999999966" height="10" class="wait"/>
+<rect x="280.9" y="853" width="1" height="10" class="download"/>
+<text x="285" y="862" class="value">9ms · 4.0KB</text>
+<text x="262" y="880" class="label" text-anchor="end">/_next/static/chunks/0lfzt8bztswfa.js</text>
+<rect x="276.8" y="871" width="4.300000000000011" height="10" class="wait"/>
+<rect x="281.1" y="871" width="1" height="10" class="download"/>
+<text x="285.3" y="880" class="value">9ms · 2.4KB</text>
+</svg>
