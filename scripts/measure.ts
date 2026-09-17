@@ -127,6 +127,8 @@ const INSTRUMENTS: Record<string, Instrument> = {
       indexes: 'every candidate index priced — build time, size, scan node',
       gaps: 'what FTS misses that ILIKE finds, and the reverse',
       writes: 'what the tsvector column and its index cost on INSERT',
+      aggregate:
+        "card 17's widget query: plan, buffers read, and the parallel workers",
     },
     knobs: [
       { flag: 'org', env: 'ORG_ID', def: '1', help: 'which org to measure' },
