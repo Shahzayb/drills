@@ -20,6 +20,10 @@ export async function GET() {
 
   return Response.json({
     status: 'ok',
+    // `development` under `next dev`, `production` under `next start`. Card
+    // 17's `pnpm ui:paint` reads it and refuses to report JS bytes from a dev
+    // server, whose chunks are unminified and carry the HMR client.
+    mode: process.env.NODE_ENV,
     checks: {
       api: result.ok
         ? { status: 'up' }

@@ -364,6 +364,73 @@ export async function fetchAgents(orgId: string): Promise<AgentsResult> {
   }
 }
 
+/** What `GET /messages/stats` says about an org. Card 17. */
+export interface OrgStats {
+  messages: number;
+  negative: number;
+  positive: number;
+  /** Messages in the last 90 days. */
+  recent: number;
+  avgLength: number;
+  lastMessageAt: string | null;
+  /** `lexicon` — two word lists against the tsvector, not sentiment analysis.
+   *  Carried so the widget can say what the number is. */
+  method: string;
+}
+
+export type OrgStatsResult = (
+  { ok: true; stats: OrgStats } | { ok: false; error: string; status?: number }
+) & { source: string; requestId: string; durMs: number };
+
+/**
+ * The inbox widget's aggregate. Card 17.
+ *
+ * Slow for the whale on purpose — one sequential scan of the org's messages,
+ * nothing cached in front of it — and that is the whole reason the widget
+ * exists: to be the slowest thing on the page so the page can be measured
+ * waiting for it, and then measured not waiting. The result carries `durMs`
+ * so the widget can print what it cost.
+ *
+ * Failure comes back as a value, the `fetchInfo` shape: a widget that is
+ * missing is degraded, and a page that collapses into an error boundary
+ * because a side widget timed out is broken.
+ */
+export async function fetchOrgStats(orgId: string): Promise<OrgStatsResult> {
+  const source = `${API_URL}/messages/stats`;
+  const requestId = await getRequestId();
+
+  try {
+    const { response, durMs } = await callApi(source, requestId, {
+      headers: { 'x-org-id': orgId },
+    });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: `API responded ${response.status}`,
+        status: response.status,
+        source,
+        requestId,
+        durMs,
+      };
+    }
+    return {
+      ok: true,
+      stats: (await response.json()) as OrgStats,
+      source,
+      requestId,
+      durMs,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      source,
+      requestId,
+      durMs: error instanceof UpstreamError ? error.durMs : 0,
+    };
+  }
+}
+
 export type AssignResult =
   | { ok: true; conversation: Conversation }
   | { ok: false; status: number; message: string; current?: ConflictState };

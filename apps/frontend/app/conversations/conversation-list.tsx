@@ -21,6 +21,30 @@ import { claimConversation } from './actions';
  * page.tsx.
  *
  * Card 14 adds the claim. See plans/2026-09-08_drill-14-optimistic-locking.md.
+ *
+ * **Why this one is a Client Component, specifically.** Card 17 asks for the
+ * real reason rather than the general one, so here it is. Not "it has buttons"
+ * — the sort links, the status links and the date form on the page are
+ * interactive and they are Server Components; a <form action> bound to a
+ * Server Action would be too. Three things in this subtree exist only in the
+ * browser, and each alone would force the directive:
+ *
+ *   1. `useOptimistic` paints a row the server has NOT confirmed, on the click
+ *      frame, before any response exists. A Server Component's output is
+ *      computed from what the server already knows; it cannot render a state
+ *      the server has never seen.
+ *   2. `appended` is state that must SURVIVE a server render. `refresh()` in
+ *      the claim action re-renders page 1 and must leave pages 2..n on screen;
+ *      the server has no memory of which pages this browser fetched.
+ *   3. `needle` (card 17's stretch) never reaches the server at all. A filter
+ *      that must not round-trip is, by definition, state the server cannot
+ *      hold.
+ *
+ * That is also why the seam sits exactly here and not one level up: this is
+ * the smallest subtree that holds all three. The stats widget above the table
+ * is the slowest thing on the page and it is a Server Component, because
+ * slowness is not a reason. See
+ * plans/2026-09-17_drill-17-streaming-inbox-suspense.md.
  */
 export function ConversationList({
   initialItems,
@@ -60,6 +84,16 @@ export function ConversationList({
   /** What the server said when it refused a claim, keyed by row. */
   const [conflicts, setConflicts] = useState<Record<string, string>>({});
   const [, startTransition] = useTransition();
+  /**
+   * Card 17's stretch: a filter that must not round-trip. It narrows the rows
+   * THIS BROWSER HAS, and only those — 50 on a fresh load, more after load-more,
+   * never the 1M the org holds. That is a different question from the status
+   * links above the table, which re-query the org; the caption says "of N
+   * loaded" so nobody mistakes one for the other. What this duplicates is the
+   * shape of a status filter — SQL equality up there, a substring here — and the
+   * two can disagree: `?status=open` and typing "open" are not the same set.
+   */
+  const [needle, setNeedle] = useState('');
 
   const rows = [...initialItems, ...appended];
 
@@ -144,8 +178,43 @@ export function ConversationList({
     }
   }
 
+  // The needle applies to the OPTIMISTIC rows, so a row you just claimed stays
+  // matched (or not) by the name it is about to have.
+  const term = needle.trim().toLowerCase();
+  const visibleRows = term
+    ? optimisticRows.filter((row) =>
+        [
+          row.id,
+          row.status,
+          row.assigneeName ?? '',
+          ...row.tags.map((t) => t.name),
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(term),
+      )
+    : optimisticRows;
+
   return (
     <>
+      <label className="flex items-baseline gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+        filter loaded rows
+        <input
+          type="search"
+          value={needle}
+          onChange={(event) => setNeedle(event.target.value)}
+          placeholder="id, status, assignee or tag"
+          data-filter
+          className="w-64 rounded border border-black/[.12] bg-white px-2 py-1 font-mono text-xs text-black dark:border-white/[.18] dark:bg-zinc-950 dark:text-zinc-50"
+        />
+        {term ? (
+          <span data-filter-count>
+            {visibleRows.length} of {rows.length} loaded match · the rest of the
+            org was never asked
+          </span>
+        ) : null}
+      </label>
+
       <div className="overflow-x-auto rounded-lg border border-black/[.08] bg-white dark:border-white/[.145] dark:bg-zinc-950">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-black/[.08] text-xs text-zinc-500 dark:border-white/[.145] dark:text-zinc-400">
@@ -159,7 +228,7 @@ export function ConversationList({
             </tr>
           </thead>
           <tbody>
-            {optimisticRows.map((conversation) => {
+            {visibleRows.map((conversation) => {
               const pending = (conversation as { pending?: boolean }).pending;
               const conflict = conflicts[conversation.id];
               return (
@@ -247,13 +316,15 @@ export function ConversationList({
                 </tr>
               );
             })}
-            {optimisticRows.length === 0 && (
+            {visibleRows.length === 0 && (
               <tr>
                 <td
                   colSpan={6}
                   className="px-4 py-8 text-center text-zinc-500 dark:text-zinc-400"
                 >
-                  No conversations here.
+                  {term
+                    ? 'Nothing loaded matches. The server was not asked.'
+                    : 'No conversations here.'}
                 </td>
               </tr>
             )}
