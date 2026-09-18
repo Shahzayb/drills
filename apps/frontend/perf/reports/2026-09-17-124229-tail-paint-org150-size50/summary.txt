@@ -1,0 +1,17 @@
+round 1 off      ttfb    16  fcp    37  list    20  widget     —  last byte    18  load    54  chunks  2  gap     0
+round 1 blocking ttfb    23  fcp    60  list    28  widget    28  last byte    25  load    62  chunks  1  gap     0
+round 1 stream   ttfb    16  fcp    42  list    20  widget    33  last byte    32  load    58  chunks  2  gap    15
+round 2 off      ttfb    12  fcp    34  list    17  widget     —  last byte    14  load    52  chunks  1  gap     0
+round 2 blocking ttfb    26  fcp    48  list    31  widget    31  last byte    28  load    66  chunks  1  gap     0
+round 2 stream   ttfb    14  fcp    35  list    19  widget    33  last byte    32  load    53  chunks  2  gap    16
+round 3 off      ttfb    13  fcp    51  list    18  widget     —  last byte    15  load    54  chunks  1  gap     0
+round 3 blocking ttfb    33  fcp    72  list    38  widget    38  last byte    35  load    74  chunks  1  gap     0
+round 3 stream   ttfb    19  fcp    40  list    24  widget    38  last byte    37  load    58  chunks  2  gap    16
+
+arm        ttfb   fcp  list widget  lastB   dcl  load   gap chunks  docKB   jsKB  cssKB payloadKB inlineKB
+off          13    37    18      —     15    22    54     0      1   10.8  134.2   63.4      30.6      0.0
+blocking     26    60    31     31     28    39    66     0      1   11.3  134.2   63.4      31.8      0.0
+stream       16    40    20     33     32    33    58    16      2   12.5  134.2   63.4      32.1      0.9
+
+medians of 3 rounds, ms from the document request; KB on the wire (transfer size). docKB is the HTML as sent, jsKB every external script, payloadKB the inline self.__next_f.push RSC payload, inlineKB every other inline <script>.
+gap = the longest silence between two document chunks.

@@ -37,10 +37,16 @@ describe('GET /messages/search (e2e)', () => {
   //
   // `refunded` is the load-bearing one: searching "refunds" finds it through
   // the stemmer and does not find it through ILIKE '%refunds%'.
+  //
+  // The fourth body is card 17's: `failing` stems to `fail`, which is in the
+  // stats endpoint's negative lexicon, and `refunded` in the first stems to
+  // `refund`, which is in the positive one. Neither list contains anything
+  // else these bodies say, so the split is exactly 1 / 1 over 4.
   const BODIES = [
     'The zqmarmalade export refunded twice last Tuesday.',
     'Nobody can sign in from zqmarmalade after the update.',
     'Unrelated body with none of the words this spec looks for.',
+    'The nightly sync has been failing since Monday with ERR_4410.',
   ];
   const OTHER_BODY = 'The zqmarmalade export refunded in another tenant.';
 
@@ -211,6 +217,66 @@ describe('GET /messages/search (e2e)', () => {
       expect(mineIds).toHaveLength(2);
       // Not just "different lengths" — no id may appear on both sides.
       expect(mineIds.filter((id) => theirIds.includes(id))).toEqual([]);
+    });
+  });
+
+  /**
+   * Card 17's widget endpoint, on the same fixtures. The counts are exact
+   * because the org was created by this spec and holds only these bodies.
+   */
+  describe('GET /messages/stats', () => {
+    interface Stats {
+      messages: number;
+      negative: number;
+      positive: number;
+      recent: number;
+      avgLength: number;
+      lastMessageAt: string | null;
+      method: string;
+    }
+
+    it('aggregates every message in the org, with the lexicon split', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/messages/stats')
+        .set('x-org-id', orgId)
+        .expect(200);
+
+      const body = response.body as Stats;
+      expect(body.messages).toBe(BODIES.length);
+      expect(body.negative).toBe(1);
+      expect(body.positive).toBe(1);
+      // The fixtures are minutes old, so all of them are "recent".
+      expect(body.recent).toBe(BODIES.length);
+      expect(body.avgLength).toBeGreaterThan(0);
+      expect(body.lastMessageAt).not.toBeNull();
+      expect(body.method).toBe('lexicon');
+    });
+
+    // Exact, like search's. The widget is slow because it is one scan of the
+    // org's messages; a second statement would be a second scan.
+    it('costs exactly one statement', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/messages/stats')
+        .set('x-org-id', orgId)
+        .expect(200);
+
+      expect(queryCount(response)).toBe(1);
+    });
+
+    it('counts only the requesting org', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/messages/stats')
+        .set('x-org-id', otherOrgId)
+        .expect(200);
+
+      const body = response.body as Stats;
+      expect(body.messages).toBe(1);
+      expect(body.positive).toBe(1);
+      expect(body.negative).toBe(0);
+    });
+
+    it('400s without an org header', async () => {
+      await request(app.getHttpServer()).get('/messages/stats').expect(400);
     });
   });
 

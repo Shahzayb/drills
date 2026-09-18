@@ -1,8 +1,15 @@
-import { fetchAgents, fetchConversations, isCursorPage } from '@/lib/api';
+import {
+  fetchAgents,
+  fetchConversations,
+  fetchOrgStats,
+  isCursorPage,
+} from '@/lib/api';
 import { logger, since } from '@/lib/logger';
 import { renderStartedAt } from '@/lib/render-timing';
 import { after } from 'next/server';
+import { Suspense } from 'react';
 import { ConversationList } from './conversation-list';
+import { OrgStats, OrgStatsFallback } from './org-stats';
 
 // There is no auth in this repo, so the tenant is a URL parameter with a
 // default. `?org=2` is how tenant isolation gets poked at by hand later.
@@ -17,6 +24,25 @@ const first = (value: string | string[] | undefined, fallback: string) =>
   (Array.isArray(value) ? value[0] : value) ?? fallback;
 
 /**
+ * Card 17's three arms, one URL parameter.
+ *
+ * - `stream`    the widget behind a <Suspense> boundary — the page ships the
+ *               list first and the widget follows in a later chunk. What ships.
+ * - `blocking`  the same component with no boundary. The whole document waits
+ *               for the aggregate. The "before".
+ * - `off`       no widget. The page as it was before this card — the baseline
+ *               that says what the widget costs at all.
+ *
+ * A URL parameter rather than an environment variable, the `?mode=offset`
+ * precedent: the three arms run in ONE process and interleave in one sitting,
+ * which is what drill 07 requires of any A/B. Anything unrecognised lands on
+ * `stream`, the same way a typo'd `mode` lands on keyset.
+ */
+type StatsArm = 'stream' | 'blocking' | 'off';
+const statsArm = (value: string): StatsArm =>
+  value === 'blocking' || value === 'off' ? value : 'stream';
+
+/**
  * Server Component. Everything below runs on the Next server, once, per
  * request: the fetch, the JSON parse, the map. The browser receives HTML.
  *
@@ -24,8 +50,11 @@ const first = (value: string | string[] | undefined, fallback: string) =>
  * prerendered at build time because the page number is not known then. That is
  * correct here and worth knowing rather than discovering.
  *
- * No `loading.tsx` and no <Suspense>: the card wants a blocking server render
- * with no spinner, so the absence is the point.
+ * Card 17 puts the first <Suspense> on this page — around the stats widget
+ * and nothing else. The list is still awaited in this body, so it is still in
+ * the shell: "the list streams first" means the shell carries it. There is no
+ * `loading.tsx`, because a page-level fallback would put the list behind a
+ * spinner too, which is the opposite of the point.
  *
  * Card 10 gives this page two modes. The default is **keyset**: the first page
  * is fetched here, on the server, and handed to a client component that appends
@@ -57,6 +86,15 @@ export default async function ConversationsPage(
   // is no auth here, so the acting agent is a URL parameter. Two browser windows
   // with different `?me` is how the two-agent race is reproduced by hand.
   const me = first(searchParams.me, '');
+  const stats = statsArm(first(searchParams.stats, 'stream'));
+
+  // Started HERE, before the list is awaited, and awaited far below inside the
+  // widget. The aggregate takes seconds; started inside <OrgStats> it would
+  // begin only after the list resolved and arrive list-time later. A promise
+  // is a fine prop between two Server Components — nothing crosses to the
+  // client. `off` starts nothing, so that arm measures the page without the
+  // query rather than the page ignoring it.
+  const statsPromise = stats === 'off' ? null : fetchOrgStats(orgId);
 
   const [result, agents] = await Promise.all([
     fetchConversations({
@@ -85,14 +123,22 @@ export default async function ConversationsPage(
   //
   // No `status`: a Server Component cannot know the HTTP status of the response
   // it is part of. The upstream status is on upstream_fetch.
-  after(() => {
+  //
+  // `statsMs` is read off the promise, which has settled by the time the
+  // response has finished — on BOTH arms. That is the number worth staring at:
+  // the server was busy for the same time whether the user waited for it or
+  // not. Streaming moves where the wait is felt, not how long the query runs.
+  after(async () => {
+    const orgStats = statsPromise ? await statsPromise : null;
     logger.info(
       {
         rid: result.requestId,
         route: '/conversations',
         orgId,
+        stats,
         totalMs: since(startedAt),
         upstreamMs: result.durMs,
+        statsMs: orgStats?.durMs ?? null,
       },
       'page_render',
     );
@@ -111,6 +157,8 @@ export default async function ConversationsPage(
       // Carried like every other bit of state: switch the sort while paging by
       // cursor and the numbered pager should not reappear underneath you.
       ...(mode === 'offset' ? { mode } : {}),
+      // Same rule: the arm is state, and switching sort must not switch arms.
+      ...(stats !== 'stream' ? { stats } : {}),
       ...overrides,
     });
     // Same rule as lib/api.ts: empty means absent, so a cleared filter leaves
@@ -293,6 +341,68 @@ export default async function ConversationsPage(
             )}
           </form>
         </div>
+
+        {/* Card 17. Above the table on purpose: if the page waits for this,
+            nothing below it paints either. The two rendered arms differ by
+            exactly one wrapper. The fallback and the widget share a height,
+            so the swap does not move the table. */}
+        {stats === 'stream' && statsPromise && (
+          <Suspense fallback={<OrgStatsFallback />}>
+            <OrgStats stats={statsPromise} />
+          </Suspense>
+        )}
+        {stats === 'blocking' && statsPromise && (
+          <OrgStats stats={statsPromise} />
+        )}
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          {stats === 'stream' && (
+            <>
+              inbox pulse streams in after the list.{' '}
+              <a
+                href={linkTo({ stats: 'blocking' })}
+                className="underline hover:text-black dark:hover:text-zinc-50"
+              >
+                make the page wait for it
+              </a>{' '}
+              ·{' '}
+              <a
+                href={linkTo({ stats: 'off' })}
+                className="underline hover:text-black dark:hover:text-zinc-50"
+              >
+                hide it
+              </a>
+            </>
+          )}
+          {stats === 'blocking' && (
+            <>
+              inbox pulse blocked the whole page.{' '}
+              <a
+                href={linkTo({ stats: 'stream' })}
+                className="underline hover:text-black dark:hover:text-zinc-50"
+              >
+                stream it instead
+              </a>{' '}
+              ·{' '}
+              <a
+                href={linkTo({ stats: 'off' })}
+                className="underline hover:text-black dark:hover:text-zinc-50"
+              >
+                hide it
+              </a>
+            </>
+          )}
+          {stats === 'off' && (
+            <>
+              inbox pulse is hidden — the page as it was before card 17.{' '}
+              <a
+                href={linkTo({ stats: 'stream' })}
+                className="underline hover:text-black dark:hover:text-zinc-50"
+              >
+                show it
+              </a>
+            </>
+          )}
+        </p>
 
         {result.ok ? (
           <>

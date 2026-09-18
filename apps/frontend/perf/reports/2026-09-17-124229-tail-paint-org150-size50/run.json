@@ -1,0 +1,1145 @@
+{
+  "instrument": "paint",
+  "at": "2026-09-17T07:42:29.159Z",
+  "name": "tail",
+  "mode": "production",
+  "knobs": {
+    "ORG_ID": {
+      "value": "150",
+      "source": "flag"
+    },
+    "ROUNDS": {
+      "value": "3",
+      "source": "flag"
+    },
+    "WARMUP": {
+      "value": "1",
+      "source": "default"
+    },
+    "ARMS": {
+      "value": "off,blocking,stream",
+      "source": "default"
+    },
+    "PAGE_SIZE": {
+      "value": "50",
+      "source": "default"
+    },
+    "FRONTEND_URL": {
+      "value": "http://localhost:3001",
+      "source": "default"
+    },
+    "NAME": {
+      "value": "tail",
+      "source": "flag"
+    }
+  },
+  "summary": {
+    "off": {
+      "ttfbMs": 13.22,
+      "fcpMs": 37.28,
+      "listMs": 17.94,
+      "widgetMs": null,
+      "lastByteMs": 15.46,
+      "dclMs": 22.21,
+      "loadMs": 53.67,
+      "gapMs": 0,
+      "docBytes": 11014,
+      "docDecodedBytes": 92295,
+      "jsBytes": 137419,
+      "jsDecodedBytes": 457709,
+      "cssBytes": 64906,
+      "inlinePayloadBytes": 31373,
+      "inlineOtherBytes": 0,
+      "chunks": 1
+    },
+    "blocking": {
+      "ttfbMs": 25.76,
+      "fcpMs": 59.82,
+      "listMs": 30.76,
+      "widgetMs": 30.76,
+      "lastByteMs": 27.85,
+      "dclMs": 39.46,
+      "loadMs": 65.79,
+      "gapMs": 0,
+      "docBytes": 11565,
+      "docDecodedBytes": 94523,
+      "jsBytes": 137419,
+      "jsDecodedBytes": 457709,
+      "cssBytes": 64906,
+      "inlinePayloadBytes": 32587,
+      "inlineOtherBytes": 0,
+      "chunks": 1
+    },
+    "stream": {
+      "ttfbMs": 15.71,
+      "fcpMs": 40.38,
+      "listMs": 20.43,
+      "widgetMs": 32.98,
+      "lastByteMs": 32.28,
+      "dclMs": 33.36,
+      "loadMs": 58.08,
+      "gapMs": 16,
+      "docBytes": 12811,
+      "docDecodedBytes": 95862,
+      "jsBytes": 137419,
+      "jsDecodedBytes": 457709,
+      "cssBytes": 64906,
+      "inlinePayloadBytes": 32827,
+      "inlineOtherBytes": 902,
+      "chunks": 2
+    }
+  },
+  "loads": [
+    {
+      "arm": "off",
+      "ttfbMs": 15.56,
+      "fcpMs": 37.28,
+      "listMs": 20.41,
+      "fallbackMs": null,
+      "widgetMs": null,
+      "lastByteMs": 18.12,
+      "dclMs": 22.21,
+      "loadMs": 53.67,
+      "gapMs": 0.48,
+      "docBytes": 11014,
+      "docDecodedBytes": 92295,
+      "jsBytes": 137419,
+      "jsDecodedBytes": 457709,
+      "cssBytes": 64906,
+      "inlinePayloadBytes": 31373,
+      "inlineOtherBytes": 0,
+      "chunks": [
+        {
+          "atMs": 17.64,
+          "bytes": 60862
+        },
+        {
+          "atMs": 18.12,
+          "bytes": 31433
+        }
+      ],
+      "resources": [
+        {
+          "name": "http://localhost:3001/_next/static/media/797e433ab948586e-s.p.0r6juujl39pe6.woff2",
+          "type": "Font",
+          "startMs": 17.43,
+          "firstByteMs": 19.63,
+          "endMs": 20.2,
+          "bytes": 23408
+        },
+        {
+          "name": "http://localhost:3001/_next/static/media/caa3a2e1cccd8315-s.p.0wgildi0cnwt9.woff2",
+          "type": "Font",
+          "startMs": 17.53,
+          "firstByteMs": 21.7,
+          "endMs": 21.9,
+          "bytes": 29588
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3n_mtspjf3i31.css",
+          "type": "Stylesheet",
+          "startMs": 17.56,
+          "firstByteMs": 21.41,
+          "endMs": 21.59,
+          "bytes": 5731
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2gajeqpcnk_a_.js",
+          "type": "Script",
+          "startMs": 17.96,
+          "firstByteMs": 22.38,
+          "endMs": 22.75,
+          "bytes": 6359
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3dq1qq0j1kpy3.js",
+          "type": "Script",
+          "startMs": 17.99,
+          "firstByteMs": 22.46,
+          "endMs": 22.63,
+          "bytes": 9986
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2dfjxp56aurbf.js",
+          "type": "Script",
+          "startMs": 18.01,
+          "firstByteMs": 23.66,
+          "endMs": 27.77,
+          "bytes": 72041
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3co9iys78z4bu.js",
+          "type": "Script",
+          "startMs": 18.02,
+          "firstByteMs": 24.85,
+          "endMs": 26.88,
+          "bytes": 39003
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/turbopack-1yov9kovjbdcp.js",
+          "type": "Script",
+          "startMs": 18.03,
+          "firstByteMs": 24.1,
+          "endMs": 24.31,
+          "bytes": 4227
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0ux5sz4273rhs.js",
+          "type": "Script",
+          "startMs": 18.05,
+          "firstByteMs": 24.79,
+          "endMs": 25.04,
+          "bytes": 4055
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0lfzt8bztswfa.js",
+          "type": "Script",
+          "startMs": 18.07,
+          "firstByteMs": 24.47,
+          "endMs": 24.55,
+          "bytes": 2492
+        },
+        {
+          "name": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNSIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJXaW5kb3dUZXh0IiBkPSJNMjAgM2gtMVYxaC0ydjJIN1YxSDV2Mkg0Yy0xLjEgMC0yIC45LTIgMnYxNmMwIDEuMS45IDIgMiAyaDE2YzEuMSAwIDItLjkgMi0yVjVjMC0xLjEtLjktMi0yLTJ6bTAgMThINFY4aDE2djEzeiIvPjxwYXRoIGZpbGw9Im5vbmUiIGQ9Ik0wIDBoMjR2MjRIMHoiLz48L3N2Zz4=",
+          "type": "Image",
+          "startMs": 26.93,
+          "firstByteMs": 26.95,
+          "endMs": 26.96,
+          "bytes": 0
+        }
+      ]
+    },
+    {
+      "arm": "blocking",
+      "ttfbMs": 23.03,
+      "fcpMs": 59.82,
+      "listMs": 27.74,
+      "fallbackMs": null,
+      "widgetMs": 27.74,
+      "lastByteMs": 24.96,
+      "dclMs": 29.74,
+      "loadMs": 62.17,
+      "gapMs": 0,
+      "docBytes": 11565,
+      "docDecodedBytes": 94523,
+      "jsBytes": 137419,
+      "jsDecodedBytes": 457709,
+      "cssBytes": 64906,
+      "inlinePayloadBytes": 32587,
+      "inlineOtherBytes": 0,
+      "chunks": [
+        {
+          "atMs": 24.96,
+          "bytes": 94523
+        }
+      ],
+      "resources": [
+        {
+          "name": "http://localhost:3001/_next/static/media/797e433ab948586e-s.p.0r6juujl39pe6.woff2",
+          "type": "Font",
+          "startMs": 24.76,
+          "firstByteMs": 28.36,
+          "endMs": 28.52,
+          "bytes": 23408
+        },
+        {
+          "name": "http://localhost:3001/_next/static/media/caa3a2e1cccd8315-s.p.0wgildi0cnwt9.woff2",
+          "type": "Font",
+          "startMs": 24.85,
+          "firstByteMs": 28.75,
+          "endMs": 28.95,
+          "bytes": 29588
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3n_mtspjf3i31.css",
+          "type": "Stylesheet",
+          "startMs": 24.88,
+          "firstByteMs": 28.84,
+          "endMs": 29.08,
+          "bytes": 5731
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2gajeqpcnk_a_.js",
+          "type": "Script",
+          "startMs": 25.37,
+          "firstByteMs": 30.06,
+          "endMs": 30.55,
+          "bytes": 6359
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3dq1qq0j1kpy3.js",
+          "type": "Script",
+          "startMs": 25.4,
+          "firstByteMs": 31.18,
+          "endMs": 32.29,
+          "bytes": 9986
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2dfjxp56aurbf.js",
+          "type": "Script",
+          "startMs": 25.41,
+          "firstByteMs": 31.26,
+          "endMs": 35.11,
+          "bytes": 72041
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3co9iys78z4bu.js",
+          "type": "Script",
+          "startMs": 25.43,
+          "firstByteMs": 32.61,
+          "endMs": 34.64,
+          "bytes": 39003
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/turbopack-1yov9kovjbdcp.js",
+          "type": "Script",
+          "startMs": 25.45,
+          "firstByteMs": 31.44,
+          "endMs": 31.62,
+          "bytes": 4227
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0ux5sz4273rhs.js",
+          "type": "Script",
+          "startMs": 25.47,
+          "firstByteMs": 31.67,
+          "endMs": 32.54,
+          "bytes": 4055
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0lfzt8bztswfa.js",
+          "type": "Script",
+          "startMs": 25.48,
+          "firstByteMs": 33.05,
+          "endMs": 33.14,
+          "bytes": 2492
+        },
+        {
+          "name": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNSIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJXaW5kb3dUZXh0IiBkPSJNMjAgM2gtMVYxaC0ydjJIN1YxSDV2Mkg0Yy0xLjEgMC0yIC45LTIgMnYxNmMwIDEuMS45IDIgMiAyaDE2YzEuMSAwIDItLjkgMi0yVjVjMC0xLjEtLjktMi0yLTJ6bTAgMThINFY4aDE2djEzeiIvPjxwYXRoIGZpbGw9Im5vbmUiIGQ9Ik0wIDBoMjR2MjRIMHoiLz48L3N2Zz4=",
+          "type": "Image",
+          "startMs": 35.02,
+          "firstByteMs": 35.05,
+          "endMs": 35.05,
+          "bytes": 0
+        }
+      ]
+    },
+    {
+      "arm": "stream",
+      "ttfbMs": 15.71,
+      "fcpMs": 41.51,
+      "listMs": 20.43,
+      "fallbackMs": 20.43,
+      "widgetMs": 32.73,
+      "lastByteMs": 32.26,
+      "dclMs": 32.97,
+      "loadMs": 58.34,
+      "gapMs": 14.51,
+      "docBytes": 12810,
+      "docDecodedBytes": 95862,
+      "jsBytes": 137419,
+      "jsDecodedBytes": 457709,
+      "cssBytes": 64906,
+      "inlinePayloadBytes": 32827,
+      "inlineOtherBytes": 902,
+      "chunks": [
+        {
+          "atMs": 17.75,
+          "bytes": 93245
+        },
+        {
+          "atMs": 32.26,
+          "bytes": 2617
+        }
+      ],
+      "resources": [
+        {
+          "name": "http://localhost:3001/_next/static/media/797e433ab948586e-s.p.0r6juujl39pe6.woff2",
+          "type": "Font",
+          "startMs": 17.55,
+          "firstByteMs": 21.31,
+          "endMs": 21.49,
+          "bytes": 23408
+        },
+        {
+          "name": "http://localhost:3001/_next/static/media/caa3a2e1cccd8315-s.p.0wgildi0cnwt9.woff2",
+          "type": "Font",
+          "startMs": 17.64,
+          "firstByteMs": 21.42,
+          "endMs": 21.67,
+          "bytes": 29588
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3n_mtspjf3i31.css",
+          "type": "Stylesheet",
+          "startMs": 17.67,
+          "firstByteMs": 21.63,
+          "endMs": 21.83,
+          "bytes": 5731
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2gajeqpcnk_a_.js",
+          "type": "Script",
+          "startMs": 18.17,
+          "firstByteMs": 22.44,
+          "endMs": 23.91,
+          "bytes": 6359
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3dq1qq0j1kpy3.js",
+          "type": "Script",
+          "startMs": 18.19,
+          "firstByteMs": 22.59,
+          "endMs": 24.09,
+          "bytes": 9986
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2dfjxp56aurbf.js",
+          "type": "Script",
+          "startMs": 18.21,
+          "firstByteMs": 26.52,
+          "endMs": 33.98,
+          "bytes": 72041
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3co9iys78z4bu.js",
+          "type": "Script",
+          "startMs": 18.22,
+          "firstByteMs": 25.56,
+          "endMs": 31.43,
+          "bytes": 39003
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/turbopack-1yov9kovjbdcp.js",
+          "type": "Script",
+          "startMs": 18.24,
+          "firstByteMs": 24.99,
+          "endMs": 25.32,
+          "bytes": 4227
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0ux5sz4273rhs.js",
+          "type": "Script",
+          "startMs": 18.25,
+          "firstByteMs": 30.19,
+          "endMs": 30.93,
+          "bytes": 4055
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0lfzt8bztswfa.js",
+          "type": "Script",
+          "startMs": 18.27,
+          "firstByteMs": 30.29,
+          "endMs": 31.02,
+          "bytes": 2492
+        },
+        {
+          "name": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNSIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJXaW5kb3dUZXh0IiBkPSJNMjAgM2gtMVYxaC0ydjJIN1YxSDV2Mkg0Yy0xLjEgMC0yIC45LTIgMnYxNmMwIDEuMS45IDIgMiAyaDE2YzEuMSAwIDItLjkgMi0yVjVjMC0xLjEtLjktMi0yLTJ6bTAgMThINFY4aDE2djEzeiIvPjxwYXRoIGZpbGw9Im5vbmUiIGQ9Ik0wIDBoMjR2MjRIMHoiLz48L3N2Zz4=",
+          "type": "Image",
+          "startMs": 27.84,
+          "firstByteMs": 27.86,
+          "endMs": 27.87,
+          "bytes": 0
+        }
+      ]
+    },
+    {
+      "arm": "off",
+      "ttfbMs": 12.07,
+      "fcpMs": 33.8,
+      "listMs": 16.87,
+      "fallbackMs": null,
+      "widgetMs": null,
+      "lastByteMs": 14.13,
+      "dclMs": 31.32,
+      "loadMs": 51.53,
+      "gapMs": 0,
+      "docBytes": 11016,
+      "docDecodedBytes": 92295,
+      "jsBytes": 137419,
+      "jsDecodedBytes": 457709,
+      "cssBytes": 64906,
+      "inlinePayloadBytes": 31373,
+      "inlineOtherBytes": 0,
+      "chunks": [
+        {
+          "atMs": 14.13,
+          "bytes": 92295
+        }
+      ],
+      "resources": [
+        {
+          "name": "http://localhost:3001/_next/static/media/797e433ab948586e-s.p.0r6juujl39pe6.woff2",
+          "type": "Font",
+          "startMs": 13.91,
+          "firstByteMs": 17.45,
+          "endMs": 17.59,
+          "bytes": 23408
+        },
+        {
+          "name": "http://localhost:3001/_next/static/media/caa3a2e1cccd8315-s.p.0wgildi0cnwt9.woff2",
+          "type": "Font",
+          "startMs": 14.01,
+          "firstByteMs": 17.74,
+          "endMs": 17.94,
+          "bytes": 29588
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3n_mtspjf3i31.css",
+          "type": "Stylesheet",
+          "startMs": 14.03,
+          "firstByteMs": 18.85,
+          "endMs": 19.37,
+          "bytes": 5731
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2gajeqpcnk_a_.js",
+          "type": "Script",
+          "startMs": 14.53,
+          "firstByteMs": 20.57,
+          "endMs": 20.85,
+          "bytes": 6359
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3dq1qq0j1kpy3.js",
+          "type": "Script",
+          "startMs": 14.55,
+          "firstByteMs": 21.19,
+          "endMs": 21.58,
+          "bytes": 9986
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2dfjxp56aurbf.js",
+          "type": "Script",
+          "startMs": 14.57,
+          "firstByteMs": 21.41,
+          "endMs": 26.2,
+          "bytes": 72041
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3co9iys78z4bu.js",
+          "type": "Script",
+          "startMs": 14.58,
+          "firstByteMs": 21.74,
+          "endMs": 24.8,
+          "bytes": 39003
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/turbopack-1yov9kovjbdcp.js",
+          "type": "Script",
+          "startMs": 14.59,
+          "firstByteMs": 20.63,
+          "endMs": 21.01,
+          "bytes": 4227
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0ux5sz4273rhs.js",
+          "type": "Script",
+          "startMs": 14.61,
+          "firstByteMs": 24.97,
+          "endMs": 25.24,
+          "bytes": 4055
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0lfzt8bztswfa.js",
+          "type": "Script",
+          "startMs": 14.62,
+          "firstByteMs": 24.89,
+          "endMs": 25.12,
+          "bytes": 2492
+        },
+        {
+          "name": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNSIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJXaW5kb3dUZXh0IiBkPSJNMjAgM2gtMVYxaC0ydjJIN1YxSDV2Mkg0Yy0xLjEgMC0yIC45LTIgMnYxNmMwIDEuMS45IDIgMiAyaDE2YzEuMSAwIDItLjkgMi0yVjVjMC0xLjEtLjktMi0yLTJ6bTAgMThINFY4aDE2djEzeiIvPjxwYXRoIGZpbGw9Im5vbmUiIGQ9Ik0wIDBoMjR2MjRIMHoiLz48L3N2Zz4=",
+          "type": "Image",
+          "startMs": 24.4,
+          "firstByteMs": 24.42,
+          "endMs": 24.43,
+          "bytes": 0
+        }
+      ]
+    },
+    {
+      "arm": "blocking",
+      "ttfbMs": 25.76,
+      "fcpMs": 48.11,
+      "listMs": 30.76,
+      "fallbackMs": null,
+      "widgetMs": 30.76,
+      "lastByteMs": 27.85,
+      "dclMs": 44.99,
+      "loadMs": 65.79,
+      "gapMs": 0,
+      "docBytes": 11562,
+      "docDecodedBytes": 94523,
+      "jsBytes": 137419,
+      "jsDecodedBytes": 457709,
+      "cssBytes": 64906,
+      "inlinePayloadBytes": 32587,
+      "inlineOtherBytes": 0,
+      "chunks": [
+        {
+          "atMs": 27.85,
+          "bytes": 94523
+        }
+      ],
+      "resources": [
+        {
+          "name": "http://localhost:3001/_next/static/media/797e433ab948586e-s.p.0r6juujl39pe6.woff2",
+          "type": "Font",
+          "startMs": 27.62,
+          "firstByteMs": 32.03,
+          "endMs": 32.15,
+          "bytes": 23408
+        },
+        {
+          "name": "http://localhost:3001/_next/static/media/caa3a2e1cccd8315-s.p.0wgildi0cnwt9.woff2",
+          "type": "Font",
+          "startMs": 27.73,
+          "firstByteMs": 32.87,
+          "endMs": 33.14,
+          "bytes": 29588
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3n_mtspjf3i31.css",
+          "type": "Stylesheet",
+          "startMs": 27.75,
+          "firstByteMs": 32.77,
+          "endMs": 33.39,
+          "bytes": 5731
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2gajeqpcnk_a_.js",
+          "type": "Script",
+          "startMs": 28.23,
+          "firstByteMs": 33.76,
+          "endMs": 34.25,
+          "bytes": 6359
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3dq1qq0j1kpy3.js",
+          "type": "Script",
+          "startMs": 28.26,
+          "firstByteMs": 35.32,
+          "endMs": 35.6,
+          "bytes": 9986
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2dfjxp56aurbf.js",
+          "type": "Script",
+          "startMs": 28.27,
+          "firstByteMs": 35.22,
+          "endMs": 39.55,
+          "bytes": 72041
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3co9iys78z4bu.js",
+          "type": "Script",
+          "startMs": 28.29,
+          "firstByteMs": 35.79,
+          "endMs": 37.8,
+          "bytes": 39003
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/turbopack-1yov9kovjbdcp.js",
+          "type": "Script",
+          "startMs": 28.3,
+          "firstByteMs": 35.95,
+          "endMs": 36.34,
+          "bytes": 4227
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0ux5sz4273rhs.js",
+          "type": "Script",
+          "startMs": 28.32,
+          "firstByteMs": 36.23,
+          "endMs": 36.42,
+          "bytes": 4055
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0lfzt8bztswfa.js",
+          "type": "Script",
+          "startMs": 28.34,
+          "firstByteMs": 36.53,
+          "endMs": 36.76,
+          "bytes": 2492
+        },
+        {
+          "name": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNSIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJXaW5kb3dUZXh0IiBkPSJNMjAgM2gtMVYxaC0ydjJIN1YxSDV2Mkg0Yy0xLjEgMC0yIC45LTIgMnYxNmMwIDEuMS45IDIgMiAyaDE2YzEuMSAwIDItLjkgMi0yVjVjMC0xLjEtLjktMi0yLTJ6bTAgMThINFY4aDE2djEzeiIvPjxwYXRoIGZpbGw9Im5vbmUiIGQ9Ik0wIDBoMjR2MjRIMHoiLz48L3N2Zz4=",
+          "type": "Image",
+          "startMs": 38.94,
+          "firstByteMs": 38.97,
+          "endMs": 38.97,
+          "bytes": 0
+        }
+      ]
+    },
+    {
+      "arm": "stream",
+      "ttfbMs": 14.18,
+      "fcpMs": 35.49,
+      "listMs": 18.98,
+      "fallbackMs": 18.98,
+      "widgetMs": 32.98,
+      "lastByteMs": 32.28,
+      "dclMs": 33.36,
+      "loadMs": 53.01,
+      "gapMs": 16,
+      "docBytes": 12812,
+      "docDecodedBytes": 95862,
+      "jsBytes": 137419,
+      "jsDecodedBytes": 457709,
+      "cssBytes": 64906,
+      "inlinePayloadBytes": 32827,
+      "inlineOtherBytes": 902,
+      "chunks": [
+        {
+          "atMs": 16.28,
+          "bytes": 93245
+        },
+        {
+          "atMs": 32.28,
+          "bytes": 2617
+        }
+      ],
+      "resources": [
+        {
+          "name": "http://localhost:3001/_next/static/media/797e433ab948586e-s.p.0r6juujl39pe6.woff2",
+          "type": "Font",
+          "startMs": 16.02,
+          "firstByteMs": 19.79,
+          "endMs": 19.91,
+          "bytes": 23408
+        },
+        {
+          "name": "http://localhost:3001/_next/static/media/caa3a2e1cccd8315-s.p.0wgildi0cnwt9.woff2",
+          "type": "Font",
+          "startMs": 16.12,
+          "firstByteMs": 19.99,
+          "endMs": 20.32,
+          "bytes": 29588
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3n_mtspjf3i31.css",
+          "type": "Stylesheet",
+          "startMs": 16.14,
+          "firstByteMs": 20.26,
+          "endMs": 20.54,
+          "bytes": 5731
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2gajeqpcnk_a_.js",
+          "type": "Script",
+          "startMs": 16.7,
+          "firstByteMs": 20.73,
+          "endMs": 21.39,
+          "bytes": 6359
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3dq1qq0j1kpy3.js",
+          "type": "Script",
+          "startMs": 16.72,
+          "firstByteMs": 21.16,
+          "endMs": 21.45,
+          "bytes": 9986
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2dfjxp56aurbf.js",
+          "type": "Script",
+          "startMs": 16.74,
+          "firstByteMs": 25.33,
+          "endMs": 29.3,
+          "bytes": 72041
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3co9iys78z4bu.js",
+          "type": "Script",
+          "startMs": 16.75,
+          "firstByteMs": 24.07,
+          "endMs": 26.31,
+          "bytes": 39003
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/turbopack-1yov9kovjbdcp.js",
+          "type": "Script",
+          "startMs": 16.77,
+          "firstByteMs": 23.97,
+          "endMs": 24.2,
+          "bytes": 4227
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0ux5sz4273rhs.js",
+          "type": "Script",
+          "startMs": 16.78,
+          "firstByteMs": 25.26,
+          "endMs": 25.51,
+          "bytes": 4055
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0lfzt8bztswfa.js",
+          "type": "Script",
+          "startMs": 16.8,
+          "firstByteMs": 24.27,
+          "endMs": 24.44,
+          "bytes": 2492
+        },
+        {
+          "name": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNSIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJXaW5kb3dUZXh0IiBkPSJNMjAgM2gtMVYxaC0ydjJIN1YxSDV2Mkg0Yy0xLjEgMC0yIC45LTIgMnYxNmMwIDEuMS45IDIgMiAyaDE2YzEuMSAwIDItLjkgMi0yVjVjMC0xLjEtLjktMi0yLTJ6bTAgMThINFY4aDE2djEzeiIvPjxwYXRoIGZpbGw9Im5vbmUiIGQ9Ik0wIDBoMjR2MjRIMHoiLz48L3N2Zz4=",
+          "type": "Image",
+          "startMs": 26.06,
+          "firstByteMs": 26.09,
+          "endMs": 26.09,
+          "bytes": 0
+        }
+      ]
+    },
+    {
+      "arm": "off",
+      "ttfbMs": 13.22,
+      "fcpMs": 51.19,
+      "listMs": 17.94,
+      "fallbackMs": null,
+      "widgetMs": null,
+      "lastByteMs": 15.46,
+      "dclMs": 20.26,
+      "loadMs": 53.84,
+      "gapMs": 0,
+      "docBytes": 11014,
+      "docDecodedBytes": 92295,
+      "jsBytes": 137419,
+      "jsDecodedBytes": 457709,
+      "cssBytes": 64906,
+      "inlinePayloadBytes": 31373,
+      "inlineOtherBytes": 0,
+      "chunks": [
+        {
+          "atMs": 15.46,
+          "bytes": 92295
+        }
+      ],
+      "resources": [
+        {
+          "name": "http://localhost:3001/_next/static/media/797e433ab948586e-s.p.0r6juujl39pe6.woff2",
+          "type": "Font",
+          "startMs": 15.19,
+          "firstByteMs": 18.8,
+          "endMs": 18.92,
+          "bytes": 23408
+        },
+        {
+          "name": "http://localhost:3001/_next/static/media/caa3a2e1cccd8315-s.p.0wgildi0cnwt9.woff2",
+          "type": "Font",
+          "startMs": 15.28,
+          "firstByteMs": 19.21,
+          "endMs": 19.37,
+          "bytes": 29588
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3n_mtspjf3i31.css",
+          "type": "Stylesheet",
+          "startMs": 15.34,
+          "firstByteMs": 19.43,
+          "endMs": 19.63,
+          "bytes": 5731
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2gajeqpcnk_a_.js",
+          "type": "Script",
+          "startMs": 15.87,
+          "firstByteMs": 19.73,
+          "endMs": 20.16,
+          "bytes": 6359
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3dq1qq0j1kpy3.js",
+          "type": "Script",
+          "startMs": 15.89,
+          "firstByteMs": 20.31,
+          "endMs": 20.68,
+          "bytes": 9986
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2dfjxp56aurbf.js",
+          "type": "Script",
+          "startMs": 15.91,
+          "firstByteMs": 21.32,
+          "endMs": 25.7,
+          "bytes": 72041
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3co9iys78z4bu.js",
+          "type": "Script",
+          "startMs": 15.92,
+          "firstByteMs": 21.55,
+          "endMs": 25.46,
+          "bytes": 39003
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/turbopack-1yov9kovjbdcp.js",
+          "type": "Script",
+          "startMs": 15.94,
+          "firstByteMs": 21.12,
+          "endMs": 21.48,
+          "bytes": 4227
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0ux5sz4273rhs.js",
+          "type": "Script",
+          "startMs": 15.96,
+          "firstByteMs": 22.14,
+          "endMs": 22.35,
+          "bytes": 4055
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0lfzt8bztswfa.js",
+          "type": "Script",
+          "startMs": 15.97,
+          "firstByteMs": 22.04,
+          "endMs": 22.22,
+          "bytes": 2492
+        },
+        {
+          "name": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNSIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJXaW5kb3dUZXh0IiBkPSJNMjAgM2gtMVYxaC0ydjJIN1YxSDV2Mkg0Yy0xLjEgMC0yIC45LTIgMnYxNmMwIDEuMS45IDIgMiAyaDE2YzEuMSAwIDItLjkgMi0yVjVjMC0xLjEtLjktMi0yLTJ6bTAgMThINFY4aDE2djEzeiIvPjxwYXRoIGZpbGw9Im5vbmUiIGQ9Ik0wIDBoMjR2MjRIMHoiLz48L3N2Zz4=",
+          "type": "Image",
+          "startMs": 25.63,
+          "firstByteMs": 25.66,
+          "endMs": 25.66,
+          "bytes": 0
+        }
+      ]
+    },
+    {
+      "arm": "blocking",
+      "ttfbMs": 32.9,
+      "fcpMs": 71.64,
+      "listMs": 37.54,
+      "fallbackMs": null,
+      "widgetMs": 37.54,
+      "lastByteMs": 34.84,
+      "dclMs": 39.46,
+      "loadMs": 73.85,
+      "gapMs": 0,
+      "docBytes": 11566,
+      "docDecodedBytes": 94523,
+      "jsBytes": 137419,
+      "jsDecodedBytes": 457709,
+      "cssBytes": 64906,
+      "inlinePayloadBytes": 32587,
+      "inlineOtherBytes": 0,
+      "chunks": [
+        {
+          "atMs": 34.84,
+          "bytes": 94523
+        }
+      ],
+      "resources": [
+        {
+          "name": "http://localhost:3001/_next/static/media/797e433ab948586e-s.p.0r6juujl39pe6.woff2",
+          "type": "Font",
+          "startMs": 34.62,
+          "firstByteMs": 38.22,
+          "endMs": 38.43,
+          "bytes": 23408
+        },
+        {
+          "name": "http://localhost:3001/_next/static/media/caa3a2e1cccd8315-s.p.0wgildi0cnwt9.woff2",
+          "type": "Font",
+          "startMs": 34.72,
+          "firstByteMs": 38.37,
+          "endMs": 38.64,
+          "bytes": 29588
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3n_mtspjf3i31.css",
+          "type": "Stylesheet",
+          "startMs": 34.74,
+          "firstByteMs": 38.3,
+          "endMs": 38.73,
+          "bytes": 5731
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2gajeqpcnk_a_.js",
+          "type": "Script",
+          "startMs": 35.23,
+          "firstByteMs": 39.86,
+          "endMs": 40.17,
+          "bytes": 6359
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3dq1qq0j1kpy3.js",
+          "type": "Script",
+          "startMs": 35.25,
+          "firstByteMs": 41.13,
+          "endMs": 41.64,
+          "bytes": 9986
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2dfjxp56aurbf.js",
+          "type": "Script",
+          "startMs": 35.26,
+          "firstByteMs": 41.98,
+          "endMs": 46.57,
+          "bytes": 72041
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3co9iys78z4bu.js",
+          "type": "Script",
+          "startMs": 35.28,
+          "firstByteMs": 41.49,
+          "endMs": 45.11,
+          "bytes": 39003
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/turbopack-1yov9kovjbdcp.js",
+          "type": "Script",
+          "startMs": 35.29,
+          "firstByteMs": 41.81,
+          "endMs": 42.14,
+          "bytes": 4227
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0ux5sz4273rhs.js",
+          "type": "Script",
+          "startMs": 35.31,
+          "firstByteMs": 41.9,
+          "endMs": 42.06,
+          "bytes": 4055
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0lfzt8bztswfa.js",
+          "type": "Script",
+          "startMs": 35.33,
+          "firstByteMs": 42.66,
+          "endMs": 42.96,
+          "bytes": 2492
+        },
+        {
+          "name": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNSIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJXaW5kb3dUZXh0IiBkPSJNMjAgM2gtMVYxaC0ydjJIN1YxSDV2Mkg0Yy0xLjEgMC0yIC45LTIgMnYxNmMwIDEuMS45IDIgMiAyaDE2YzEuMSAwIDItLjkgMi0yVjVjMC0xLjEtLjktMi0yLTJ6bTAgMThINFY4aDE2djEzeiIvPjxwYXRoIGZpbGw9Im5vbmUiIGQ9Ik0wIDBoMjR2MjRIMHoiLz48L3N2Zz4=",
+          "type": "Image",
+          "startMs": 44.92,
+          "firstByteMs": 44.94,
+          "endMs": 44.95,
+          "bytes": 0
+        }
+      ]
+    },
+    {
+      "arm": "stream",
+      "ttfbMs": 19.18,
+      "fcpMs": 40.38,
+      "listMs": 23.57,
+      "fallbackMs": 23.57,
+      "widgetMs": 37.97,
+      "lastByteMs": 37.17,
+      "dclMs": 38.24,
+      "loadMs": 58.08,
+      "gapMs": 16.16,
+      "docBytes": 12811,
+      "docDecodedBytes": 95862,
+      "jsBytes": 137419,
+      "jsDecodedBytes": 457709,
+      "cssBytes": 64906,
+      "inlinePayloadBytes": 32827,
+      "inlineOtherBytes": 902,
+      "chunks": [
+        {
+          "atMs": 21.01,
+          "bytes": 93245
+        },
+        {
+          "atMs": 37.17,
+          "bytes": 2617
+        }
+      ],
+      "resources": [
+        {
+          "name": "http://localhost:3001/_next/static/media/797e433ab948586e-s.p.0r6juujl39pe6.woff2",
+          "type": "Font",
+          "startMs": 20.8,
+          "firstByteMs": 24.12,
+          "endMs": 24.28,
+          "bytes": 23408
+        },
+        {
+          "name": "http://localhost:3001/_next/static/media/caa3a2e1cccd8315-s.p.0wgildi0cnwt9.woff2",
+          "type": "Font",
+          "startMs": 20.89,
+          "firstByteMs": 24.56,
+          "endMs": 24.78,
+          "bytes": 29588
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3n_mtspjf3i31.css",
+          "type": "Stylesheet",
+          "startMs": 20.92,
+          "firstByteMs": 24.94,
+          "endMs": 25.45,
+          "bytes": 5731
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2gajeqpcnk_a_.js",
+          "type": "Script",
+          "startMs": 21.37,
+          "firstByteMs": 25.25,
+          "endMs": 25.87,
+          "bytes": 6359
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3dq1qq0j1kpy3.js",
+          "type": "Script",
+          "startMs": 21.39,
+          "firstByteMs": 26.4,
+          "endMs": 27.64,
+          "bytes": 9986
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/2dfjxp56aurbf.js",
+          "type": "Script",
+          "startMs": 21.41,
+          "firstByteMs": 28.39,
+          "endMs": 32.57,
+          "bytes": 72041
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/3co9iys78z4bu.js",
+          "type": "Script",
+          "startMs": 21.42,
+          "firstByteMs": 27.74,
+          "endMs": 30.57,
+          "bytes": 39003
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/turbopack-1yov9kovjbdcp.js",
+          "type": "Script",
+          "startMs": 21.44,
+          "firstByteMs": 29.04,
+          "endMs": 29.3,
+          "bytes": 4227
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0ux5sz4273rhs.js",
+          "type": "Script",
+          "startMs": 21.45,
+          "firstByteMs": 29.44,
+          "endMs": 29.65,
+          "bytes": 4055
+        },
+        {
+          "name": "http://localhost:3001/_next/static/chunks/0lfzt8bztswfa.js",
+          "type": "Script",
+          "startMs": 21.46,
+          "firstByteMs": 30.49,
+          "endMs": 30.69,
+          "bytes": 2492
+        },
+        {
+          "name": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNSIgdmlld0JveD0iMCAwIDI0IDI0Ij48cGF0aCBmaWxsPSJXaW5kb3dUZXh0IiBkPSJNMjAgM2gtMVYxaC0ydjJIN1YxSDV2Mkg0Yy0xLjEgMC0yIC45LTIgMnYxNmMwIDEuMS45IDIgMiAyaDE2YzEuMSAwIDItLjkgMi0yVjVjMC0xLjEtLjktMi0yLTJ6bTAgMThINFY4aDE2djEzeiIvPjxwYXRoIGZpbGw9Im5vbmUiIGQ9Ik0wIDBoMjR2MjRIMHoiLz48L3N2Zz4=",
+          "type": "Image",
+          "startMs": 31.3,
+          "firstByteMs": 31.32,
+          "endMs": 31.32,
+          "bytes": 0
+        }
+      ]
+    }
+  ]
+}

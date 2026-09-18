@@ -2,7 +2,11 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { QueryBudget } from '../observability/query-budget.decorator';
 import { OrgId } from '../tenancy/org-id.decorator';
 import { SearchMessagesQuery } from './dto/search-messages.query';
-import { MessageSearchResult, SearchService } from './search.service';
+import {
+  MessageSearchResult,
+  MessageStats,
+  SearchService,
+} from './search.service';
 
 /**
  * Search over one org's message bodies.
@@ -31,5 +35,17 @@ export class SearchController {
     @Query() query: SearchMessagesQuery,
   ): Promise<MessageSearchResult> {
     return this.search.search(orgId, query);
+  }
+
+  /**
+   * Card 17's widget. One aggregate over the org's messages, one statement,
+   * and slow for the whale by design — see SearchService.stats(). The budget
+   * is exact for the same reason search's is: a second statement here would be
+   * a second scan of ten million rows.
+   */
+  @Get('stats')
+  @QueryBudget(1)
+  stats(@OrgId() orgId: string): Promise<MessageStats> {
+    return this.search.stats(orgId);
   }
 }

@@ -5,6 +5,7 @@
 //   pnpm db:search indexes   build time + on-disk size for five candidates
 //   pnpm db:search gaps      the inputs where FTS answers worse than LIKE
 //   pnpm db:search writes    stretch: what the GIN costs on the way in
+//   pnpm db:search aggregate card 17's widget query: plan, buffers, parallel
 //
 // Same two load-bearing choices as db/explain.mjs, for the same reasons: it
 // connects as the owner and drops into the app role inside a transaction, so
@@ -44,7 +45,7 @@ import {
   record,
 } from './lib/run.mts';
 
-const MODES = ['plans', 'indexes', 'gaps', 'writes'];
+const MODES = ['plans', 'indexes', 'gaps', 'writes', 'aggregate'];
 const mode = process.argv[2];
 
 if (!MODES.includes(mode)) {
@@ -107,6 +108,23 @@ const ftsQuery = `
    WHERE m.org_id = $1 AND m.tsv @@ websearch_to_tsquery('english', $2)
    ORDER BY m.created_at DESC, m.id DESC
    LIMIT ${LIMIT}`;
+
+// Verbatim from SearchService.stats(), lexicons included — an instrument that
+// measures a paraphrase of the shipped statement measures the paraphrase.
+const NEGATIVE_LEXICON =
+  'fail | error | charge | duplicate | block | stop | drop | chase | wrong';
+const POSITIVE_LEXICON =
+  'thank | fix | resolve | refund | credit | deploy | confirm | appreciate';
+const statsQuery = `
+  SELECT count(*)                                                   AS messages,
+         count(*) FILTER (WHERE m.tsv @@ to_tsquery('english', $2)) AS negative,
+         count(*) FILTER (WHERE m.tsv @@ to_tsquery('english', $3)) AS positive,
+         count(*) FILTER (WHERE m.created_at >= now() - interval '90 days')
+                                                                    AS recent,
+         avg(length(m.message))::float8                             AS avg_length,
+         max(m.created_at)                                          AS last_message_at
+    FROM messages m
+   WHERE m.org_id = $1`;
 
 // ------------------------------------------------------------------ reporting
 
@@ -829,6 +847,114 @@ async function writes() {
   await client.query('ROLLBACK');
 }
 
+// ------------------------------------------------------------------ aggregate
+
+/**
+ * Card 17's widget query, as the app role, under the policy: the plan, how many
+ * of the heap's blocks it read, and what the parallel workers are worth. The
+ * whole point of the widget is that this number is large for org 1, so this is
+ * where "genuinely slow" becomes a number rather than an adjective.
+ *
+ * Three cells: the shipped statement as planned by default, the same statement
+ * with parallel query off, and — the tail org's question — whether the btree_gin
+ * on (org_id, tsv) is reachable for `org_id = $1` alone.
+ */
+async function aggregate() {
+  await openScope();
+
+  const heapBytes = Number(await scalar(`SELECT pg_relation_size('messages')`));
+  const orgRows = Number(
+    await scalar('SELECT count(*) FROM messages WHERE org_id = $1', [ORG_ID]),
+  );
+  // As the owner: inside the scope the policy would count the org's rows
+  // twice over and report every org as 100% of the table.
+  const total = await asOwner(() =>
+    scalar('SELECT count(*) FROM messages').then(Number),
+  );
+  const workers = String(await scalar('SHOW max_parallel_workers_per_gather'));
+  const buffers = String(await scalar('SHOW shared_buffers'));
+
+  console.log(
+    `org ${ORG_ID}  ${orgRows.toLocaleString()} of ${total.toLocaleString()} messages ` +
+      `(${((100 * orgRows) / total).toFixed(1)}%)`,
+  );
+  console.log(
+    `messages heap ${(heapBytes / 1024 / 1024).toFixed(0)}MB = ` +
+      `${(heapBytes / 8192).toLocaleString()} blocks · shared_buffers ${buffers} · ` +
+      `max_parallel_workers_per_gather ${workers}`,
+  );
+  console.log(`rounds ${ROUNDS} (first discarded)\n`);
+  console.log(
+    '  cell                       scan node                 workers   ' +
+      'hit/read blocks          read MB   median ms',
+  );
+
+  const params = [ORG_ID, NEGATIVE_LEXICON, POSITIVE_LEXICON];
+  const chart: { label: string; ms: number }[] = [];
+
+  const cell = async (label: string) => {
+    const plan = await explainJson(statsQuery, params);
+    const scan = findScan(plan.Plan) ?? plan.Plan;
+    // Buffers on the scan node are summed across the leader and its workers,
+    // so this is the whole heap the statement touched, not one process's share.
+    const hit = scan['Shared Hit Blocks'];
+    const read = scan['Shared Read Blocks'];
+    const launched = countWorkers(plan.Plan);
+    const ms = await timed(statsQuery, params);
+    console.log(
+      `  ${label.padEnd(26)} ${scan['Node Type'].padEnd(25)} ${String(launched).padStart(7)}   ` +
+        `${`${hit.toLocaleString()}/${read.toLocaleString()}`.padEnd(24)} ` +
+        `${((read * 8192) / 1024 / 1024).toFixed(0).padStart(7)}   ${ms.toFixed(2).padStart(9)}`,
+    );
+    chart.push({ label, ms });
+    return plan;
+  };
+
+  const shipped = await cell('shipped');
+
+  await client.query('SAVEPOINT serial');
+  await client.query('SET LOCAL max_parallel_workers_per_gather = 0');
+  await cell('parallel off');
+  await client.query('ROLLBACK TO SAVEPOINT serial');
+
+  // Whether the index is even an option. The planner's own choice is the
+  // `shipped` row; this forces the question for the org where 40% of the
+  // table is not the answer.
+  await client.query('SAVEPOINT noseq');
+  await client.query('SET LOCAL enable_seqscan = off');
+  await cell('seqscan off (gin forced)');
+  await client.query('ROLLBACK TO SAVEPOINT noseq');
+
+  bars(chart);
+
+  rule('shipped — full plan');
+  const { rows } = await client.query(
+    `EXPLAIN (ANALYZE, BUFFERS) ${statsQuery}`,
+    params,
+  );
+  for (const row of rows) console.log(row['QUERY PLAN']);
+
+  console.log(
+    `\nExecution Time on the shipped plan: ${shipped['Execution Time'].toFixed(2)} ms ` +
+      `(one cold run; the table above is a median of warm round trips)`,
+  );
+
+  await client.query('COMMIT');
+}
+
+/** Workers Launched off the Gather node, or 0 when the plan has none. */
+function countWorkers(node: PlanNode): number {
+  const launched = (node as { 'Workers Launched'?: number })[
+    'Workers Launched'
+  ];
+  if (typeof launched === 'number') return launched;
+  for (const child of node.Plans ?? []) {
+    const found = countWorkers(child);
+    if (found) return found;
+  }
+  return 0;
+}
+
 // ----------------------------------------------------------------------- main
 
 header(`search ${mode}`);
@@ -838,6 +964,7 @@ try {
   if (mode === 'plans') await plans();
   else if (mode === 'indexes') await indexes();
   else if (mode === 'gaps') await gaps();
+  else if (mode === 'aggregate') await aggregate();
   else await writes();
 } finally {
   await client.end();

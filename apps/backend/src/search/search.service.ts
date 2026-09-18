@@ -26,6 +26,39 @@ export interface MessageSearchResult {
   strategy: SearchStrategy;
 }
 
+/** The database's shape for the stats aggregate. Every count is a bigint and
+ *  so arrives as a string; the two nullable ones are null on an empty org. */
+interface StatsRow {
+  messages: string;
+  negative: string;
+  positive: string;
+  recent: string;
+  avg_length: number | null;
+  last_message_at: Date | null;
+}
+
+/**
+ * Card 17's org-level widget. One aggregate over every message the org has.
+ *
+ * `method` is there so the number is never mistaken for sentiment analysis: it
+ * is two word lists matched against the tsvector, and it says so in the body
+ * rather than in a comment nobody sees.
+ *
+ * Counts are `Number()`d off bigint strings, the same 2^53 cap as the quota
+ * meter and the import counters — recorded in memory-bank/progress.md, not
+ * hidden here.
+ */
+export interface MessageStats {
+  messages: number;
+  negative: number;
+  positive: number;
+  /** Messages in the last 90 days. */
+  recent: number;
+  avgLength: number;
+  lastMessageAt: string | null;
+  method: 'lexicon';
+}
+
 /**
  * Which arm answers. Read once at module load, same as LIST_STRATEGY and
  * KEYSET_TIEBREAK and for the same reason: an A/B whose arms are two different
@@ -48,6 +81,18 @@ export const SEARCH_STRATEGY: SearchStrategy =
  * into every A/B run that has nothing to do with the tsvector.
  */
 const escapeLike = (term: string) => term.replace(/[\\%_]/g, '\\$&');
+
+/**
+ * Stems, not words, because that is what the tsvector holds. `failing`,
+ * `failed` and `fails` are all the lexeme `fail`, so one entry matches every
+ * form — and the words come from the seed corpus, so the split describes the
+ * inbox rather than an English dictionary. Two lists, `|`-joined for
+ * to_tsquery. See plans/2026-09-17_drill-17-streaming-inbox-suspense.md.
+ */
+const NEGATIVE_LEXICON =
+  'fail | error | charge | duplicate | block | stop | drop | chase | wrong';
+const POSITIVE_LEXICON =
+  'thank | fix | resolve | refund | credit | deploy | confirm | appreciate';
 
 const toHit = (row: HitRow): MessageHit => ({
   id: row.id,
@@ -92,5 +137,48 @@ export class SearchService {
     });
 
     return { items, strategy: SEARCH_STRATEGY };
+  }
+
+  /**
+   * The inbox widget's aggregate. Card 17.
+   *
+   * One statement, and it is expensive on purpose — the card asks for a widget
+   * that is genuinely slow rather than one with a sleep in it. `messages.org_id`
+   * has a foreign key and no index (drill 02 left it out for exactly this), so
+   * for the whale this is a sequential scan of the whole `messages` heap, every
+   * request, with nothing cached in front of it. Caching is a later card; this
+   * one measures what the page does while the query runs.
+   *
+   * Every aggregate rides the same scan: the FILTER clauses evaluate `@@`
+   * against the stored tsvector per row rather than through the GIN index,
+   * because the WHERE is only `org_id` and the index cannot help a query that
+   * wants 40% of the table. `pnpm db:search aggregate` records the plan.
+   */
+  async stats(orgId: string): Promise<MessageStats> {
+    const { rows } = await this.tenants.withOrg(orgId, (tx) =>
+      tx.query<StatsRow>(
+        `SELECT count(*)                                                   AS messages,
+                count(*) FILTER (WHERE m.tsv @@ to_tsquery('english', $2)) AS negative,
+                count(*) FILTER (WHERE m.tsv @@ to_tsquery('english', $3)) AS positive,
+                count(*) FILTER (WHERE m.created_at >= now() - interval '90 days')
+                                                                           AS recent,
+                avg(length(m.message))::float8                             AS avg_length,
+                max(m.created_at)                                          AS last_message_at
+           FROM messages m
+          WHERE m.org_id = $1`,
+        [orgId, NEGATIVE_LEXICON, POSITIVE_LEXICON],
+      ),
+    );
+
+    const row = rows[0];
+    return {
+      messages: Number(row.messages),
+      negative: Number(row.negative),
+      positive: Number(row.positive),
+      recent: Number(row.recent),
+      avgLength: row.avg_length ?? 0,
+      lastMessageAt: row.last_message_at?.toISOString() ?? null,
+      method: 'lexicon',
+    };
   }
 }
