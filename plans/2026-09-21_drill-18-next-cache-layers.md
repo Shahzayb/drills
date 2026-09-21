@@ -1,6 +1,6 @@
 # Drill 18 — Make Next serve stale data on purpose
 
-**Status:** planned
+**Status:** shipped
 
 Card 18. Prereqs 14 and 17. Builds a stale-data bug behind a switch, instruments the fetch so
 the guilty cache layer is observed rather than argued, fixes it with tags, over-revalidates on
@@ -391,11 +391,20 @@ inside the measured window). Round 1, one sitting, arms in order:
 | `blanket` | 6,011 | **100.18** | 17.66ms | 42.44 | **2,062.80** | 12,118 | 1.0 / 1.0 / 0.9 | **56** |
 | `tagged`, no writer | 13,860 | 231.00 | 29.15ms | 72.23 | 101.24 | 166 | 0 / 0 / 0 | 0 |
 
-Round 2, `nostore`: 95 views, 1.58/s, p50 5,463 / p95 13,787 / p99 14,108ms, 75 scans, and
-**20 of 95 views rendered no widget at all** — the stats fetch failed under ten concurrent
-scans (the `OrgStats` error branch prints no evidence line). The round-1 run's "86 per 100"
-was the same thing, unlabelled; the summary now counts it. Round 2's other three runs were
-lost when the Docker daemon stopped mid-run and are re-run below.
+Round 2, same order, after a Docker restart between the two halves:
+
+| arm | views (60s) | views/s | p50 | p95 | p99 | stats | writes |
+|---|---|---|---|---|---|---|---|
+| `nostore` | 95 | 1.58 | 5,463ms | 13,787 | 14,108 | 75 scans, **20 views without a widget** | 17 |
+| `tagged` | 14,242 | 237.37 | 29.71ms | 54.87 | 79.30 | 0 scans, 14,242 cache answers | 16 |
+| `blanket` | 5,804 | 96.73 | 17.48ms | 49.66 | 2,088.77 | **57 scans**, 19 views without a widget | 17 |
+| `tagged`, no writer | 15,562 | 259.37 | 26.95ms | 53.81 | 74.68 | 0 scans | 0 |
+
+The ratios held: `tagged` at 150–163x `nostore`'s throughput, `blanket` at 41–42% of
+`tagged`'s, 56–57 scans per run. "Views without a widget" is the `OrgStats` error branch,
+which prints no evidence line: under ten concurrent scans (`nostore`) or five (`blanket`'s
+stampede) the stats fetch fails for a fifth of `nostore`'s readers and 0.3% of `blanket`'s.
+Round 1's "86 per 100" was the same thing before the summary counted it.
 
 ```bash
 pnpm load page --cache nostore --mutate-every 5 --page-size 50 --name nostore-m5-r1
@@ -424,6 +433,47 @@ What the table says:
 - Predictions 5 held in shape and missed in scale: `nostore` at 1.5 views/s rather than 3–7
   (the stampede on the DB, not the query), `blanket` at 56 scans rather than "more than 12".
 
+### `pnpm ui:paint --cache tagged --name whale-cached`
+
+Same instrument as drill 17, same page, the widget answered from the data cache (the discarded
+warm-up load fills it). Medians of 5, production build, whale:
+
+| arm | TTFB | FCP | list | widget | load | chunks | docKB | jsKB |
+|---|---|---|---|---|---|---|---|---|
+| `off` | 10 | 33 | 15 | — | 50 | 1 | 11.7 | 137.8 |
+| `blocking` | **12** | 35 | 16 | **16** | 51 | 1 | 12.3 | 137.8 |
+| `stream` | 10 | 33 | 15 | **30** | 50 | **1** | 13.2 | 137.8 |
+
+Against drill 17's `nostore` numbers (TTFB 1,335 / widget 1,346 blocking; 13 / 1,333 stream):
+the blocking arm's TTFB fell 111x because the aggregate it waited for is now a 1ms read, and
+the stream arm sends **one chunk** — the boundary resolves before the shell flushes, so there
+is nothing left to stream. A `<Suspense>` around a cache hit is a wrapper around nothing,
+which drill 17's tail-org run already said. JS is **137.8KB against 134.2KB**: the 3.6KB is
+`next/link` on the fifty row links — the price of putting the router cache in play.
+
+→ `apps/frontend/perf/reports/2026-09-21-190427-whale-cached-paint-org1-size50-tagged/summary.txt`.
+
+### The stretch — what `revalidate: 60` does when it expires
+
+Four loads of the whale's list on `tagged`, read off the footer and `page_render`, with the
+API log beside them:
+
+| load | entry age | `stats:` | `statsMs` | API |
+|---|---|---|---|---|
+| 1 | 45s | `cache · filled by 20a21b57` | 1.04 | — |
+| 2 | 46s | `cache · filled by 20a21b57` | 0.32 | — |
+| 3, 65s later | 113s | `cache · filled by 20a21b57` | 1.43 | `/messages/stats` **rid 209f5d03**, arrived 14:05:55.2, done 14:05:57.1 |
+| 4, 1s after | 114s | `cache · filled by 20a21b57` | 1.05 | `/messages/stats` **rid 68ad6182**, done 14:05:59.1 |
+
+```bash
+docker compose logs nest_server --no-log-prefix --since 4m | grep '/messages/stats' | grep '"msg":"http_request"'
+```
+
+Time-based expiry is **stale-while-revalidate**: the reader past the budget gets the old
+entry in 1ms and Next refetches behind it — no view paid the scan. And the two refetches are
+**not coalesced**: load 4 arrived while load 3's revalidation was still scanning and started
+its own. The on-disk entry afterwards carries rid `68ad6182`, the second one. Prediction 7
+answered: background, and one refetch per reader in the window.
 ## Verification
 
 1. Branch `drill-18`; plan file to `plans/`; `planned` row in `history.md`; commit.
