@@ -28,6 +28,7 @@ orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose
 | 15 | Streaming a 200MB import | The obvious version runs out of memory in under three seconds; streaming it keeps memory flat whether the file is 20MB or 400MB, and a failure half way through says exactly where it stopped. |
 | 16 | Zero-downtime schema change | The obvious migration locked the table for 75 seconds and failed 77% of writes; the same work, split across four transactions, failed none of them. |
 | 17 | Streaming the inbox with Suspense | A widget that reads 5GB per request made the whole page wait 1.3 seconds; one Suspense boundary put the list on screen in 35ms with the widget arriving later, and shipped no extra JavaScript. |
+| 18 | Next's cache layers | A status change that the page kept denying: the data cache answered the click that made it, with a request id from before the write. One tag per row and one per org's lists fix it; the "just disable caching" fix costs the whale a 5GB scan per view. |
 
 Current state and what's open live in `memory-bank/progress.md`; every decision and
 number is one row in `memory-bank/history.md`, with the full reasoning in `plans/`.
@@ -61,6 +62,7 @@ pnpm db:claim fire      # 50 agents claim one ticket; asserts and exits 1 (bench
 pnpm db:import gen      # write a 200MB CSV, then import it (fire, bench, resume)
 pnpm test:ui            # frontend Playwright suite, on the host against the container
 pnpm ui:paint           # TTFB, FCP, chunk arrival and JS bytes per ?stats= arm (needs docker:up:prod)
+pnpm load page          # the inbox through Next per ?cache= arm, with a writer (needs docker:up:prod)
 pnpm format
 pnpm lint
 ```

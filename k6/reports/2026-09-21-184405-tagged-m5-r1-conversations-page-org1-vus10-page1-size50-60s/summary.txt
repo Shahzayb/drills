@@ -1,0 +1,13 @@
+
+  name=tagged-m5-r1 org=1 vus=10 warmup=20s measured=60s cache=tagged mutate_every=5s
+  measured requests : 13106
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 32.86 / 59.06 / 86.17 ms
+  min / avg / max   : 3.53 / 38.77 / 2082.19 ms
+  throughput        : 218.43 req/s
+  (incl. warm-up)   : p50 33.69  p95 58.52  p99 84.70 ms
+  origin / 100 views: list 0.5 · agents 0.0 · stats 0.0
+  stats scans       : 0 in 13106 views
+  writes            : 17 (status flip + /api/revalidate, cache=tagged)
+
+RESULT,tagged-m5-r1,1,10,tagged,5,50,32.86,59.06,86.17,218.43,13106

@@ -74,6 +74,9 @@ export default async function Home() {
         )}
 
         <p className="text-sm">
+          {/* A full document load on purpose (drill 03). The rule started
+              firing when card 18 added /conversations/[id]. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
           <a
             href="/conversations"
             className="text-zinc-600 underline hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50"

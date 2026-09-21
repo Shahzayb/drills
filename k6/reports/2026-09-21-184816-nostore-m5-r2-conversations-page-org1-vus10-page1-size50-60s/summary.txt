@@ -1,0 +1,13 @@
+
+  name=nostore-m5-r2 org=1 vus=10 warmup=20s measured=60s cache=nostore mutate_every=5s
+  measured requests : 95
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 5462.58 / 13786.61 / 14107.63 ms
+  min / avg / max   : 2017.22 / 6817.09 / 15353.63 ms
+  throughput        : 1.58 req/s
+  (incl. warm-up)   : p50 5023.91  p95 12903.24  p99 13965.08 ms
+  origin / 100 views: list 100.0 · agents 100.0 · stats 78.9
+  stats             : 75 scans · 0 cache answers · 20 views without a widget, in 95 views
+  writes            : 17 (status flip + /api/revalidate, cache=nostore)
+
+RESULT,nostore-m5-r2,1,10,nostore,5,50,5462.58,13786.61,14107.63,1.58,95

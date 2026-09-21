@@ -1,6 +1,7 @@
 'use client';
 
-import type { Conversation } from '@/lib/api';
+import type { CacheArm, Conversation } from '@/lib/api';
+import Link from 'next/link';
 import { useOptimistic, useState, useTransition } from 'react';
 import { claimConversation } from './actions';
 
@@ -52,6 +53,7 @@ export function ConversationList({
   query,
   me,
   meName,
+  cache,
 }: {
   /**
    * The server-rendered first page, and it is LIVE.
@@ -74,6 +76,9 @@ export function ConversationList({
    *  selected, and then there is nothing to assign to and no button. */
   me: string | null;
   meName: string | null;
+  /** Card 18's arm. Goes into the claim action, the row links and the
+   *  load-more query, so the whole page stays on one arm. */
+  cache: CacheArm;
 }) {
   // Only the pages fetched by the browser. Page 1 comes from the prop above, so
   // a server re-render reaches the table.
@@ -134,6 +139,7 @@ export function ConversationList({
         orgId: query.org,
         assigneeId: me,
         version: row.version,
+        cache,
       });
 
       // A useState setter, and being deferred is the point. React holds this
@@ -157,7 +163,7 @@ export function ConversationList({
     setError(null);
 
     try {
-      const params = new URLSearchParams({ ...query, cursor });
+      const params = new URLSearchParams({ ...query, cursor, cache });
       const response = await fetch(`/api/conversations?${params}`);
       const body: unknown = await response.json();
 
@@ -238,9 +244,31 @@ export function ConversationList({
                   className="border-b border-black/[.05] last:border-0 dark:border-white/[.08]"
                 >
                   <td className="px-4 py-2 font-mono text-xs text-zinc-500 dark:text-zinc-400">
-                    {conversation.id}
+                    {/* next/link, not <a>: a client-side transition is what
+                        puts the router cache in play, and card 18 needs it in
+                        play. prefetch={false} because fifty in-viewport links
+                        would prefetch fifty routes on every load, and that
+                        is not the layer under study. Still an <a> in the HTML,
+                        so JS-off still gets there. */}
+                    <Link
+                      href={`/conversations/${conversation.id}?${new URLSearchParams(
+                        {
+                          org: query.org,
+                          ...(me ? { me } : {}),
+                          ...(cache !== 'tagged' ? { cache } : {}),
+                        },
+                      )}`}
+                      prefetch={false}
+                      data-conversation-link={conversation.id}
+                      className="underline hover:text-black dark:hover:text-zinc-50"
+                    >
+                      {conversation.id}
+                    </Link>
                   </td>
-                  <td className="px-4 py-2 text-black dark:text-zinc-50">
+                  <td
+                    data-row-status={conversation.id}
+                    className="px-4 py-2 text-black dark:text-zinc-50"
+                  >
                     {conversation.status}
                   </td>
                   <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">

@@ -1,0 +1,13 @@
+
+  name=tagged-m0-r2 org=1 vus=10 warmup=20s measured=60s cache=tagged mutate_every=0s
+  measured requests : 15562
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 26.95 / 53.81 / 74.68 ms
+  min / avg / max   : 3.18 / 31.36 / 150.79 ms
+  throughput        : 259.37 req/s
+  (incl. warm-up)   : p50 28.50  p95 51.12  p99 72.09 ms
+  origin / 100 views: list 0.0 · agents 0.0 · stats 0.0
+  stats             : 0 scans · 15562 cache answers · 0 views without a widget, in 15562 views
+  writes            : 0 (status flip + /api/revalidate, cache=tagged)
+
+RESULT,tagged-m0-r2,1,10,tagged,0,50,26.95,53.81,74.68,259.37,15562

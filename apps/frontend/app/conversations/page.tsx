@@ -1,4 +1,5 @@
 import {
+  cacheArm,
   fetchAgents,
   fetchConversations,
   fetchOrgStats,
@@ -10,6 +11,7 @@ import { after } from 'next/server';
 import { Suspense } from 'react';
 import { ConversationList } from './conversation-list';
 import { OrgStats, OrgStatsFallback } from './org-stats';
+import { ServedLine } from './served';
 
 // There is no auth in this repo, so the tenant is a URL parameter with a
 // default. `?org=2` is how tenant isolation gets poked at by hand later.
@@ -87,6 +89,10 @@ export default async function ConversationsPage(
   // with different `?me` is how the two-agent race is reproduced by hand.
   const me = first(searchParams.me, '');
   const stats = statsArm(first(searchParams.stats, 'stream'));
+  // Card 18. Which cache arm every fetch on this page is on. `tagged` ships;
+  // the other three are the before, the bug and the over-correction. See
+  // `cacheArm` in lib/api.ts.
+  const cache = cacheArm(first(searchParams.cache, 'tagged'));
 
   // Started HERE, before the list is awaited, and awaited far below inside the
   // widget. The aggregate takes seconds; started inside <OrgStats> it would
@@ -94,7 +100,7 @@ export default async function ConversationsPage(
   // is a fine prop between two Server Components — nothing crosses to the
   // client. `off` starts nothing, so that arm measures the page without the
   // query rather than the page ignoring it.
-  const statsPromise = stats === 'off' ? null : fetchOrgStats(orgId);
+  const statsPromise = stats === 'off' ? null : fetchOrgStats(orgId, cache);
 
   const [result, agents] = await Promise.all([
     fetchConversations({
@@ -106,8 +112,9 @@ export default async function ConversationsPage(
       updatedFrom,
       updatedTo,
       paging: mode === 'keyset' ? 'keyset' : undefined,
+      cache,
     }),
-    fetchAgents(orgId),
+    fetchAgents(orgId, cache),
   ]);
 
   const agentList = agents.ok ? agents.agents : [];
@@ -136,9 +143,17 @@ export default async function ConversationsPage(
         route: '/conversations',
         orgId,
         stats,
+        arm: cache,
         totalMs: since(startedAt),
         upstreamMs: result.durMs,
         statsMs: orgStats?.durMs ?? null,
+        // Card 18: who answered each fetch. `cache` on the list after a write
+        // is the bug; `cache` on the stats is the budget working.
+        served: {
+          list: result.served.from,
+          agents: agents.served.from,
+          stats: orgStats?.served.from ?? null,
+        },
       },
       'page_render',
     );
@@ -159,6 +174,7 @@ export default async function ConversationsPage(
       ...(mode === 'offset' ? { mode } : {}),
       // Same rule: the arm is state, and switching sort must not switch arms.
       ...(stats !== 'stream' ? { stats } : {}),
+      ...(cache !== 'tagged' ? { cache } : {}),
       ...overrides,
     });
     // Same rule as lib/api.ts: empty means absent, so a cleared filter leaves
@@ -404,6 +420,36 @@ export default async function ConversationsPage(
           )}
         </p>
 
+        {/* Card 18's arm, stated on the page like the other two. Every arm is
+            a link, because the whole point is switching between them in one
+            process and watching the footer change. */}
+        <p
+          data-cache-arm={cache}
+          className="text-xs text-zinc-500 dark:text-zinc-400"
+        >
+          cache: <span className="font-medium">{cache}</span> —{' '}
+          {cache === 'nostore' && 'every fetch goes to the API, every time.'}
+          {cache === 'cached' &&
+            'fetches are cached and a write expires nothing. The bug.'}
+          {cache === 'tagged' &&
+            'fetches are cached and a write expires the tags it touched.'}
+          {cache === 'blanket' &&
+            'fetches are cached and a write expires the whole org.'}{' '}
+          {(['nostore', 'cached', 'tagged', 'blanket'] as const)
+            .filter((arm) => arm !== cache)
+            .map((arm, i) => (
+              <span key={arm}>
+                {i > 0 && ' · '}
+                <a
+                  href={linkTo({ cache: arm })}
+                  className="underline hover:text-black dark:hover:text-zinc-50"
+                >
+                  {arm}
+                </a>
+              </span>
+            ))}
+        </p>
+
         {result.ok ? (
           <>
             <ConversationList
@@ -413,6 +459,7 @@ export default async function ConversationsPage(
               }
               me={me || null}
               meName={meName}
+              cache={cache}
               query={{
                 org: orgId,
                 pageSize,
@@ -524,10 +571,28 @@ export default async function ConversationsPage(
         {/* The id is on the response header too, but printing it here means
             you can copy it out of the page you are looking at and go straight
             to `pnpm logs:trace <id>`. */}
-        <p className="font-mono text-xs break-all text-zinc-500 dark:text-zinc-400">
+        <p
+          data-page-rid={result.requestId}
+          className="font-mono text-xs break-all text-zinc-500 dark:text-zinc-400"
+        >
           fetched from {result.source} in {result.durMs}ms
           <br />
           rid {result.requestId}
+          <br />
+          {/* Card 18's evidence. `origin` and this page's rid: the API ran
+              for this render. `cache` and somebody else's rid: it did not, and
+              the answer is as old as it says. */}
+          <ServedLine
+            name="list"
+            served={result.served}
+            pageRid={result.requestId}
+          />{' '}
+          ·{' '}
+          <ServedLine
+            name="agents"
+            served={agents.served}
+            pageRid={result.requestId}
+          />
         </p>
       </main>
     </div>

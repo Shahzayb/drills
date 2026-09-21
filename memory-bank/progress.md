@@ -9,11 +9,12 @@ None.
 
 ## Next step
 
-Card 19 (entitlement cache) or SQ3 are drill 17's stated alternatives, and card 19 now has a
-victim: `GET /messages/stats` reads 5.1GB per request for the whale and nothing caches it. Card
-30 (the noisy-neighbour bulk import) has the path it needs — drill 15's worker is an in-process
-async function sharing the pool with every request. Card 26 (the outbox) is still open from
-drill 12.
+Card 19 (entitlement cache) or SQ1 are drill 18's stated alternatives. Drill 18 put
+`GET /messages/stats` behind Next's data cache with a 60s budget, so card 19's victim is now
+the API-side cost that Next cannot see — `POST /ingest`'s per-request key lookup (known issue 9)
+is the obvious entitlement-shaped read. Card 30 (the noisy-neighbour bulk import) has the path
+it needs — drill 15's worker is an in-process async function sharing the pool with every
+request. Card 26 (the outbox) is still open from drill 12.
 
 ## Active plan
 
@@ -47,18 +48,31 @@ the point of it — restarting an import from row zero is slower and just as cor
 quota counter riding on it, because a NOT NULL constraint deployed ahead of the code that fills the
 column is not a degradation, it is a stop.
 
-`pnpm test:ui` runs the frontend's Playwright suite (4 tests) on the **host** against the running
-container. One-time setup: `pnpm exec playwright install chromium`. It has two required red runs —
+`pnpm test:ui` runs the frontend's Playwright suite (6 tests) on the **host** against the running
+container. One-time setup: `pnpm exec playwright install chromium`. It has three required red runs —
 `ASSIGN=lww docker compose up -d nest_server && pnpm test:ui` fails the conflict test, because the
-losing browser is never told anything, and `E2E_STATS=blocking pnpm test:ui` fails the streaming
-test, because a blocking document never contains the fallback. Drill 17's tests load the whale's
-inbox, which now runs a 5GB scan per page view; each `goto` waits for that stream to finish.
+losing browser is never told anything; `E2E_STATS=blocking pnpm test:ui` fails the streaming
+test, because a blocking document never contains the fallback; and `E2E_CACHE=cached pnpm test:ui`
+fails **three** — the status action's own re-render and both assign tests — because nothing
+expires the data cache after a write. `E2E_CACHE=nostore|blanket` are green. The assign and
+stale-status specs pass `stats=off`; only the stream spec loads the whale's widget, and it asks
+for `cache=nostore` because a cached widget lands in the first chunk with no fallback to see.
+Every fixture that writes through the API calls `POST /api/revalidate` afterwards, or the next
+run reads last run's list out of Next's cache.
 
 `pnpm ui:paint` needs the **production build**: `COMPOSE_PROJECT_NAME=drills pnpm docker:up:prod`,
 then `pnpm docker:up` to come back. It refuses a dev server without `--allow-dev`. The whale's
 aggregate ranged 1.3–3.5s across one session depending on the VM's page cache, so a before/after
 is one sitting, interleaved — the instrument does that itself — and cross-sitting absolutes are
-not comparable. Add `?stats=off` to any `/conversations` URL used to measure something else.
+not comparable. Add `?stats=off` to any `/conversations` URL used to measure something else, and
+`?cache=nostore` to anything that wants the API hit on every load — the default arm caches.
+`pnpm load page` is the same page under k6 and needs the production build for the same reason.
+
+Next's data cache is in memory plus a directory — `.next/cache/fetch-cache/` in prod,
+`.next/dev/cache/fetch-cache/` in dev — bind-mounted from `apps/frontend/.next`, so a container
+restart or recreate keeps it. Any API-side write made by hand (curl, a `db:*` instrument, a
+seed) leaves the web tier stale until `POST /api/revalidate {org, id, cache: "blanket"}` for
+that org, or the directory is deleted.
 
 `pnpm db:import` writes into `/tmp` inside the container, and **recreating the container wipes it** —
 both the generated CSVs and the API's own spooled uploads. `docker compose restart nest_server`
@@ -107,7 +121,7 @@ or after a `VACUUM`.
 
 ## Known issues
 
-**Drill 17 added five (36-40).**
+**Drill 17 added five (36-40). Drill 18 added seven (41-47).**
 
 1. Frontend coverage is one page and one flow. Drill 14 gave it a test runner (Playwright,
    `pnpm test:ui`) and three tests, all about the assign conflict. The Route Handler, load-more,
@@ -235,6 +249,31 @@ or after a `VACUUM`.
    describe one load so they agree with each other, and that load is whichever came last — on the
    whale run it was the fastest of the five (1,297ms against a 1,333ms median). The table is the
    number; the picture is the shape.
+41. **`POST /api/revalidate` is unauthenticated, and so is the status Server Action.** Anyone
+   who can reach the web tier can empty an org's cache or close its conversations. The same
+   auth stub as `?org=`, and the cache purge is the cheaper attack: `cache: "blanket"` on the
+   whale costs the next reader a 5GB scan.
+42. **Writes that bypass a Server Action never revalidate.** `POST /ingest`, the import worker,
+   `PATCH` from curl and every `db:*` instrument change rows the web tier has cached. Nothing
+   calls `/api/revalidate` for them. The honest shape is the API emitting "row changed" and Next
+   subscribing (card 26's outbox is the same seam); until then a write outside the actions is a
+   stale read for up to a year on the list and the row, and 60s on the stats.
+43. **The list tag is org-wide, so one status change evicts every list variant the org has** —
+   every sort, filter, page and cursor. Correct (a status change moves the row across every
+   filter and re-sorts every page) and expensive on a busy org: the whale's page 1 is a 180ms
+   query that ten agents will re-fill at once. A per-filter tag would be wrong, not cheaper.
+44. **The stats widget is up to 60 seconds stale on purpose and nothing says so to the
+   user beyond `Ns old`.** `STATS_MAX_AGE_S` is a constant, not a per-org budget, and the
+   revalidation after expiry is whatever Next does — measured in the plan, not chosen.
+45. **Another agent's write is invisible on Back.** Test 2 of `stale-status.spec.ts` asserts it:
+   zero requests, old value. A Link click fetches; the Back button does not, and no Server
+   Action ran in that browser to make it. Known issue 18's subscription is the fix; nothing
+   short of it is.
+46. **The `cached` arm is a live route to a stale read**, deliberate like `lww`, and a URL
+   parameter away from being served.
+47. **`x-request-id` no longer reaches the API on a cache-eligible fetch.** A cached page's
+   `pnpm logs:trace <rid>` finds no API line, by design; the fill request's id is on the page.
+   The `traceparent` still travels on a miss, so Jaeger joins where the log grep does not.
 
 ## Releases
 
@@ -249,6 +288,7 @@ or after a `VACUUM`.
 | [drill/15](https://github.com/Shahzayb/drills/releases/tag/drill/15) | 0.15.0 | none (no open issues to attach) | Streaming CSV import: peak memory flat at ~120MB from a 20MB file to a 400MB one, against a naive version that dies in 2.63 seconds having written nothing. Tagged on the branch before the merge, the `drill/14` precedent. |
 | [drill/16](https://github.com/Shahzayb/drills/releases/tag/drill/16) | 0.16.0 | none (no open issues to attach) | Zero-downtime schema change: the naive migration held ACCESS EXCLUSIVE for 74.7s and failed 76.73% of writes; the same work in four transactions failed none and came in 21% *under* the baseline p99. Tagged on the branch before the merge, the `drill/14` precedent. |
 | [drill/17](https://github.com/Shahzayb/drills/releases/tag/drill/17) | 0.17.0 | none (no open issues to attach) | Streaming the inbox with Suspense: one boundary around a widget backed by a 5GB scan took the whale's TTFB from 1,335ms to 13ms and FCP from 1,388ms to 35ms, with JS bytes identical to the byte. Tagged on the branch before the merge, the `drill/14` precedent. |
+| [drill/18](https://github.com/Shahzayb/drills/releases/tag/drill/18) | 0.18.0 | none (no open issues to attach) | Next's cache layers: a stale read built behind `?cache=`, pinned to the data cache by the click's own re-render carrying a request id from before the write; two tags per write fix it, and "disable caching" costs the whale 150x the throughput. Tagged on the branch before the merge, the `drill/14` precedent. PR #17. |
 
 ## Preferences
 

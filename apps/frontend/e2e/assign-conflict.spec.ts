@@ -33,6 +33,9 @@ import {
 
 const ORG = process.env.E2E_ORG_ID ?? '1';
 const API = process.env.E2E_API_URL ?? 'http://localhost:3002';
+// Card 18. `E2E_CACHE=cached` is a red run here too: the loser's re-render
+// comes from the data cache and never shows the winner's name.
+const CACHE = process.env.E2E_CACHE ?? 'tagged';
 
 interface Row {
   id: string;
@@ -62,6 +65,12 @@ async function claimableRow(api: APIRequestContext): Promise<Row> {
     data: { assigneeId: null, version: row.version },
   });
   expect(released.ok()).toBeTruthy();
+  // The fixture wrote through the API, which cannot reach Next's cache. Card
+  // 18: tell Next, or a cached list from the last run shows the old version.
+  const purged = await api.post('/api/revalidate', {
+    data: { org: ORG, id: row.id, cache: 'blanket' },
+  });
+  expect(purged.ok()).toBeTruthy();
   return (await released.json()) as Row;
 }
 
@@ -103,7 +112,7 @@ test.describe('two agents claim the same ticket', () => {
     const bobPage = await second.newPage();
 
     const url = (me: string) =>
-      `/conversations?org=${ORG}&pageSize=25&me=${me}`;
+      `/conversations?org=${ORG}&pageSize=25&stats=off&me=${me}&cache=${CACHE}`;
 
     // BOTH loaded before EITHER clicks. That is the scenario: two inboxes
     // rendered from the same version, minutes of human time apart from the
@@ -169,7 +178,9 @@ test.describe('two agents claim the same ticket', () => {
     const [alice] = await agents(request);
     const row = await claimableRow(request);
 
-    await page.goto(`/conversations?org=${ORG}&pageSize=25&me=${alice.id}`);
+    await page.goto(
+      `/conversations?org=${ORG}&pageSize=25&stats=off&me=${alice.id}&cache=${CACHE}`,
+    );
     await markDocument(page, 'solo');
 
     await page.click(`[data-claim="${row.id}"]`);
