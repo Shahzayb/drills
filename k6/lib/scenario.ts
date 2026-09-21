@@ -105,7 +105,7 @@ type SummaryOutput = Record<string, string>;
  * p99 next to `throughput NaN req/s` and put NaN in the RESULT row.
  */
 const UNITS: Record<string, number> = { h: 3600, m: 60, s: 1, ms: 0.001 };
-function seconds(d: string): number {
+export function seconds(d: string): number {
   const parts = [...String(d).matchAll(/(\d+(?:\.\d+)?)(ms|[hms])/g)];
   const total = parts.reduce((sum, [, n, u]) => sum + Number(n) * UNITS[u], 0);
   if (!parts.length || !total) throw new Error(`'${d}' is not a duration`);
@@ -352,7 +352,18 @@ export function post(
  */
 export function summary(
   data: SummaryData,
-  { params, columns }: { params: string; columns: (string | number)[] },
+  {
+    params,
+    columns,
+    extra = [],
+  }: {
+    params: string;
+    columns: (string | number)[];
+    /** Drill 18. A script's own lines, printed after the warm-up line and
+     *  before the RESULT row. Absent by default, so every earlier script's
+     *  block is byte-identical to what it printed before this existed. */
+    extra?: string[];
+  },
 ): SummaryOutput {
   if (!SHAPE) {
     throw new Error(
@@ -401,6 +412,7 @@ export function summary(
     // Printed side by side so warm-up exclusion is visible rather than claimed.
     // If these two lines are identical, the exclusion is not working.
     `  (incl. warm-up)   : p50 ${n(overall.med)}  p95 ${n(overall['p(95)'])}  p99 ${n(overall['p(99)'])} ms`,
+    ...extra,
     '',
     // Machine-readable row, for wherever the table is being kept. NAME leads —
     // an empty leading field keeps every other column where it was. Rows

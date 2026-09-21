@@ -109,6 +109,32 @@ const SCRIPTS: Record<string, Script> = {
     ],
   },
 
+  page: {
+    file: 'conversations-page.ts',
+    blurb: 'GET /conversations through Next, per ?cache= arm (drill 18)',
+    knobs: [
+      {
+        flag: 'cache',
+        env: 'CACHE',
+        def: 'tagged',
+        help: 'the ?cache= arm: nostore | cached | tagged | blanket',
+      },
+      {
+        flag: 'mutate-every',
+        env: 'MUTATE_EVERY',
+        def: '5',
+        help: 'seconds between status writes + revalidation; 0 = never',
+      },
+      { flag: 'page-size', env: 'PAGE_SIZE', def: '20', help: 'rows per page' },
+      {
+        flag: 'web-url',
+        env: 'WEB_URL',
+        def: 'http://next_app:3001',
+        help: 'the Next server, as seen from inside the k6 container',
+      },
+    ],
+  },
+
   ingest: {
     file: 'ingest-storm.ts',
     blurb: 'POST /ingest under a duplicate storm (drill 12)',

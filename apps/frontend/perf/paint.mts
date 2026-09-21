@@ -45,6 +45,15 @@ const KNOBS: Knob[] = [
   },
   { flag: 'page-size', env: 'PAGE_SIZE', def: '50', help: 'rows on page 1' },
   {
+    // Drill 18. `nostore` by default so drill 17's numbers stay what they
+    // measured; `tagged` measures the page with the widget answered from the
+    // data cache — the discarded warm-up load is what fills it.
+    flag: 'cache',
+    env: 'CACHE',
+    def: 'nostore',
+    help: 'the ?cache= arm the page is on',
+  },
+  {
     flag: 'url',
     env: 'FRONTEND_URL',
     def: 'http://localhost:3001',
@@ -97,6 +106,7 @@ const ARMS = knob('arms')
   .map((arm) => arm.trim())
   .filter(Boolean);
 const PAGE_SIZE = knob('page-size');
+const CACHE = knob('cache');
 const FRONTEND_URL = knob('url').replace(/\/$/, '');
 const NAME = knob('name');
 
@@ -258,7 +268,7 @@ async function measure(
     }
   });
 
-  const url = `${FRONTEND_URL}/conversations?org=${ORG_ID}&pageSize=${PAGE_SIZE}&stats=${arm}`;
+  const url = `${FRONTEND_URL}/conversations?org=${ORG_ID}&pageSize=${PAGE_SIZE}&stats=${arm}&cache=${CACHE}`;
   await page.goto(url, { waitUntil: 'load', timeout: 120_000 });
   // `load` can beat the FCP lifecycle event on a page this small. Give it a
   // moment, or the record has no first paint and the screenshot fires into a
@@ -558,7 +568,7 @@ const stamp =
   `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 const safeName = NAME.trim().replace(/[^a-zA-Z0-9._]+/g, '-');
 const dir = new URL(
-  `./reports/${stamp}${safeName ? `-${safeName}` : ''}-paint-org${ORG_ID}-size${PAGE_SIZE}/`,
+  `./reports/${stamp}${safeName ? `-${safeName}` : ''}-paint-org${ORG_ID}-size${PAGE_SIZE}${CACHE === 'nostore' ? '' : `-${CACHE}`}/`,
   import.meta.url,
 );
 mkdirSync(dir, { recursive: true });
