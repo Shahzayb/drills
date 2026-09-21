@@ -140,7 +140,7 @@ export function handleSummary(data: SummaryData) {
     columns: [CACHE, MUTATE_EVERY, PAGE_SIZE],
     extra: [
       `  origin / 100 views: list ${per100('served_list_origin')} · agents ${per100('served_agents_origin')} · stats ${per100('served_stats_origin')}`,
-      `  stats scans       : ${count('served_stats_origin')} in ${views} views`,
+      `  stats             : ${count('served_stats_origin')} scans · ${count('served_stats_cache')} cache answers · ${views - count('served_stats_origin') - count('served_stats_cache')} views without a widget, in ${views} views`,
       `  writes            : ${count('mutations')} (status flip + /api/revalidate, cache=${CACHE})`,
     ],
   });

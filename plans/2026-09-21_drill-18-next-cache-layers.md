@@ -362,6 +362,68 @@ prints the same value — `pnpm logs:trace 08d27eed` finds that request in both 
 `.next/dev/cache/fetch-cache/`; `revalidate=31536000` is Next's "one year" for an entry with no
 `revalidate` of its own.
 
+### Production: the route table, memoization, the cache directory
+
+`pnpm docker:up:prod`. The build's route table:
+
+```
+├ ƒ /conversations
+├ ƒ /conversations/[id]
+ƒ  (Dynamic)  server-rendered on demand
+```
+
+No Full Route Cache for either — both read `searchParams`. The response carries
+`Cache-Control: private, no-cache, no-store, max-age=0, must-revalidate` and no
+`x-nextjs-cache`. Memoization in prod, steady state: 3 API requests per detail view on
+`nostore` (row once for three calls, messages, agents), three runs of three. The prod cache
+directory is `.next/cache/fetch-cache/`.
+
+### The cost — `pnpm load page`, whale, 10 VUs, 20s warm-up, 60s measured, one write / 5s
+
+Production build, org 1, `pageSize=50`, `stats=stream`. The writer flips the newest row's
+status through the API and calls `/api/revalidate` with the arm 17 times per 80s run (12–13
+inside the measured window). Round 1, one sitting, arms in order:
+
+| arm | views (60s) | views/s | p50 | p95 | p99 | max | origin list / agents / stats per 100 views | stats scans |
+|---|---|---|---|---|---|---|---|---|
+| `nostore` | 87 | **1.45** | 6,131ms | 13,382 | 13,890 | 13,952 | 100 / 100 / 86 | 75 |
+| `tagged` | 13,106 | **218.43** | 32.86ms | 59.06 | 86.17 | 2,082 | 0.5 / 0.0 / 0.0 | **0** |
+| `blanket` | 6,011 | **100.18** | 17.66ms | 42.44 | **2,062.80** | 12,118 | 1.0 / 1.0 / 0.9 | **56** |
+| `tagged`, no writer | 13,860 | 231.00 | 29.15ms | 72.23 | 101.24 | 166 | 0 / 0 / 0 | 0 |
+
+Round 2, `nostore`: 95 views, 1.58/s, p50 5,463 / p95 13,787 / p99 14,108ms, 75 scans, and
+**20 of 95 views rendered no widget at all** — the stats fetch failed under ten concurrent
+scans (the `OrgStats` error branch prints no evidence line). The round-1 run's "86 per 100"
+was the same thing, unlabelled; the summary now counts it. Round 2's other three runs were
+lost when the Docker daemon stopped mid-run and are re-run below.
+
+```bash
+pnpm load page --cache nostore --mutate-every 5 --page-size 50 --name nostore-m5-r1
+pnpm load page --cache tagged  --mutate-every 5 --page-size 50 --name tagged-m5-r1
+pnpm load page --cache blanket --mutate-every 5 --page-size 50 --name blanket-m5-r1
+pnpm load page --cache tagged  --mutate-every 0 --page-size 50 --name tagged-m0-r1
+```
+
+→ `k6/reports/2026-09-21-184238-nostore-m5-r1-…/summary.txt` and siblings.
+
+What the table says:
+
+- **`nostore` is not "the same page, slower". It is ten concurrent 5GB scans against 128MB of
+  `shared_buffers`** — drill 17 measured one scan at 1.3s; ten at once are 6–14s each, 1.5
+  views a second, and a fifth of the views lose the widget outright. Disabling caching to fix
+  a stale read costs 150x the throughput on the whale.
+- **`tagged` pays for the writes it gets and nothing else.** 65 origin list fetches for 17
+  writes — about four readers miss at once per eviction, the rest wait on the incremental
+  cache's per-key lock — and the stats never run. Against the no-writer run the writer costs
+  5% of throughput (231 → 218) and 4ms of p50.
+- **`blanket` turns 12 writes into 56 scans.** Every eviction of `org:1` empties the stats
+  entry too, and 10 VUs missing together run 4–5 scans each time. p99 2,063ms is the reader
+  that waited on a scan; max 12,118ms is one that waited on five. The p50 is *lower* than
+  `tagged`'s (17.66 vs 32.86ms) — a closed-model artifact: the VUs parked on a scan stop
+  competing, and the others go faster. Throughput and p99 are the honest columns.
+- Predictions 5 held in shape and missed in scale: `nostore` at 1.5 views/s rather than 3–7
+  (the stampede on the DB, not the query), `blanket` at 56 scans rather than "more than 12".
+
 ## Verification
 
 1. Branch `drill-18`; plan file to `plans/`; `planned` row in `history.md`; commit.

@@ -5,7 +5,7 @@
 pnpm workspace monorepo (`apps/*`, `packages/*`) under Turborepo. `packages/` is empty.
 
 - `apps/backend` — NestJS (TypeScript), port `3002`. Jest for unit + e2e.
-- `apps/frontend` — Next.js 16 (App Router, React 19, Tailwind v4), port `3001`. Playwright since drill 14, host-run against the container (`pnpm test:ui`), covering the assign conflict and, since drill 17, the streamed stats widget. `apps/frontend/perf/` holds `pnpm ui:paint`, the browser-side measurement instrument.
+- `apps/frontend` — Next.js 16 (App Router, React 19, Tailwind v4), port `3001`. Playwright since drill 14, host-run against the container (`pnpm test:ui`), covering the assign conflict, the streamed stats widget (drill 17) and the stale read per cache arm (drill 18). `apps/frontend/perf/` holds `pnpm ui:paint`, the browser-side measurement instrument.
 - Postgres 18 and Redis 8, alpine, alongside both apps under Docker Compose.
 
 Two `@Global()` chokepoint modules, one per data store, client private in both. `src/postgres` owns the `pg` `Pool`; every read goes through its `query()`, so later drills have one place to hook timing/tracing/pool metrics. `src/redis` owns the ioredis client and grows a method per command. No ORM: hand-written SQL run by node-pg-migrate. Every tenant-owned row carries `org_id` directly; several indexes are deliberately missing. Reasoning: `plans/2026-08-07_drill-02-schema-and-migrations.md`.
@@ -66,6 +66,31 @@ runs. `conversation-list.tsx` gains a client-side substring filter over the load
 (`data-filter`, "N of M loaded match") and the comment naming the three reasons it is a
 Client Component. `/health` reports `mode: process.env.NODE_ENV`.
 
+Drill 18 caches the web tier's fetches behind `?cache=nostore|cached|tagged|blanket` (default
+`tagged`), parsed by `cacheArm()` in `lib/api.ts`, carried by `linkTo()`, and handed to the
+Server Actions and the load-more Route Handler as an input. Three arms cache with
+`force-cache` + tags; they differ only in what a WRITE expires: `tagged` →
+`updateTag(conversation:<id>)` + `updateTag(org:<o>:conversations)`, `blanket` → `updateTag(org:<o>)`,
+`cached` → nothing (the reproduced bug), `nostore` → `refresh()` with nothing cached. The tag
+scheme is `tags` in `lib/api.ts` and `tagsAfterWrite(arm, …)` is its one home, read by
+`actions.ts` (`updateTag`) and `app/api/revalidate/route.ts` (`revalidateTag(t, {expire: 0})`,
+the door for writes that bypass the actions — k6, Playwright fixtures, curl). The list tag is
+org-wide on purpose: a status change re-sorts every page and moves the row across every
+filter. The stats fetch carries `revalidate: STATS_MAX_AGE_S` (60) as its staleness budget.
+**`callApi` sends no `x-request-id` on a cache-eligible fetch** — Next keys the data cache on
+headers and strips only `traceparent`/`tracestate` (`server/lib/incremental-cache/index.js`),
+so the id made every load a miss. Every result carries `served: { from: 'origin'|'cache',
+ageMs, rid }`, computed from the API's `x-served-at`: an answer stamped before the call asked
+is a cache answer, and `rid` is the request that filled it (this page's own id = memoized in
+this render). `app/conversations/served.tsx` prints it; `page_render` logs it.
+`app/conversations/[id]/page.tsx` is the detail page: a Server Component, `<form action>` to
+`setConversationStatus`, `next/link` back to the inbox (the router cache needs a client
+transition), and `fetchConversation` called from `generateMetadata`, the body and `StatusForm`
+so memoization is measured (one API request for the three). `updateTag` and `refresh()` set
+the same flag and **the last call wins** — `expireAfterWrite` in `actions.ts` calls
+`refresh()` only when nothing was tagged. `/api/revalidate` is unauthenticated. Numbers:
+`plans/2026-09-21_drill-18-next-cache-layers.md`.
+
 `app/imports/page.tsx` is the UI half and is zero application JavaScript: a job table and a `<meta http-equiv="refresh" content="2">` rendered **only while a job is running**, so the page stops polling on its own. Uploads go through `app/api/imports/route.ts`, a Route Handler that pipes `request.body` on with `duplex: 'half'` for `text/csv` and falls back to `request.formData()` for a browser file input — which buffers, and the page says so. A Server Action was rejected: Next buffers a Server Action's body and caps it at `serverActions.bodySizeLimit`, 1MB by default.
 
 `src/observability` owns request correlation and query counting. One id (`x-request-id`) is generated or accepted at the Next edge and threads every layer via `AsyncLocalStorage`; `PostgresService.query()` appends it as a trailing `/* rid=… */`. Both apps log structured JSON via pino, every line carrying `time`/`level`/`svc`/`msg`/`rid` (`durMs`/`status` named consistently). `LOG_LEVEL` is per-service in `docker-compose.yml`, shell first.
@@ -105,7 +130,7 @@ Seeding is `apps/backend/db/seed.mts`.
 - `db:bench` — `COPY` vs `INSERT` loop, and faker-per-row vs the template corpus.
 - Fixed RNG seed: two runs produce byte-identical data. `--scale` is the only flag.
 
-Load testing is k6 in a container on the Compose network (`test` profile): `pnpm load list --org 150` runs one measurement, `pnpm load search` runs drill 11's, `pnpm load write` runs drill 16's — the first script here that is an OPEN model (`constant-arrival-rate`, knob `RATE`) rather than fixed concurrency, because a closed-model run cannot show a lock outage: blocked VUs simply stop sending. `k6/lib/scenario.ts` grew an arrival-rate branch in `shapeOf`/`warmupFor`, a conditional `dropped_iterations` threshold (the metric does not exist for a fixed-VU executor, and a threshold naming a metric k6 never created fails the whole run), and an `errors` line in every summary. The flat path is byte-identical, so the ~60 recorded runs stay comparable. `scripts/load.ts` is the runner — a knob catalog, `parseArgs`, generated `-e` flags, `--help` per script, same shape as `scripts/measure.ts`. Knobs are `ORG_ID`/`VUS`/`WARMUP`/`DURATION`/`BASE_URL`/`NAME`/`P95_BUDGET_MS` for both, plus `PAGE`/`PAGE_SIZE` for list and `Q`/`PAGE_SIZE` for search; each is a `--flag` or an env var, and the two forms produce identical records. `pnpm load:baseline` is an alias for `pnpm load list`, because the plans cite it. No sweep script — the method (vacuum, settle, 3 runs per org in fixed order) is written in `plans/2026-08-13_drill-05-load-test-baseline.md` and run by hand. A run leaves one directory under `k6/reports/` holding `dashboard.html` and `summary.txt`; **the HTML is gitignored** (170KB/run) and every cited number is in the ~300-byte summary. The run directory's name **is** the only index, so a run's `NAME` has to describe its arm well enough to stand alone. The measurement method — warm-up/measure split, tagged sub-metrics, thresholds, p99 arithmetic — lives once in `k6/lib/scenario.ts`; a script in `k6/` is a URL and one summary line, so the two scripts are the same experiment by construction. **Their basenames do not change**: ~60 recorded report directories are named after them, and `scripts/load.ts` strips the extension when building that name.
+Load testing is k6 in a container on the Compose network (`test` profile): `pnpm load list --org 150` runs one measurement, `pnpm load search` runs drill 11's, `pnpm load write` runs drill 16's — the first script here that is an OPEN model (`constant-arrival-rate`, knob `RATE`) rather than fixed concurrency, because a closed-model run cannot show a lock outage: blocked VUs simply stop sending. `k6/lib/scenario.ts` grew an arrival-rate branch in `shapeOf`/`warmupFor`, a conditional `dropped_iterations` threshold (the metric does not exist for a fixed-VU executor, and a threshold naming a metric k6 never created fails the whole run), and an `errors` line in every summary. The flat path is byte-identical, so the ~60 recorded runs stay comparable. `scripts/load.ts` is the runner — a knob catalog, `parseArgs`, generated `-e` flags, `--help` per script, same shape as `scripts/measure.ts`. Knobs are `ORG_ID`/`VUS`/`WARMUP`/`DURATION`/`BASE_URL`/`NAME`/`P95_BUDGET_MS` for both, plus `PAGE`/`PAGE_SIZE` for list and `Q`/`PAGE_SIZE` for search; each is a `--flag` or an env var, and the two forms produce identical records. `pnpm load:baseline` is an alias for `pnpm load list`, because the plans cite it. `pnpm load page` is drill 18's and the first script against the **web tier** (`WEB_URL` `http://next_app:3001`): the whale's inbox per `CACHE` arm, with a third `mutate` scenario flipping one row's status through the API and calling `/api/revalidate` every `MUTATE_EVERY` seconds (0 = never); the summary reads `data-served` off the HTML and prints origin fetches and stats scans per 100 views. `summary()` grew an optional `extra` lines argument for it; the flat path is unchanged. No sweep script — the method (vacuum, settle, 3 runs per org in fixed order) is written in `plans/2026-08-13_drill-05-load-test-baseline.md` and run by hand. A run leaves one directory under `k6/reports/` holding `dashboard.html` and `summary.txt`; **the HTML is gitignored** (170KB/run) and every cited number is in the ~300-byte summary. The run directory's name **is** the only index, so a run's `NAME` has to describe its arm well enough to stand alone. The measurement method — warm-up/measure split, tagged sub-metrics, thresholds, p99 arithmetic — lives once in `k6/lib/scenario.ts`; a script in `k6/` is a URL and one summary line, so the two scripts are the same experiment by construction. **Their basenames do not change**: ~60 recorded report directories are named after them, and `scripts/load.ts` strips the extension when building that name.
 
 Observability: `pnpm logs:trace <rid>` reconstructs one request across all services. `db:log:on`/`db:log:off`/`db:log:status` toggle Postgres statement logging at runtime, off by default. `db:activity` shows `pg_stat_activity`. `trace:on`/`trace:off` start and stop the collector and Jaeger together with the sampler env var, since a set endpoint with nothing listening is a retry loop; `trace:logs` is the collector's stdout. `db:stats:on`/`db:stats`/`db:stats:reset` drive `pg_stat_statements` (`db:stats` prints top statements by `calls` and by `mean_exec_time` side by side — the orderings diverge on purpose, since an N+1 tops `calls` but is invisible on `mean_exec_time`).
 
@@ -135,7 +160,7 @@ paint.mts`, host-run Playwright driving Chromium over CDP against the **producti
 (`pnpm docker:up:prod`; it reads `/health`'s `mode` and refuses `development` unless
 `--allow-dev`, because dev chunks carry HMR and are unminified). Knobs `--org`/`ORG_ID`,
 `--rounds`/`ROUNDS` (5), `--warmup`/`WARMUP` (1, discarded), `--arms`/`ARMS`
-(`off,blocking,stream`, interleaved per round), `--page-size`, `--url`/`FRONTEND_URL`,
+(`off,blocking,stream`, interleaved per round), `--page-size`, `--cache`/`CACHE` (`nostore`, drill 18), `--url`/`FRONTEND_URL`,
 `--name`; a flag beats the env beats the default and the header says which. Each load is a
 fresh context; `Network.*` and `Page.lifecycleEvent` give TTFB (`receiveHeadersEnd`), every
 document `dataReceived` chunk, FCP, DCL and load on one monotonic clock, and a
@@ -150,8 +175,8 @@ statement as `app_user`, default vs `max_parallel_workers_per_gather = 0` vs `en
 = off`, buffers hit/read, the full plan.
 
 `db:test:naive` runs the e2e suite with `LIST_STRATEGY=naive`, expected to fail **two** query-budget assertions. `db:test:notiebreak` runs it with `KEYSET_TIEBREAK=off` and is expected to fail **one**, the tie-block walk. `db:test:like` fails **one**, the stemming assertion. Drill 12 adds four more: `db:test:constraint` and `db:test:donothing` are expected **green** (they are the card's DONE WHEN as a test), `db:test:redis` fails **one** on purpose — a concurrent duplicate gets 202 instead of a conversation id, which is the failure mode the constraint does not have — and `db:test:noidem` fails **three**. Drill 13 adds `db:test:rmw` (fails **two**), `db:test:locking` and `db:test:serializable` (green). Drill 14 adds `db:test:lww` (fails **four** — every assertion in the concurrent block) and `db:test:pessimistic` (green), plus a required red run on the UI half: `ASSIGN=lww … && pnpm test:ui` fails the conflict test. Drill 15 adds `db:test:buffer` (`IMPORT=buffer`), which fails **four**, and `db:test:restart` (`IMPORT_ON_FAIL=restart`), which is expected **green** — a correct answer that is merely slower. Drill 16 adds `db:test:skiplast` (`LAST_MESSAGE=skip`), which fails **15** across two suites. Drill 17 adds a red run on the UI half: `E2E_STATS=blocking pnpm test:ui` fails **one** —
-the fallback markup never exists in a blocking document. Backend suite is 140 tests;
-Playwright is 4 more, outside it.
+the fallback markup never exists in a blocking document. Drill 18 adds `E2E_CACHE=cached pnpm test:ui`, which fails **three** — the status action's own re-render and both assign tests, every one at the render after a write — while `nostore` and `blanket` are green. Backend suite is 141 tests;
+Playwright is 6 more, outside it.
 
 Formatting is root Prettier: `pnpm format`/`format:check`, resolved per file nearest-wins (backend keeps its own `.prettierrc`; both apps' ESLint configs untouched). `.prettierignore` excludes `*.md` (prose is hand-wrapped; Prettier would pad tables to a uniform width) and `k6/reports` (machine-written).
 
@@ -354,7 +379,16 @@ Root, via Turborepo: `pnpm dev`/`build`/`lint`/`typecheck`/`test`, plus `dev:bac
 - **`pg` returns `bigint` (int8) as a string**, including `count(*)` — ids stay strings out to the JSON, counts get cast.
 - **New folders make the editor's ESLint server go stale** (type-aware rules hold their own TS program). Tell: CLI clean, editor red, only `no-unsafe-*` firing. Restart the ESLint server.
 - Next.js 16 differs from training data. Read `apps/frontend/AGENTS.md`, don't guess. It is generated during `next dev`/`next build`, loaded via `apps/frontend/CLAUDE.md` — commit it.
-- Next 16 does **not** cache `fetch` by default, and `cacheComponents` is off here on purpose — a later card is about caching.
+- Next 16 does **not** cache `fetch` by default, and `cacheComponents` is off here on purpose; drill 18 caches per fetch with `force-cache` + `next.tags` on the classic model. `'use cache'` is a whole-app mode switch and is not adopted.
+- **Headers are part of Next's fetch cache key, and only `traceparent`/`tracestate` are stripped.** A per-request header (`x-request-id`) on a `force-cache` fetch is a per-request key: 0 hits in 10 loads, one cache file per load. Drop it on cacheable fetches; the response echoes the id that filled the entry.
+- **`updateTag`, `revalidateTag(…, {expire: 0})`, `revalidatePath` and `refresh()` in a Server Action all set ONE flag, and the last call wins.** `refresh()` after `updateTag()` downgrades StaticAndDynamic to DynamicOnly — the client keeps its router cache. `revalidateTag(tag, 'max')` deliberately does not re-render the action's own response, so a user cannot read their own write through it; `updateTag` is the read-your-own-writes form.
+- **A Server Action's re-render reads the data cache.** With `refresh()` alone the response to "close" says `open` (`served: cache`, filled by the request before the write). Expire the tag or the action lies in its own response.
+- **Back/forward reuses the router's entry regardless of stale time, unless a Server Action ran in this browser since.** Another agent's write is invisible on Back (zero `_rsc` requests) and visible on a Link click; after any action revalidation — `refresh()` included — Back to an entry rendered before the action refetches, and Back to one rendered after it does not.
+- **Request memoization spans `generateMetadata`, the page body and child Server Components** (one API request for three `fetchConversation` calls, dev and prod), except the first render of a freshly compiled route in dev, which ran all three. Measure from the second load.
+- **A memoized response also predates its second asker.** The `x-served-at` predicate labels it `cache`; the echoed rid (this page's own) is what separates memoization from the data cache.
+- **The dev fetch cache is on disk at `.next/dev/cache/fetch-cache/`, prod at `.next/cache/fetch-cache/`.** Each file is JSON: `tags`, `revalidate` (31536000 when unset), the upstream URL, the response headers (the filler's `x-request-id`, `x-served-at`) and the base64 body — the evidence, readable with `jq`.
+- **`/conversations` and `/conversations/[id]` are `ƒ (Dynamic)`** in the build table (both read `searchParams`), so the Full Route Cache is not in play and every view logs `page_render`. No `x-nextjs-cache` header; `Cache-Control: private, no-cache, no-store`.
+- **`[data-status]` is taken.** Next's dev overlay renders `data-status="none"`; a test locator on it hits two elements.
 - `params`/`searchParams` are Promises and must be awaited. `PageProps<'/route'>`/`LayoutProps<'/'>` are globally available generated types.
 - **Next 16 renamed `middleware.ts` to `proxy.ts`** (export `proxy`, Node runtime by default). `NextResponse.next({ request: { headers } })` is what the *app* sees via `headers()`; `next({ headers })` is what the *browser* sees.
 - **A `<Suspense>` boundary changes what the document waits for, not how long the query runs.** The whale's widget lands at 1,346ms blocking and 1,333ms streamed; `page_render.totalMs` is 1,334 vs 1,322ms. TTFB went 1,335 → 13ms and JS bytes did not move by one byte.
