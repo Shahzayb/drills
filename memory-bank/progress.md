@@ -288,6 +288,7 @@ or after a `VACUUM`.
 | [drill/15](https://github.com/Shahzayb/drills/releases/tag/drill/15) | 0.15.0 | none (no open issues to attach) | Streaming CSV import: peak memory flat at ~120MB from a 20MB file to a 400MB one, against a naive version that dies in 2.63 seconds having written nothing. Tagged on the branch before the merge, the `drill/14` precedent. |
 | [drill/16](https://github.com/Shahzayb/drills/releases/tag/drill/16) | 0.16.0 | none (no open issues to attach) | Zero-downtime schema change: the naive migration held ACCESS EXCLUSIVE for 74.7s and failed 76.73% of writes; the same work in four transactions failed none and came in 21% *under* the baseline p99. Tagged on the branch before the merge, the `drill/14` precedent. |
 | [drill/17](https://github.com/Shahzayb/drills/releases/tag/drill/17) | 0.17.0 | none (no open issues to attach) | Streaming the inbox with Suspense: one boundary around a widget backed by a 5GB scan took the whale's TTFB from 1,335ms to 13ms and FCP from 1,388ms to 35ms, with JS bytes identical to the byte. Tagged on the branch before the merge, the `drill/14` precedent. |
+| [drill/18](https://github.com/Shahzayb/drills/releases/tag/drill/18) | 0.18.0 | none (no open issues to attach) | Next's cache layers: a stale read built behind `?cache=`, pinned to the data cache by the click's own re-render carrying a request id from before the write; two tags per write fix it, and "disable caching" costs the whale 150x the throughput. Tagged on the branch before the merge, the `drill/14` precedent. PR #17. |
 
 ## Preferences
 
