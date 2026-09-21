@@ -1,0 +1,23 @@
+round 1 off      ttfb    10  fcp    33  list    14  widget     —  last byte    12  load    50  chunks  1  gap     0
+round 1 blocking ttfb     8  fcp    32  list    13  widget    13  last byte    10  load    49  chunks  1  gap     0
+round 1 stream   ttfb    11  fcp    34  list    16  widget    30  last byte    13  load    50  chunks  1  gap     0
+round 2 off      ttfb    10  fcp    34  list    15  widget     —  last byte    12  load    52  chunks  1  gap     0
+round 2 blocking ttfb    13  fcp    36  list    18  widget    18  last byte    15  load    53  chunks  1  gap     0
+round 2 stream   ttfb    10  fcp    32  list    15  widget    28  last byte    12  load    50  chunks  1  gap     0
+round 3 off      ttfb     9  fcp    33  list    14  widget     —  last byte    11  load    50  chunks  1  gap     0
+round 3 blocking ttfb    12  fcp    36  list    16  widget    16  last byte    13  load    53  chunks  1  gap     0
+round 3 stream   ttfb    10  fcp    34  list    15  widget    30  last byte    12  load    51  chunks  1  gap     0
+round 4 off      ttfb    12  fcp    34  list    17  widget     —  last byte    14  load    51  chunks  1  gap     0
+round 4 blocking ttfb    13  fcp    35  list    18  widget    18  last byte    15  load    51  chunks  1  gap     0
+round 4 stream   ttfb    11  fcp    33  list    16  widget    29  last byte    13  load    50  chunks  1  gap     0
+round 5 off      ttfb    10  fcp    33  list    15  widget     —  last byte    12  load    49  chunks  1  gap     0
+round 5 blocking ttfb     9  fcp    32  list    13  widget    13  last byte    10  load    48  chunks  1  gap     0
+round 5 stream   ttfb    10  fcp    33  list    15  widget    30  last byte    12  load    50  chunks  1  gap     0
+
+arm        ttfb   fcp  list widget  lastB   dcl  load   gap chunks  docKB   jsKB  cssKB payloadKB inlineKB
+off          10    33    15      —     12    30    50     0      1   11.7  137.8   59.5      32.3      0.0
+blocking     12    35    16     16     13    31    51     0      1   12.3  137.8   59.5      33.8      0.0
+stream       10    33    15     30     12    31    50     0      1   13.2  137.8   59.5      34.0      0.9
+
+medians of 5 rounds, ms from the document request; KB on the wire (transfer size). docKB is the HTML as sent, jsKB every external script, payloadKB the inline self.__next_f.push RSC payload, inlineKB every other inline <script>.
+gap = the longest silence between two document chunks.
