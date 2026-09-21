@@ -571,7 +571,10 @@ export default async function ConversationsPage(
         {/* The id is on the response header too, but printing it here means
             you can copy it out of the page you are looking at and go straight
             to `pnpm logs:trace <id>`. */}
-        <p className="font-mono text-xs break-all text-zinc-500 dark:text-zinc-400">
+        <p
+          data-page-rid={result.requestId}
+          className="font-mono text-xs break-all text-zinc-500 dark:text-zinc-400"
+        >
           fetched from {result.source} in {result.durMs}ms
           <br />
           rid {result.requestId}

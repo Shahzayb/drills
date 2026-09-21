@@ -197,7 +197,7 @@ export default async function ConversationPage(
               <p className="text-sm text-zinc-600 dark:text-zinc-400">
                 status{' '}
                 <span
-                  data-status={result.conversation.status}
+                  data-conversation-status={result.conversation.status}
                   className="font-medium text-black dark:text-zinc-50"
                 >
                   {result.conversation.status}
@@ -246,7 +246,10 @@ export default async function ConversationPage(
             says `cache` with a rid that is not this page's, the API did not
             run for this render — `pnpm logs:trace <this rid>` has no API line,
             `pnpm logs:trace <filled-by rid>` has the one that did. */}
-        <p className="font-mono text-xs break-all text-zinc-500 dark:text-zinc-400">
+        <p
+          data-page-rid={result.requestId}
+          className="font-mono text-xs break-all text-zinc-500 dark:text-zinc-400"
+        >
           fetched from {result.source} in {result.durMs}ms
           <br />
           rid {result.requestId}

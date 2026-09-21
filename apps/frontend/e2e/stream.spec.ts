@@ -41,9 +41,15 @@ test.describe('the inbox streams', () => {
   test('the list is visible before the stats widget has been computed', async ({
     page,
   }) => {
-    await page.goto(`/conversations?org=${ORG}&pageSize=25&stats=${STATS}`, {
-      waitUntil: 'commit',
-    });
+    // cache=nostore: a cached widget lands in the first chunk and there is no
+    // fallback to observe. Card 18 made the stats fetch cacheable; this test
+    // is about the stream, so it asks for the uncached arm.
+    await page.goto(
+      `/conversations?org=${ORG}&pageSize=25&stats=${STATS}&cache=nostore`,
+      {
+        waitUntil: 'commit',
+      },
+    );
 
     const rows = page.locator('[data-conversation]');
     const fallback = page.locator('[data-stats-fallback]');
