@@ -1,4 +1,4 @@
-import { fetchConversations } from '@/lib/api';
+import { cacheArm, fetchConversations } from '@/lib/api';
 import { NextRequest, NextResponse } from 'next/server';
 
 /**
@@ -39,6 +39,10 @@ export async function GET(request: NextRequest) {
     updatedTo: get('updatedTo'),
     paging: 'keyset',
     cursor: get('cursor'),
+    // Card 18. The arm rides along so page 2 is cached (or not) like page 1
+    // and carries the same tags. Route Handlers get the data cache but not
+    // request memoization, which is why `served` here never says `memo`.
+    cache: cacheArm(get('cache') ?? ''),
   });
 
   if (!result.ok) {

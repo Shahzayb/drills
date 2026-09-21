@@ -1,4 +1,5 @@
 import type { OrgStatsResult } from '@/lib/api';
+import { ServedLine } from './served';
 
 /**
  * The slow widget. Card 17.
@@ -51,9 +52,13 @@ export async function OrgStats({ stats }: { stats: Promise<OrgStatsResult> }) {
         {s.lastMessageAt ?? '—'}
       </p>
       {/* The cost, on the widget it paid for. Stays visible either way: on the
-          blocking arm this number is also how long the page waited. */}
+          blocking arm this number is also how long the page waited. Card 18
+          adds who answered and how old the answer is: on a cache hit the API
+          took its 1.3s for somebody else, up to STATS_MAX_AGE_S ago. That age
+          is the staleness budget, printed where the user can see it. */}
       <p className="font-mono text-zinc-500 dark:text-zinc-500">
-        aggregate took {result.durMs}ms on the API
+        aggregate took {result.durMs}ms on the API ·{' '}
+        <ServedLine name="stats" served={result.served} />
       </p>
     </div>
   );
