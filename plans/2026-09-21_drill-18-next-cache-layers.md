@@ -253,7 +253,114 @@ new `.mts` flag and the k6 script; `check:arms` for the catalog. No new dependen
 
 ## Results
 
-_Not yet measured._
+Dev server unless stated (`pnpm docker:up`), org 150 for the by-hand evidence, org 1 for cost.
+
+### Prediction 1 — the request id is in the cache key
+
+Built with `x-request-id` on the cached fetch first, on purpose, then dropped it. Ten loads of
+`/conversations/<id>?org=150` each way, reading `data-served` off the page's own footer:
+
+| cached fetch sends `x-request-id` | `conversation:` answers |
+|---|---|
+| yes | **10 × `origin`** — every load ran the API |
+| no | **1 × `origin`, 9 × `cache`** — the first load filled it, nine hit |
+
+```bash
+for i in $(seq 1 10); do curl -s "localhost:3001/conversations/$ID?org=150" | grep -o 'data-fetch="conversation" data-served="[a-z]*"'; done | sort | uniq -c
+```
+
+The cache directory says the same thing another way. After the arm-A loads,
+`apps/frontend/.next/dev/cache/fetch-cache/` held **43 entries for each of the three upstream
+URLs** — one per load, because each load's id made a new key — and the page still said `origin`
+every time. Next strips `traceparent` and `tracestate` from the key by name
+(`server/lib/incremental-cache/index.js:285-287`) and knows nothing about ours. Confirmed, and the
+line `if (policy === 'no-store') headers.set(REQUEST_ID_HEADER, requestId)` in `callApi` is why.
+
+### Request memoization — measured, and one surprise
+
+The detail page calls `fetchConversation` three times per view: `generateMetadata`, the page
+body and `StatusForm`. On the `nostore` arm the API logs **one** `http_request` for the row per
+view (three for the page: row, messages, agents) — memoization spans all three, including
+`generateMetadata`. The evidence line beside the button says `form: cache · filled by this
+render`: the response predates its asker and the rid is this page's own.
+
+```bash
+docker compose logs nest_server --no-log-prefix --since 10s | grep <page rid> | grep -c '"msg":"http_request"'   # → 3
+```
+
+The surprise: the **first** render of the route after it was compiled (dev) logged **5** — no
+dedupe at all — and a throwaway page with two identical `no-store` fetches logged 2 on its
+first request and 1 on every request after. Dev's first render of a fresh route is not a
+steady-state measurement; every number here is from the second load onwards.
+
+A first-cut `memo` label (a per-render registry via React `cache()`) was built and removed: it
+claimed dedupe that the API log contradicted on that first render. The label is what the
+predicate observes — `cache` — and the rid says who filled it.
+
+### The reproduction — `E2E_CACHE=cached pnpm test:ui`
+
+Three tests go red, all three at the render after a write:
+
+| test | what it saw |
+|---|---|
+| stale-status › after the write | the action's own re-render says `open`; evidence `cache (filled by 461f5b29…, page e55cac22…)` — the rid of the page load BEFORE the write |
+| assign-conflict › the loser converges | Bob's re-render is the cached list; Alice's name never arrives |
+| assign-conflict › a claim that wins | Alice's own re-render is the cached list; her name never arrives |
+
+By hand, the same thing with an out-of-band write (dev, org 150): the API says `closed`, three
+consecutive loads of the detail page say `open` with `conversation: cache`, and one
+`POST /api/revalidate {cache: "tagged"}` turns the next load into `origin` and `closed`.
+
+```bash
+curl -s -X PATCH -H 'x-org-id: 150' -H 'content-type: application/json' -d '{"status":"closed"}' localhost:3002/conversations/$ID
+curl -s "localhost:3001/conversations/$ID?org=150&cache=cached" | grep -o 'data-conversation-status="[a-z]*"'   # open, open, open
+curl -s -X POST -H 'content-type: application/json' -d "{\"org\":\"150\",\"id\":\"$ID\",\"cache\":\"tagged\"}" localhost:3001/api/revalidate
+curl -s "localhost:3001/conversations/$ID?org=150&cache=cached" | grep -o 'data-conversation-status="[a-z]*"'   # closed
+```
+
+`tagged`, `nostore` and `blanket` pass all six; `E2E_STATS=blocking` still fails exactly one.
+
+### The router cache — prediction 4 was wrong, and the test says how
+
+Test 1's two Backs, on every arm including `nostore`: **to the detail page: no request; to the
+original list entry: one `/conversations?_rsc=` request.** A Server Action's revalidation —
+`refresh()` included — leaves the router unwilling to reuse an entry rendered before the
+action; the entry rendered after it (the detail page) is reused. `updateTag` and `refresh()`
+differ on the DATA cache, not on this.
+
+Test 2, no action in this browser: another agent's write through the API (+ `/api/revalidate`,
+so the data cache is fresh), then Back → the row still says `open` and **zero** RSC requests
+were made. Then a Link into the row → `closed`. Same page, two ways back, two answers — the
+card's "intermittent" — and nothing in this repo fixes the Back case, because nothing told this
+browser anything (known issue 18).
+
+### The evidence, one hit, dev
+
+One load of the detail page after the entry was filled. Page rid `834b74dc…`:
+
+```
+page_render  route=/conversations/[id] arm=tagged totalMs=34.59 upstreamMs=2.28
+             served={conversation:cache, messages:cache, agents:cache}
+```
+
+```bash
+docker compose logs nest_server --no-log-prefix --since 15s | grep -c 834b74dc   # → 0
+```
+
+The API has no line for this page's request: nothing ran. The entry that answered is a file:
+
+```
+.next/dev/cache/fetch-cache/497ccaed3f8d…  kind=FETCH  revalidate=31536000
+  tags=['org:150', 'conversation:019fee1e-6dbe-7384-90c7-32511708296e']
+  url=http://nest_server:3002/conversations/019fee1e-…   x-request-id=08d27eed-…   x-served-at=13:16:12.770Z
+  body={"id":"019fee1e-…","status":"open","assigneeId":"1373","version":1,…}
+```
+
+The rid inside it (`08d27eed…`) is the request that filled it, and the footer's `filled by rid`
+prints the same value — `pnpm logs:trace 08d27eed` finds that request in both services;
+`pnpm logs:trace 834b74dc` finds it in the web tier only. In dev the directory is
+`.next/dev/cache/fetch-cache/`; `revalidate=31536000` is Next's "one year" for an entry with no
+`revalidate` of its own.
 
 ## Verification
 
