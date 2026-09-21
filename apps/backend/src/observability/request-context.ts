@@ -5,6 +5,10 @@ import { QUERY_COUNTER_MODE } from './query-counter';
 import { currentTraceId } from './trace';
 
 export const REQUEST_ID_HEADER = 'x-request-id';
+// Card 18. When this response was produced, to the millisecond. A cache in
+// front of the API hands the same response back later, and "served before it
+// was asked for" is how the web tier tells a cache hit from a fresh answer.
+export const SERVED_AT_HEADER = 'x-served-at';
 
 // A security boundary, not tidiness: this value is interpolated into a SQL
 // comment, so `*/ SELECT 1; --` would break out of it. Anything outside the set

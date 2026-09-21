@@ -3,7 +3,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
-import { REQUEST_ID_HEADER } from '../src/observability/request-context';
+import {
+  REQUEST_ID_HEADER,
+  SERVED_AT_HEADER,
+} from '../src/observability/request-context';
 
 /**
  * The request id, from the API's side of the wire.
@@ -39,6 +42,21 @@ describe('request id propagation (e2e)', () => {
 
     // A v4 UUID: the fallback shape, and safe to embed in a SQL comment.
     expect(response.headers[REQUEST_ID_HEADER]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('stamps when the response was produced', async () => {
+    const before = Date.now();
+    const response = await request(app.getHttpServer())
+      .get('/conversations?page=1&pageSize=1')
+      .set('x-org-id', '1')
+      .expect(200);
+
+    // Card 18's evidence header. Millisecond ISO, and it lands inside the
+    // request's own window — a cache handing this response back later is the
+    // one case where it would not.
+    const servedAt = Date.parse(response.headers[SERVED_AT_HEADER]);
+    expect(servedAt).toBeGreaterThanOrEqual(before);
+    expect(servedAt).toBeLessThanOrEqual(Date.now());
   });
 
   it('echoes a well-formed inbound id unchanged', async () => {

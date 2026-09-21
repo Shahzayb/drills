@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import {
   REQUEST_ID_HEADER,
+  SERVED_AT_HEADER,
   requestIdFor,
   runWithRequestContext,
 } from './request-context';
@@ -21,6 +22,7 @@ export function requestContextMiddleware(
 ): void {
   const requestId = requestIdFor(req);
   res.setHeader(REQUEST_ID_HEADER, requestId);
+  res.setHeader(SERVED_AT_HEADER, new Date().toISOString());
   runWithRequestContext(
     { requestId, queries: 0, roundTrips: 0, retries: 0 },
     next,
