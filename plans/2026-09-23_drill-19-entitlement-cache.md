@@ -89,7 +89,7 @@ fixture orgs are `pro`, with a few `free` "other org" rows. `db:storm fire`, `db
 - `test/arms.e2e-spec.ts` — the exact `toEqual` grows two keys.
 - `docker-compose.yml` (`ENTITLEMENT_CACHE`, `ENTITLEMENT_TTL_S`), `.env.example`,
   `apps/backend/package.json` (`ENTITLEMENT_TTL_S=2` in `test:e2e`), root `package.json`
-  (`db:entitle`, `db:test:nocache`, `db:test:ttlonly`, `db:test:notify`), `scripts/measure.ts`
+  (`db:entitle`, `db:test:nocache`, `db:test:ttlonly`, `db:test:invalidate`), `scripts/measure.ts`
   catalog, `pnpm check:arms` green.
 
 **Test — `test/entitlements.e2e-spec.ts`** (fixture: one `free` org + API key)
@@ -142,7 +142,7 @@ apply to that shared volume.
   `pnpm load list --org <n> --name ent-<arm>` → `pnpm db:entitle metrics`, plus `pnpm db:stats`
   calls for the entitlement statement.
 - DONE WHEN 3: `pnpm db:test` green; red runs `db:test:nocache`, `db:test:ttlonly` (failure
-  counts recorded); `db:test:notify` green.
+  counts recorded); `db:test:invalidate` green.
 - DONE WHEN 4: `pnpm db:entitle oob --rounds 10`, `upgrade --path oob|api`, `race`; stretch `lost`.
 - `ratio` at 0.1 / 1 / 10 req/s.
 - Every command and its output goes into the plan's Results section and the guide.
@@ -197,7 +197,8 @@ measured requests in rounds 2 and 3: distinct runs (lookups 146,482 vs 146,768, 
 
 `pnpm db:test` 147/147 (141 → 147). `pnpm db:test:nocache` fails **1** (the hit assertion:
 `db` for `miss`). `pnpm db:test:ttlonly` fails **2** (the API plan change reads `free`; the
-post-upgrade ingest is 429). `pnpm db:test:notify` 147/147, out-of-band within 500ms.
+post-upgrade ingest is 429). The `notify` arm was 147/147 with the out-of-band test inside 500ms,
+and after the default flip below `pnpm db:test:invalidate` is 147/147.
 
 ### DONE WHEN 4 — the out-of-band window, TTL 30s
 
@@ -234,6 +235,12 @@ Reports: `apps/backend/db/reports/2026-09-23-17*-{invalidate,ttl,notify}-entitle
 - `ratio` prints the finite-run periodic prediction `1 − ⌈N / ⌈R·T⌉⌉ / N` beside the Poisson one.
 - The listener lives in `PostgresService.listen()` with `application_name = 'listen:<channel>'`,
   which is what `db:entitle lost` terminates.
+- **The default is `notify`, flipped after the measurements.** It cut the typical out-of-band
+  window from up to 30s to 9–12ms and left the worst case unchanged. `db:test:notify` became
+  `db:test:invalidate`.
+- **The flip exposed shared-Redis interference.** The dev server's listener deleted keys the
+  e2e process had filled, so `db:test:invalidate` failed its "first read is stale" assertion.
+  `test:e2e` now sets `REDIS_DB=1`; `RedisService` reads `REDIS_DB` (default 0).
 - The guide was drafted in the worktree's gitignored `drills/` and copied to main: a harness hook
   blocks direct writes to the main checkout.
 

@@ -1,7 +1,6 @@
 # Progress
 
-Where things stand and what's next. **Not a changelog** — every drill's decisions, numbers and
-dead ends are one row each in `history.md`; this file is only what a session needs *now*.
+Where things stand and what's next. Not a changelog: `history.md` holds each drill's result.
 
 ## Current focus
 
@@ -9,83 +8,60 @@ None.
 
 ## Next step
 
-Card 19 shipped. Its stated alternatives are SQ3 (ADRs) and SQ1. Card 26 (the outbox) is still
-open from drill 12 and is also the durable replacement for drill 19's `NOTIFY`. Card 30 (the
+Card 19 shipped. Its stated alternatives are SQ3 (ADRs) and SQ1. Card 26 (the outbox) is open
+from drill 12 and is also the durable replacement for drill 19's `NOTIFY`. Card 30 (the
 noisy-neighbour bulk import) has the path it needs in drill 15's in-process worker.
 
 ## Active plan
 
-None open — every plan file in `plans/` is shipped. `history.md` lists them with results.
+None open. Every plan in `plans/` is shipped.
 
-## What works
+## Live validation
 
-`pnpm docker:up`, then `pnpm db:migrate` and `pnpm db:seed` — or `pnpm db:reset` for both.
-Every instrument and toggle is listed in `techContext.md` under Commands.
+`pnpm docker:up`, then `pnpm db:reset` (migrate + seed). `pnpm db:test` runs the backend e2e
+suite in the container (147 tests). Each arm below MUST fail exactly as listed; a green red run
+means the switch stopped switching.
 
-`pnpm db:test` runs the e2e suite inside the container (147 tests). Nine arms are *expected* to
-fail, and a green run of any of them means the switch stopped switching: `pnpm db:test:naive`
-(`LIST_STRATEGY=naive`) fails **two** query-budget assertions, `pnpm db:test:notiebreak`
-(`KEYSET_TIEBREAK=off`) fails **one** — the tie-block walk, which returns 9 of 12 rows with no error
-— `pnpm db:test:like` (`SEARCH_STRATEGY=like`) fails **one**, the stemming assertion,
-`pnpm db:test:noidem` (`IDEMPOTENCY=none`) fails **three**, and `pnpm db:test:rmw` (`QUOTA=rmw`)
-fails **two** — the counter against the request count and against the ledger. `pnpm db:test:redis`
-fails **one** for a different reason: not a broken switch, but the Redis arm's real failure mode — a
-concurrent duplicate gets a 202 instead of a conversation id. `db:test:constraint` and
-`db:test:donothing` are expected green (drill 12's DONE WHEN as a test), and so are
-`db:test:locking` and `db:test:serializable` (drill 13's). Drill 14 adds two more:
-`pnpm db:test:lww` (`ASSIGN=lww`) fails **four** — every assertion in the concurrent block, because
-all twenty claimers are told they won — and `pnpm db:test:pessimistic` is expected green. Drill 15
-adds `pnpm db:test:buffer` (`IMPORT=buffer`), which fails **four**: the upload answers 200 instead
-of 202, it spends a query per row instead of one, its durable state after a crash is an arbitrary
-row rather than a batch boundary, and its retry answers 500 because the work it does synchronously
-is what throws. `pnpm db:test:restart` (`IMPORT_ON_FAIL=restart`) is expected **green**, and that is
-the point of it — restarting an import from row zero is slower and just as correct, because drill
-12's partial unique index makes a re-imported row a no-op. Drill 16 adds `pnpm db:test:skiplast`
-(`LAST_MESSAGE=skip`), which fails **15** across two suites — the whole ingest write path plus the
-quota counter riding on it, because a NOT NULL constraint deployed ahead of the code that fills the
-column is not a degradation, it is a stop.
+| script | arm | expected |
+|---|---|---|
+| `db:test:naive` | `LIST_STRATEGY=naive` | 2 fail (query budget) |
+| `db:test:notiebreak` | `KEYSET_TIEBREAK=off` | 1 fail (tie-block walk) |
+| `db:test:like` | `SEARCH_STRATEGY=like` | 1 fail (stemming) |
+| `db:test:noidem` | `IDEMPOTENCY=none` | 3 fail |
+| `db:test:redis` | `IDEMPOTENCY=redis` | 1 fail (202 for a concurrent duplicate) |
+| `db:test:rmw` | `QUOTA=rmw` | 2 fail |
+| `db:test:lww` | `ASSIGN=lww` | 4 fail |
+| `db:test:buffer` | `IMPORT=buffer` | 4 fail |
+| `db:test:skiplast` | `LAST_MESSAGE=skip` | 15 fail across two suites |
+| `db:test:nocache` | `ENTITLEMENT_CACHE=off` | 1 fail (the hit assertion) |
+| `db:test:ttlonly` | `ENTITLEMENT_CACHE=ttl` | 2 fail (both API-path upgrade tests) |
+| `db:test:constraint`, `:donothing`, `:locking`, `:serializable`, `:pessimistic`, `:restart`, `:invalidate` | — | green |
 
-`pnpm test:ui` runs the frontend's Playwright suite (6 tests) on the **host** against the running
-container. One-time setup: `pnpm exec playwright install chromium`. It has three required red runs —
-`ASSIGN=lww docker compose up -d nest_server && pnpm test:ui` fails the conflict test, because the
-losing browser is never told anything; `E2E_STATS=blocking pnpm test:ui` fails the streaming
-test, because a blocking document never contains the fallback; and `E2E_CACHE=cached pnpm test:ui`
-fails **three** — the status action's own re-render and both assign tests — because nothing
-expires the data cache after a write. `E2E_CACHE=nostore|blanket` are green. The assign and
-stale-status specs pass `stats=off`; only the stream spec loads the whale's widget, and it asks
-for `cache=nostore` because a cached widget lands in the first chunk with no fallback to see.
-Every fixture that writes through the API calls `POST /api/revalidate` afterwards, or the next
-run reads last run's list out of Next's cache.
+`pnpm test:ui` runs Playwright (6 tests) on the host (`pnpm exec playwright install chromium`
+once). Red runs: `ASSIGN=lww docker compose up -d nest_server` fails the conflict test;
+`E2E_STATS=blocking` fails the streaming test; `E2E_CACHE=cached` fails three.
+`E2E_CACHE=nostore|blanket` are green. Every fixture that writes through the API calls
+`POST /api/revalidate` afterwards.
 
-`pnpm ui:paint` needs the **production build**: `COMPOSE_PROJECT_NAME=drills pnpm docker:up:prod`,
-then `pnpm docker:up` to come back. It refuses a dev server without `--allow-dev`. The whale's
-aggregate ranged 1.3–3.5s across one session depending on the VM's page cache, so a before/after
-is one sitting, interleaved — the instrument does that itself — and cross-sitting absolutes are
-not comparable. Add `?stats=off` to any `/conversations` URL used to measure something else, and
-`?cache=nostore` to anything that wants the API hit on every load — the default arm caches.
-`pnpm load page` is the same page under k6 and needs the production build for the same reason.
+Before measuring:
 
-Next's data cache is in memory plus a directory — `.next/cache/fetch-cache/` in prod,
-`.next/dev/cache/fetch-cache/` in dev — bind-mounted from `apps/frontend/.next`, so a container
-restart or recreate keeps it. Any API-side write made by hand (curl, a `db:*` instrument, a
-seed) leaves the web tier stale until `POST /api/revalidate {org, id, cache: "blanket"}` for
-that org, or the directory is deleted.
-
-`pnpm db:import` writes into `/tmp` inside the container, and **recreating the container wipes it** —
-both the generated CSVs and the API's own spooled uploads. `docker compose restart nest_server`
-keeps them, `up -d --force-recreate` does not, so an arm switch means regenerating. A run also
-leaves its rows in the org it measured: `fire` and `resume` clean `conversations` with
-`provider_event_id LIKE 'import:%'` at the START of a run, not the end, so the last run's rows are
-still there until the next one. Clear them by hand before any drill 05/09/10 baseline.
-
-**`IMPORT=buffer` kills the API process and nothing restarts it.** V8's heap limit fires at 511MB
-against the container's 1024MB, `nest start --watch` does not bring the process back, and the
-container stays up reporting unhealthy — so the next command gets `ECONNREFUSED`.
-`docker compose restart nest_server` after every buffered run.
-
-`pnpm db:storm fire` and `pnpm db:quota fire` write rows into whichever org they measure and clean
-them up themselves, but a k6 `pnpm load ingest` run does **not** — k6 has no database connection.
-Before any drill 05/09/10 baseline:
+- `pnpm ui:paint` and `pnpm load page` need `COMPOSE_PROJECT_NAME=drills pnpm docker:up:prod`
+  (`--allow-dev` overrides). The whale's aggregate ranges 1.3–3.5s across a session, so compare
+  within one sitting. Add `?stats=off` to a `/conversations` URL measuring something else and
+  `?cache=nostore` to force the API on every load.
+- A write made by hand (curl, a `db:*` instrument, a seed) leaves Next's data cache stale until
+  `POST /api/revalidate {org, id, cache: "blanket"}` or the fetch-cache directory is deleted.
+  Next's cache survives container recreates (bind-mounted `.next`).
+- `pnpm db:import` files and the API's spooled uploads live in container `/tmp`; a recreate
+  wipes them. Import runs clean up their rows at the start of the next run, not the end.
+- `IMPORT=buffer` kills the API process; `docker compose restart nest_server` after each run.
+- `pnpm db:quota bench` needs `PG_MAX_CONNECTIONS=200` on `postgres_db`, repeated on every
+  compose call for the sweep.
+- `db:search writes` leaves hundreds of MB of dead tuples; take size numbers after a `VACUUM`.
+- `pnpm db:entitle metrics` keeps its snapshot in container `/tmp`; bracket a k6 run with two
+  calls.
+- `pnpm load ingest` leaves rows behind (k6 has no database connection). Before a drill 05/09/10
+  baseline, as the owner:
 
 ```sql
 CREATE TEMP TABLE doomed AS
@@ -97,219 +73,113 @@ DELETE FROM messages      WHERE conversation_id IN (SELECT id FROM doomed);
 DELETE FROM conversations WHERE id IN (SELECT id FROM doomed);
 ```
 
-`provider_event_id IS NOT NULL` is what lets the partial unique index answer that instead of
-sequential-scanning 2.5M rows. The three deletes are not optional and the one-line version
-recorded here before drill 16 was wrong: an ingested conversation has a message and a usage_event
-pointing at it, and a bare `DELETE FROM conversations` fails on `messages_conversation_id_fkey`.
-`probe-%` is what `pnpm db:schema locks` and `index` tag their probe rows with.
-
-`pnpm db:quota bench` needs `PG_MAX_CONNECTIONS=200 docker compose up -d postgres_db` — it opens one
-connection per concurrent transaction and the default 100 has no headroom over the app's pool. The
-default is deliberately unchanged, so every recorded baseline still describes the same server. Note
-that a later `docker compose up -d nest_server` without the variable set recreates `postgres_db` back
-to 100; put it in `.env` for the duration of a sweep.
-
-Baseline numbers and query plans for drill 03 are in its plan file — the `before` column cards 09
-and 10 were compared against; drill 04's plan records the same queries at 2.5M rows.
-
-`db:search writes` leaves several hundred MB of dead tuples behind (rolled-back COPYs), so
-`pg_relation_size('messages')` reads high until autovacuum catches up: take size numbers before it
-or after a `VACUUM`.
-
 ## Known issues
 
-**Drill 17 added five (36-40). Drill 18 added seven (41-47). Drill 19 added seven (48-54).**
+Numbered for reference from plans; gaps are retired numbers.
 
-1. Frontend coverage is one page and one flow. Drill 14 gave it a test runner (Playwright,
-   `pnpm test:ui`) and three tests, all about the assign conflict. The Route Handler, load-more,
-   `/search` and the filters still have none.
-2. Backend: `HealthService`, `InfoController` and `RedisService` have no tests of their own — the
-   e2e suites reach `/health` over HTTP but never exercise the failure branches. `PostgresService`
-   is the exception: `schema.e2e-spec.ts` drives it directly.
-3. **Nothing under backend `src/` has a unit test** — only e2e coverage. `pnpm test` passes
-   trivially (`--passWithNoTests`); the last unit spec was deleted in drill 08 along with the
-   scaffolded `AppController`/`AppService` it tested.
-4. **`organizations` and `users` have no RLS policy**, and that's a recorded decision, not a gap to
-   close casually: `organizations` is the tenant registry rather than tenant-owned data, and `users`
-   genuinely has no `org_id` (a person can belong to several orgs). Both are real leak surfaces the
-   mechanism doesn't cover.
-5. **The offset arm has no depth cap.** `?page=100000` is still a legal, slow request, and the cap
-   is a product decision (400? empty page?) rather than something to guess at — named in drill 10's
-   plan, not built.
-6. **The GIN index depends on a superuser catalog change that nothing guards.**
-   `ALTER FUNCTION ts_match_vq(tsvector, tsquery) LEAKPROOF` (migration 007) does not survive a
-   `pg_dump`/restore or a major-version upgrade, and there is no check for it — the symptom is
-   search silently going back to a 3.6-second sequential scan. `check:tenancy` would be the natural
-   home for a `pg_proc.proleakproof` assertion; not built.
-7. **`/search` has no test at all**, same as the rest of the frontend (issue 1). And search results
-   have no paging — `limit` only, no cursor.
-8. **Interior-substring search is not supported and that is a recorded decision.** `xport` finds
-   nothing while `LIKE '%xport%'` finds 164,508 rows. The trigram index that would answer it is
-   priced (2,159 MB, 123s) and rejected in drill 11's plan.
-9. **`POST /ingest` authenticates with one uncached query per request**, including the ~70% of a
-   duplicate storm that is about to be discarded. The Redis guard removes the *write* from the
-   duplicate path, not the read. Caching the key lookup is the obvious next move and belongs to a
-   caching drill; the cost is visible in `db:storm`'s numbers rather than hidden.
-   Drill 19 cached entitlements and left this lookup alone: a cached key would keep a revoked key
-   working for the TTL, so revocation needs its own path first.
-10. **The ingest partial-failure case is named and not built.** Once a side effect exists, the row
-   and the effect are no longer one atomic unit and `ON CONFLICT` stops being sufficient — a retry
-   that finds the row returns 200 and the effect never runs. Needs an outbox. Card 26.
-11. **Nothing enforces the quota.** `usage_counters.quota_limit` exists and no code reads it. Counting
-   correctly and rejecting at the limit are different jobs, and drill 13 only did the first. Drill 19
-   added a per-plan ingest *rate* limit on API-key traffic; the monthly quota is still unread.
-12. **The billing period is UTC.** `date_trunc('month', now() AT TIME ZONE 'UTC')` — a real meter
-   truncates in the org's billing timezone, which the schema does not carry. Invisible for eleven
-   months at a time.
-13. **Nothing reconciles the counter against the ledger.** The query exists (it is drill 13's test
-   assertion) and no job runs it. Drift here is money.
-14. **`Number(rows[0].used)` caps the meter at 2^53.** `bigint` arrives from `pg` as a string.
-15. **The write-skew case is demonstrated and not defended.** `db:quota skew` shows that `atomic`
-   cannot hold an invariant across two counter rows, but the endpoint writes one metric, so the day a
-   second counter joins that path the shipped arm is wrong and no test says so.
-16. **Logging is now a cost to watch, not an absence.** `LOG_LEVEL=debug` in anything resembling
-   production would be expensive, and `url` is logged with its query string in full — safe for
-   today's parameters, not for a token or an email.
-17. **Appended pages do not converge.** `refresh()` in the assign Server Action re-renders page 1,
-   which is a live prop. Rows fetched by load-more live in `useState` and keep whatever they were
-   showing, so a claim on page 3 stays optimistic forever.
-18. **Nobody but the clicker is told.** A claim corrects one browser. Every other agent's inbox goes
-   on showing the ticket as unassigned until something re-renders it. Needs a subscription, and
-   drill 14 explicitly did not build one.
-19. **`version` is a raw integer on the wire.** It leaks a row's write rate and invites guessing.
-   `ETag` / `If-Match` / `412` is the standard shape for the same mechanism.
-20. **The `lww` arm is a live route to a silent data bug.** It is deliberate — a red run is the only
-   proof a concurrency test works — and it is an environment variable away from being served.
-21. **The import worker has no lease, no heartbeat and no reaper.** A crashed worker leaves its job
-   on `status = 'running'` forever, and `/imports` polls it every two seconds for as long as the tab
-   is open. `locked_until` plus a sweeper is the shape; not built.
-22. **The upload spool is ephemeral.** `/tmp/imports/<jobId>.csv` does not survive a container
-   recreate, so a retry after a redeploy has no file to read. Object storage with the key on the job
-   row is the answer.
-23. **Nothing limits import concurrency.** The worker is an in-process async function sharing the
-   pool of ten with every request. Two tenants importing at once is card 30's scenario, and that is
-   deliberate rather than overlooked.
-24. **A single bad row kills the whole import.** There is no quarantine table and no `rows_failed`.
-   A customer's 200MB export will have a handful of bad rows and re-uploading the file is not an
-   answer.
-25. **Resume skips the writes, not the parse.** `from` in csv-parse stops records being emitted, not
-   read, so resuming at row 400,000 still runs the parser over 400,000 rows. A byte offset on the
-   job row plus record-boundary reporting would fix it.
-26. **`POST /imports` has no size limit, no rate limit and no quota check.** A 50GB upload is
-   accepted and spooled until the disk fills. `usage_counters.quota_limit` exists and nothing reads
-   it (issue 11).
-27. **`Number(row.rows_read)` caps every import counter at 2^53**, same as issue 14.
-28. **The batch size is one global.** 1,000 is right for this row shape. A table with 40 columns
-   reaches the 65,535 bind-parameter ceiling at 1,600 rows, and nothing notices until the protocol
-   error — which reports a *wrapped* count and so names a number that was never sent.
-29. **The browser upload buffers.** A file input sends `multipart/form-data` and reading the part
-   back out means `request.formData()`, which materialises it. The page says so beside the control;
-   the fix is a presigned PUT direct to object storage.
-30. **The backfill is a script somebody has to remember to run, between two migrations, in the right
-   order, and nothing gates it.** `pnpm db:migrate` will run migration 016 against an unbackfilled
-   table; it fails loudly on `contains null values`, which is the good case, but "the deploy fails"
-   is not "the deploy is impossible". It also has no progress row, no lease and no resume marker —
-   it re-derives its position from `IS NULL` every run, so a stopped run says nothing about how far
-   it got. Drill 15's `import_jobs` is the shape that fixes this and was not reused.
-31. **Nothing throttles the backfill against live load.** The 10ms pause is a constant, not a
-   feedback loop on replication lag or on the endpoint's p99.
-32. **The imported rows disagree with the backfill's own oracle and nothing says so.** An import
-   writes `last_message_at` from the CSV while the messages it creates get `created_at = now()`, so
-   for those rows `last_message_at < max(messages.created_at)`. The `AND col IS NULL` guard inside
-   the backfill's UPDATE is the only thing stopping a re-run from "fixing" them into being wrong,
-   and there is no test for that guard.
-33. **Nothing reads `last_message_at`.** It is in the list response and no query sorts or filters by
-   it. `(org_id, last_message_at DESC, id DESC)` is priced at 118.6MB in drill 16's plan and
-   rejected, so shipping the sort would ship a sequential scan on the whale.
-34. **`lock_timeout` is on migration 016 only.** Nothing stops the next `ALTER TABLE` anyone writes
-   from omitting it, and `check:tenancy`/`check:arms` do not look for it. The deploy tooling is
-   where it belongs.
-35. **A k6 report directory name says `vus10` for an arrival-rate run.** `scripts/load.ts` builds
-   the name from the catalog defaults and does not know which executor the script declares, so
-   drill 16's runs are filed under `…-org1-vus10-page1-size20-90s` while the summary inside them
-   correctly reads `rate=50.00/s maxvus=200`. It is the "a summary that looks right and is not"
-   defect in the one place `k6/lib/scenario.ts` does not reach, and the directory name is the only
-   index those runs have. Adding `rate` to the name would rename every future directory for every
-   script, which is why it was named rather than done.
-36. **The inbox widget costs a 5GB scan per page view and nothing caches it.** `GET /messages/stats`
-   reads 663k of the heap's 667k blocks for the whale on every load of `/conversations`, streamed
-   or not — `page_render.totalMs` is the same 1.3s on both arms. Ten people opening the inbox is
-   ten concurrent scans of one heap against 128MB of `shared_buffers`, which drill 11 measured as
-   the thing that turns 11x into 395x. Card 19 is the cache; until then the widget is a cost the
-   user does not see and the server does.
-37. **The sentiment is two word lists.** `negative`/`positive` are stems matched against the
-   tsvector, and "Sorry about that, fixed" counts on both sides. The response says
-   `method: 'lexicon'` and the widget says "not sentiment analysis"; nothing stops a reader
-   putting the number on a slide.
-38. **`Number(row.messages)` caps the widget at 2^53**, same as issues 14 and 27.
-39. **The `?stats=` arm is state a user can reach.** `?stats=blocking` is a link on the page,
-   and it is the deliberately slow version. A real product would not ship the before arm on a
-   URL; this repo does, because the A/B has to run in one process.
-40. **`ui:paint` draws the last round, not the median round.** The waterfall and the screenshots
-   describe one load so they agree with each other, and that load is whichever came last — on the
-   whale run it was the fastest of the five (1,297ms against a 1,333ms median). The table is the
-   number; the picture is the shape.
-41. **`POST /api/revalidate` is unauthenticated, and so is the status Server Action.** Anyone
-   who can reach the web tier can empty an org's cache or close its conversations. The same
-   auth stub as `?org=`, and the cache purge is the cheaper attack: `cache: "blanket"` on the
-   whale costs the next reader a 5GB scan.
-42. **Writes that bypass a Server Action never revalidate.** `POST /ingest`, the import worker,
-   `PATCH` from curl and every `db:*` instrument change rows the web tier has cached. Nothing
-   calls `/api/revalidate` for them. The honest shape is the API emitting "row changed" and Next
-   subscribing (card 26's outbox is the same seam); until then a write outside the actions is a
-   stale read for up to a year on the list and the row, and 60s on the stats.
-43. **The list tag is org-wide, so one status change evicts every list variant the org has** —
-   every sort, filter, page and cursor. Correct (a status change moves the row across every
-   filter and re-sorts every page) and expensive on a busy org: the whale's page 1 is a 180ms
-   query that ten agents will re-fill at once. A per-filter tag would be wrong, not cheaper.
-44. **The stats widget is up to 60 seconds stale on purpose and nothing says so to the
-   user beyond `Ns old`.** `STATS_MAX_AGE_S` is a constant, not a per-org budget, and the
-   revalidation after expiry is whatever Next does — measured in the plan, not chosen.
-45. **Another agent's write is invisible on Back.** Test 2 of `stale-status.spec.ts` asserts it:
-   zero requests, old value. A Link click fetches; the Back button does not, and no Server
-   Action ran in that browser to make it. Known issue 18's subscription is the fix; nothing
-   short of it is.
-46. **The `cached` arm is a live route to a stale read**, deliberate like `lww`, and a URL
-   parameter away from being served.
-47. **`x-request-id` no longer reaches the API on a cache-eligible fetch.** A cached page's
-   `pnpm logs:trace <rid>` finds no API line, by design; the fill request's id is on the page.
-   The `traceparent` still travels on a miss, so Jaeger joins where the log grep does not.
-48. **The cache-aside fill race is demonstrated and undefended.** A reader that reads Postgres
-   before a plan change and `SET`s after its `DEL` serves the old plan for a full TTL
-   (`pnpm db:entitle race`, 30s, every cache arm). A versioned fill or a lease is the fix.
-49. **`plan_limits` edits invalidate nothing on any arm.** The `notify` trigger is on
-   `organizations` only; changing a plan's limit waits out every key's TTL.
-50. **Redis sits on every org-scoped request with a 2s `commandTimeout`.** A slow Redis adds up to
-   2s per request. No circuit breaker, no short hot-path timeout.
-51. **The ingest limiter is a fixed window and fails open.** 2× the limit fits across a window
-   boundary, and a Redis error disables the limit (`ingest_rate_limit_errors_total`).
-52. **`PUT /entitlements/plan` is unauthenticated** — the `X-Org-Id` stub, so any caller can
-   upgrade any org.
-53. **`notify` drops messages while its listener is disconnected** and does not flush on
-   reconnect, so a missed change waits out the TTL (`pnpm db:entitle lost`). The listener is one
-   connection per API process outside the pool. A listener stuck in a transaction lets the NOTIFY
-   queue fill, and then every plan-changing commit fails.
-54. **Concurrent misses are not coalesced.** Ten VUs starting together against an empty key made
-   ten Postgres reads; 7–14 misses per 80s run where three fills would do.
+**Coverage**
+
+1. Frontend tests cover the assign conflict, the stale read and streaming only: the Route
+   Handlers, load-more, `/search`, `/imports` and the filters have none.
+2. No backend unit tests; `pnpm test` passes on `--passWithNoTests`. `HealthService`,
+   `InfoController` and `RedisService` failure branches are untested.
+
+**Tenancy and auth (stubbed on purpose; see `projectbrief.md`)**
+
+4. `organizations` and `users` have no RLS policy (decision, and a real leak surface).
+41. `POST /api/revalidate`, the status Server Action and `PUT /entitlements/plan` are
+    unauthenticated. `cache: "blanket"` on the whale costs the next reader a 5GB scan.
+
+**Query paths**
+
+5. The offset arm has no depth cap; the cap is a product decision.
+6. Nothing guards migration 007's LEAKPROOF flag; losing it silently returns search to a 3.6s scan.
+   `check:tenancy` is the natural home for a `proleakproof` assertion.
+7. Search results have no paging (limit only).
+8. Interior-substring search is rejected by decision (trigram index priced at 2,159MB).
+33. Nothing reads `last_message_at`; its index was priced at 118.6MB and rejected.
+36. The stats widget still costs the whale a 5GB scan per fill (every 60s, drill 18).
+37. The sentiment split is two word lists (`method: 'lexicon'`).
+
+**Ingest, quota and billing**
+
+9. The API-key lookup is uncached. Caching it would keep a revoked key working for the TTL, so
+   revocation needs its own path first.
+10. The ingest partial-failure case needs an outbox (card 26).
+11. The monthly quota (`quota_limit`) is never enforced; drill 19 added only a per-plan rate limit.
+12. The billing period truncates in UTC; orgs carry no billing timezone.
+13. No job reconciles `usage_counters` against the `usage_events` ledger.
+14. `Number()` on `bigint` caps counters at 2^53 (meter, import counters, widget).
+15. Write skew across two counter rows is demonstrated and undefended.
+
+**Assign and the UI**
+
+17. Load-more pages do not converge after `refresh()`; a claim on page 3 stays optimistic.
+18. Nobody but the clicker learns about a claim; needs a subscription. Another agent's write is
+    also invisible on Back (`stale-status.spec.ts` asserts it).
+19. `version` is a raw integer on the wire; `ETag`/`If-Match`/412 is the standard shape.
+20. The `lww`, `?stats=blocking` and `?cache=cached` arms are reachable on purpose.
+
+**Imports and schema changes**
+
+21. The import worker has no lease, heartbeat or reaper; a crash leaves a job `running` forever.
+22. The upload spool is ephemeral; object storage is the answer.
+23. Nothing limits import concurrency; it shares the pool with every request (card 30).
+24. One bad row kills an import; no quarantine or `rows_failed`.
+25. Resume skips the writes and still re-parses from row zero.
+26. `POST /imports` has no size, rate or quota limit.
+28. `IMPORT_BATCH_ROWS` is one global; a 40-column table hits the 65,535-parameter ceiling at
+    1,600 rows.
+29. The browser upload buffers (`request.formData()`); a presigned PUT is the fix.
+30. Nothing gates the backfill between migrations 015 and 016, and it keeps no progress row.
+31. The backfill's 10ms pause is not a feedback loop on load.
+32. Imported rows have `last_message_at` older than their messages; only the backfill's
+    `AND col IS NULL` guard protects them, untested.
+34. `lock_timeout` is on migration 016 only; nothing checks later migrations.
+
+**Caching (drills 18, 19)**
+
+42. Writes outside the Server Actions never revalidate Next's cache (ingest, imports, curl,
+    instruments); the list and row stay stale until a tag expires.
+43. The org-wide list tag evicts every list variant on each status change.
+44. The widget is up to 60s stale and says only `Ns old`.
+48. The cache-aside fill race beats the `DEL` for a full TTL on every cache arm (versioned fill or
+    lease is the fix).
+49. `plan_limits` edits invalidate nothing; they wait out every key's TTL.
+50. Redis sits on every org-scoped request with a 2s command timeout and no circuit breaker.
+51. The ingest limiter is a fixed window (2× burst across a boundary) and fails open.
+53. `notify` loses messages while its listener is disconnected and does not flush on reconnect;
+    a listener stuck in a transaction can fill the NOTIFY queue and fail plan-changing commits.
+54. Concurrent misses are not coalesced; a cold key costs one Postgres read per concurrent request.
+
+**Instruments and observability**
+
+16. `url` is logged with its full query string; `LOG_LEVEL=debug` would be expensive.
+35. k6 report directories say `vus10` for arrival-rate runs.
+40. `ui:paint` draws the last round, not the median one.
+47. A cached page's request id never reaches the API log; `traceparent` still joins in Jaeger.
 
 ## Releases
 
-| Tag | Version | Milestone | Notes |
-|---|---|---|---|
-| [drill/09](https://github.com/Shahzayb/drills/releases/tag/drill/09) | 0.9.0 | `drill/09` (closed) | First release actually cut. Tags `drill/01` and `drill/02` exist locally, were never pushed, and have no release. |
-| [drill/10](https://github.com/Shahzayb/drills/releases/tag/drill/10) | 0.10.0 | `drill/10` | Keyset pagination, the depth chart, and the load-more UI. |
-| [drill/11](https://github.com/Shahzayb/drills/releases/tag/drill/11) | 0.11.0 | `drill/11` | Full-text search, the GIN index, and the leakproof flag it depends on. |
-| [drill/12](https://github.com/Shahzayb/drills/releases/tag/drill/12) | 0.12.0 | none (no open issues to attach) | Idempotent ingest: unique constraint vs Redis `SETNX`, both hit exactly 3,000/10,000 under a concurrent duplicate storm. |
-| [drill/13](https://github.com/Shahzayb/drills/releases/tag/drill/13) | 0.13.0 | none (no open issues to attach) | The lost update: a read-modify-write counter loses 84 of 100 concurrent increments; atomic `UPDATE` shipped over `FOR UPDATE` and `SERIALIZABLE`. |
-| [drill/14](https://github.com/Shahzayb/drills/releases/tag/drill/14) | 0.14.0 | none (no open issues to attach) | Optimistic locking on assignment: 50 agents claim one ticket and a version check leaves exactly one winner, with the losing browser converging on the truth without a reload. **Tagged on the branch before the merge**, at the request of the release, so `drill/14` points at `chore(release): 0.14.0` rather than at a merge commit the way `drill/13` does. `--generate-notes` produced only a changelog link for that reason — there was no merged PR to attribute commits to — so the body was written by hand. |
-| [drill/15](https://github.com/Shahzayb/drills/releases/tag/drill/15) | 0.15.0 | none (no open issues to attach) | Streaming CSV import: peak memory flat at ~120MB from a 20MB file to a 400MB one, against a naive version that dies in 2.63 seconds having written nothing. Tagged on the branch before the merge, the `drill/14` precedent. |
-| [drill/16](https://github.com/Shahzayb/drills/releases/tag/drill/16) | 0.16.0 | none (no open issues to attach) | Zero-downtime schema change: the naive migration held ACCESS EXCLUSIVE for 74.7s and failed 76.73% of writes; the same work in four transactions failed none and came in 21% *under* the baseline p99. Tagged on the branch before the merge, the `drill/14` precedent. |
-| [drill/17](https://github.com/Shahzayb/drills/releases/tag/drill/17) | 0.17.0 | none (no open issues to attach) | Streaming the inbox with Suspense: one boundary around a widget backed by a 5GB scan took the whale's TTFB from 1,335ms to 13ms and FCP from 1,388ms to 35ms, with JS bytes identical to the byte. Tagged on the branch before the merge, the `drill/14` precedent. |
-| [drill/18](https://github.com/Shahzayb/drills/releases/tag/drill/18) | 0.18.0 | none (no open issues to attach) | Next's cache layers: a stale read built behind `?cache=`, pinned to the data cache by the click's own re-render carrying a request id from before the write; two tags per write fix it, and "disable caching" costs the whale 150x the throughput. Tagged on the branch before the merge, the `drill/14` precedent. PR #17. |
+From `drill/14` on, each release is tagged on its branch before the merge. No milestones since
+`drill/11`: there were no open issues to attach.
+
+| Tag | Version | Notes |
+|---|---|---|
+| [drill/09](https://github.com/Shahzayb/drills/releases/tag/drill/09) | 0.9.0 | First release cut; milestone `drill/09` (closed). `drill/01`/`drill/02` exist locally only. |
+| [drill/10](https://github.com/Shahzayb/drills/releases/tag/drill/10) | 0.10.0 | Keyset pagination; milestone `drill/10`. |
+| [drill/11](https://github.com/Shahzayb/drills/releases/tag/drill/11) | 0.11.0 | Full-text search; milestone `drill/11`. |
+| [drill/12](https://github.com/Shahzayb/drills/releases/tag/drill/12) | 0.12.0 | Idempotent ingest. |
+| [drill/13](https://github.com/Shahzayb/drills/releases/tag/drill/13) | 0.13.0 | The lost update. Tagged on the merge commit. |
+| [drill/14](https://github.com/Shahzayb/drills/releases/tag/drill/14) | 0.14.0 | Optimistic locking. `--generate-notes` gave only a changelog link (no merged PR yet); body written by hand. |
+| [drill/15](https://github.com/Shahzayb/drills/releases/tag/drill/15) | 0.15.0 | Streaming CSV import. |
+| [drill/16](https://github.com/Shahzayb/drills/releases/tag/drill/16) | 0.16.0 | Zero-downtime schema change. |
+| [drill/17](https://github.com/Shahzayb/drills/releases/tag/drill/17) | 0.17.0 | Streaming the inbox with Suspense. |
+| [drill/18](https://github.com/Shahzayb/drills/releases/tag/drill/18) | 0.18.0 | Next's cache layers. PR #17. |
 
 ## Preferences
 
 - Structure is added when there is content for it, not in anticipation.
-- Memory bank updates are made _with_ the user: verified facts written directly, judgments proposed
+- Memory bank updates are made with the user: verified facts written directly, judgments proposed
   first.
 - Keep these files short. Bloat is what stops them being read.
