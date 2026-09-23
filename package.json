@@ -26,6 +26,7 @@
     "db:claim": "node scripts/measure.ts claim",
     "db:import": "node scripts/measure.ts import",
     "db:schema": "node scripts/measure.ts schema",
+    "db:entitle": "node scripts/measure.ts entitle",
     "db:psql": "node scripts/psql.ts psql",
     "db:log:on": "node scripts/psql.ts log:on",
     "db:log:off": "node scripts/psql.ts log:off",
