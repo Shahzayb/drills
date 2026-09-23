@@ -1,6 +1,6 @@
 # Progress
 
-Where things stand and what's next. Not a changelog: `history.md` holds each drill's result.
+Current state and next action. `history.md` holds each drill's result.
 
 ## Current focus
 
@@ -18,8 +18,7 @@ None open. Every plan in `plans/` is shipped.
 
 ## Live validation
 
-`pnpm docker:up`, then `pnpm db:reset` (migrate + seed). `pnpm db:test` runs the backend e2e
-suite in the container (147 tests). Each arm below MUST fail exactly as listed; a green red run
+`pnpm docker:up`, then `pnpm db:reset`. `pnpm db:test` runs the backend e2e suite (147 tests). Each arm below MUST fail exactly as listed; a green red run
 means the switch stopped switching.
 
 | script | arm | expected |
@@ -57,7 +56,7 @@ Before measuring:
 - `IMPORT=buffer` kills the API process; `docker compose restart nest_server` after each run.
 - `pnpm db:quota bench` needs `PG_MAX_CONNECTIONS=200` on `postgres_db`, repeated on every
   compose call for the sweep.
-- `db:search writes` leaves hundreds of MB of dead tuples; take size numbers after a `VACUUM`.
+- `db:search writes` leaves dead tuples; take size numbers after a `VACUUM`.
 - `pnpm db:entitle metrics` keeps its snapshot in container `/tmp`; bracket a k6 run with two
   calls.
 - `pnpm load ingest` leaves rows behind (k6 has no database connection). Before a drill 05/09/10
@@ -176,6 +175,7 @@ From `drill/14` on, each release is tagged on its branch before the merge. No mi
 | [drill/16](https://github.com/Shahzayb/drills/releases/tag/drill/16) | 0.16.0 | Zero-downtime schema change. |
 | [drill/17](https://github.com/Shahzayb/drills/releases/tag/drill/17) | 0.17.0 | Streaming the inbox with Suspense. |
 | [drill/18](https://github.com/Shahzayb/drills/releases/tag/drill/18) | 0.18.0 | Next's cache layers. PR #17. |
+| [drill/19](https://github.com/Shahzayb/drills/releases/tag/drill/19) | 0.19.0 | Entitlement cache and its staleness window. PR #18. |
 
 ## Preferences
 
