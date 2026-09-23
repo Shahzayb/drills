@@ -18,6 +18,7 @@ import { TenantDb } from '../src/tenancy/tenant-db.service';
  * Card 19's DONE WHEN as a test: a plan change is visible inside a stated bound.
  * Runs at ENTITLEMENT_TTL_S=2 (apps/backend/package.json) so the out-of-band case waits ≤2s.
  * Red runs: `db:test:nocache` fails the hit test, `db:test:ttlonly` fails both API-path tests.
+ * `db:test:invalidate` is green: its out-of-band bound is the TTL instead of 500ms.
  * See plans/2026-09-23_drill-19-entitlement-cache.md.
  */
 describe('entitlements (e2e)', () => {

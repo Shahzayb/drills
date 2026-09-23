@@ -8,8 +8,8 @@ import { RedisService } from '../redis/redis.service';
  *
  * - `off`         Postgres, every request. The before arm.
  * - `ttl`         Redis cache-aside with a TTL and nothing else. A plan change waits out the TTL.
- * - `invalidate`  `ttl` plus a DEL after the plan-change commit. Shipped.
- * - `notify`      `invalidate` plus a Postgres trigger that reaches writes made outside the API.
+ * - `invalidate`  `ttl` plus a DEL after the plan-change commit.
+ * - `notify`      `invalidate` plus a Postgres trigger that reaches writes made outside the API. Shipped.
  *
  * See plans/2026-09-23_drill-19-entitlement-cache.md.
  */
@@ -21,7 +21,7 @@ export const ENTITLEMENT_CACHE: EntitlementCacheMode = MODES.includes(
   process.env.ENTITLEMENT_CACHE as EntitlementCacheMode,
 )
   ? (process.env.ENTITLEMENT_CACHE as EntitlementCacheMode)
-  : 'invalidate';
+  : 'notify';
 
 /** The worst-case staleness for a write the cache is never told about. */
 export const ENTITLEMENT_TTL_S = Number(process.env.ENTITLEMENT_TTL_S || '30');

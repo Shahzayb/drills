@@ -27,6 +27,8 @@ export class RedisService implements OnApplicationShutdown {
       host: process.env.REDIS_HOST ?? 'localhost',
       port: Number(process.env.REDIS_PORT ?? 6379),
       password: process.env.REDIS_PASSWORD,
+      // The e2e suite uses DB 1, so the dev server's NOTIFY listener cannot delete its keys. Drill 19.
+      db: Number(process.env.REDIS_DB || 0),
       commandTimeout: COMMAND_TIMEOUT_MS,
       connectTimeout: CONNECT_TIMEOUT_MS,
       maxRetriesPerRequest: MAX_RETRIES_PER_REQUEST,

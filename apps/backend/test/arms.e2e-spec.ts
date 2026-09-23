@@ -79,7 +79,7 @@ describe('GET /info arms (e2e)', () => {
         process.env.ENTITLEMENT_CACHE ?? '',
       )
         ? process.env.ENTITLEMENT_CACHE
-        : 'invalidate',
+        : 'notify',
       entitlementTtlS: process.env.ENTITLEMENT_TTL_S || '30',
       queryCounter:
         process.env.QUERY_COUNTER === 'off' ||
