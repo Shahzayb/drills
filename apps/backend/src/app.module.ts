@@ -2,6 +2,8 @@ import { MiddlewareConsumer, Module, ValidationPipe } from '@nestjs/common';
 import { APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import { ConversationsModule } from './conversations/conversations.module';
+import { EntitlementsInterceptor } from './entitlements/entitlements.interceptor';
+import { EntitlementsModule } from './entitlements/entitlements.module';
 import { HealthModule } from './health/health.module';
 import { ImportsModule } from './imports/imports.module';
 import { InfoModule } from './info/info.module';
@@ -27,6 +29,7 @@ import { SearchModule } from './search/search.module';
     SearchModule,
     IngestModule,
     ImportsModule,
+    EntitlementsModule,
   ],
   providers: [
     {
@@ -34,6 +37,11 @@ import { SearchModule } from './search/search.module';
       // would be missing from every e2e test.
       provide: APP_INTERCEPTOR,
       useClass: LoggingInterceptor,
+    },
+    // After LoggingInterceptor, so a 429 thrown here is still logged with its counts.
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: EntitlementsInterceptor,
     },
     {
       // Registered as a provider rather than with app.useGlobalPipes() in

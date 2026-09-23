@@ -18,7 +18,7 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "QUERY_COUNTER=header jest --config ./test/jest-e2e.json",
+    "test:e2e": "QUERY_COUNTER=header ENTITLEMENT_TTL_S=2 REDIS_DB=1 jest --config ./test/jest-e2e.json",
     "migrate": "node-pg-migrate --config-file migrate.config.mjs",
     "seed": "node db/seed.mts",
     "check:tenancy": "node db/check-tenancy.mts",

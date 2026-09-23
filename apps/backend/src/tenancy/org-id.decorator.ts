@@ -7,6 +7,8 @@ import { Request } from 'express';
 
 export const ORG_ID_HEADER = 'x-org-id';
 
+export const ORG_ID_PATTERN = /^[1-9][0-9]*$/;
+
 /**
  * The stub that stands in for authentication.
  *
@@ -35,7 +37,7 @@ export const OrgId = createParamDecorator(
     // Validated as an integer but returned as a string: org ids are bigint, and
     // `pg` hands bigints back as strings for the same reason — 2^53 is not far
     // enough away to round-trip one through a JS number safely.
-    if (!/^[1-9][0-9]*$/.test(raw.trim())) {
+    if (!ORG_ID_PATTERN.test(raw.trim())) {
       throw new BadRequestException(
         `${ORG_ID_HEADER} must be a positive integer`,
       );

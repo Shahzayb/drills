@@ -1,6 +1,6 @@
 {
   "name": "drills",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -26,6 +26,7 @@
     "db:claim": "node scripts/measure.ts claim",
     "db:import": "node scripts/measure.ts import",
     "db:schema": "node scripts/measure.ts schema",
+    "db:entitle": "node scripts/measure.ts entitle",
     "db:psql": "node scripts/psql.ts psql",
     "db:log:on": "node scripts/psql.ts log:on",
     "db:log:off": "node scripts/psql.ts log:off",
@@ -47,6 +48,9 @@
     "db:test:buffer": "docker compose exec -T -e IMPORT=buffer nest_server pnpm --filter=backend run test:e2e",
     "db:test:restart": "docker compose exec -T -e IMPORT_ON_FAIL=restart nest_server pnpm --filter=backend run test:e2e",
     "db:test:skiplast": "docker compose exec -T -e LAST_MESSAGE=skip nest_server pnpm --filter=backend run test:e2e",
+    "db:test:nocache": "docker compose exec -T -e ENTITLEMENT_CACHE=off nest_server pnpm --filter=backend run test:e2e",
+    "db:test:ttlonly": "docker compose exec -T -e ENTITLEMENT_CACHE=ttl nest_server pnpm --filter=backend run test:e2e",
+    "db:test:invalidate": "docker compose exec -T -e ENTITLEMENT_CACHE=invalidate nest_server pnpm --filter=backend run test:e2e",
     "check:tenancy": "docker compose exec -T nest_server pnpm --filter=backend run check:tenancy",
     "check:arms": "node scripts/check-arms.ts",
     "arms": "node scripts/check-arms.ts live",

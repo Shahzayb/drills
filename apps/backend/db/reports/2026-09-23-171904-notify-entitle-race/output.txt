@@ -1,0 +1,17 @@
+entitle race  api http://nest_server:3002
+  ROUNDS               5                            (default)
+  POLL_MS              50                           (default)
+  RATE                 10                           (default)
+  AFTER                5                            (default)
+  VIA                  oob                          (default)
+  RATES                0.1,1,10                     (default)
+  SECONDS              90                           (default)
+
+  server arms  entitlementCache=notify entitlementTtlS=30
+
+  A  reader misses, reads Postgres (free), and is descheduled before its SET
+  W  writer upgrades through the API: UPDATE, COMMIT, DEL
+  A  reader wakes up and SETs what it read, after the DEL
+  API now serves plan=free source=hit
+
+  stale for 30,036 ms after the invalidation (481 stale reads), TTL 30,000 ms

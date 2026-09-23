@@ -1,0 +1,15 @@
+entitle ratio  api http://nest_server:3002
+  ROUNDS               5                            (default)
+  POLL_MS              50                           (default)
+  RATE                 10                           (default)
+  AFTER                5                            (default)
+  VIA                  oob                          (default)
+  RATES                0.1,1,10                     (env)
+  SECONDS              90                           (env)
+
+  server arms  entitlementCache=invalidate entitlementTtlS=30
+
+  rate/s  requests  hits  misses  hit_ratio  predicted periodic       poisson RT/(1+RT)
+     0.1        10     7       3      70.0%                    60.0%              75.0%
+       1        91    88       3      96.7%                    95.6%              96.8%
+      10       901   898       3      99.7%                    99.6%              99.7%

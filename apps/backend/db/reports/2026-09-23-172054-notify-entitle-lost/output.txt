@@ -1,0 +1,17 @@
+entitle lost  api http://nest_server:3002
+  ROUNDS               3                            (env)
+  POLL_MS              50                           (default)
+  RATE                 10                           (default)
+  AFTER                5                            (default)
+  VIA                  oob                          (default)
+  RATES                0.1,1,10                     (default)
+  SECONDS              90                           (default)
+
+  server arms  entitlementCache=notify entitlementTtlS=30
+
+  round 1  listener up          pttl  29576 ms  staleness     11 ms  stale reads 0
+  round 1  listener killed (1)  pttl  24302 ms  staleness  24371 ms  stale reads 398
+  round 2  listener up          pttl  27655 ms  staleness     11 ms  stale reads 0
+  round 2  listener killed (1)  pttl  16145 ms  staleness  16187 ms  stale reads 261
+  round 3  listener up          pttl  25272 ms  staleness     10 ms  stale reads 0
+  round 3  listener killed (1)  pttl  17162 ms  staleness  17226 ms  stale reads 279

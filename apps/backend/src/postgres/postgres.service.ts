@@ -1,5 +1,12 @@
 import { Injectable, OnApplicationShutdown } from '@nestjs/common';
-import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
+import {
+  Client,
+  ClientConfig,
+  Pool,
+  PoolClient,
+  QueryResult,
+  QueryResultRow,
+} from 'pg';
 import { errorMessage, logger, since } from '../observability/logger';
 import {
   getRequestId,
@@ -18,6 +25,7 @@ const CONNECTION_TIMEOUT_MS = 2000;
 // pg defaults this to 10s. 30s keeps connections warm between the sparse
 // requests a dev stack sees, without holding them open indefinitely.
 const IDLE_TIMEOUT_MS = 30_000;
+const LISTEN_RECONNECT_MS = 1000;
 // Not a limit, just the line above which a query gets noticed.
 const SLOW_QUERY_MS = 200;
 // Long enough to tell two queries apart, short enough that a log line stays one
@@ -59,6 +67,9 @@ export class PostgresService implements OnApplicationShutdown {
   // Imported, not injected — see observability/logger.ts. Keeping this out of
   // the constructor is what lets schema.e2e-spec.ts boot PostgresModule alone.
   private readonly logger = logger;
+  private readonly connection: ClientConfig;
+  private readonly listeners = new Set<Client>();
+  private closing = false;
 
   constructor() {
     // The serving role, and it has no default. POSTGRES_USER is the owner: it
@@ -78,14 +89,18 @@ export class PostgresService implements OnApplicationShutdown {
       );
     }
 
-    this.pool = new Pool({
+    this.connection = {
       host: process.env.POSTGRES_HOST ?? 'localhost',
       port: Number(process.env.POSTGRES_PORT ?? 5432),
       user,
       password,
       database: process.env.POSTGRES_DB ?? 'postgres',
-      max: POOL_MAX,
       connectionTimeoutMillis: CONNECTION_TIMEOUT_MS,
+    };
+
+    this.pool = new Pool({
+      ...this.connection,
+      max: POOL_MAX,
       idleTimeoutMillis: IDLE_TIMEOUT_MS,
     });
 
@@ -106,8 +121,10 @@ export class PostgresService implements OnApplicationShutdown {
   async query<T extends QueryResultRow = QueryResultRow>(
     text: string,
     params?: unknown[],
+    // `counted: false` is a round trip but not a route's query. Drill 19's entitlement read.
+    { counted = true }: { counted?: boolean } = {},
   ): Promise<QueryResult<T>> {
-    return this.runOn(this.pool, text, params);
+    return this.runOn(this.pool, text, params, counted);
   }
 
   /**
@@ -144,12 +161,14 @@ export class PostgresService implements OnApplicationShutdown {
     executor: Pool | PoolClient,
     text: string,
     params?: unknown[],
+    counted = true,
   ): Promise<QueryResult<T>> {
     const rid = getRequestId();
     // Counted at call time, not on completion — a query that errors still
     // made the round trip, and this is meant to answer "how many did I make",
     // not "how many succeeded".
-    recordQuery();
+    if (counted) recordQuery();
+    else recordRoundTrip();
 
     // The id rides inside the statement — the only channel that reaches
     // Postgres's own log and pg_stat_activity without pinning a connection.
@@ -220,6 +239,58 @@ export class PostgresService implements OnApplicationShutdown {
     }
   }
 
+  /**
+   * A dedicated LISTEN connection outside the pool, reconnected after LISTEN_RECONNECT_MS.
+   * NOTIFY is at-most-once: a message sent while this is down is gone. Drill 19's stretch.
+   */
+  listen(
+    channel: string,
+    onMessage: (payload: string) => void,
+    onConnect: () => void,
+  ): void {
+    const connect = async () => {
+      if (this.closing) return;
+      const client = new Client({
+        ...this.connection,
+        application_name: `listen:${channel}`,
+      });
+      this.listeners.add(client);
+
+      let retried = false;
+      const retry = () => {
+        if (retried) return;
+        retried = true;
+        this.listeners.delete(client);
+        if (!this.closing)
+          setTimeout(() => void connect(), LISTEN_RECONNECT_MS);
+      };
+
+      client.on('notification', (message) => {
+        if (message.payload) onMessage(message.payload);
+      });
+      client.on('error', (error: Error) => {
+        this.logger.warn({ channel, err: error.message }, 'listener_error');
+      });
+      client.on('end', retry);
+
+      try {
+        await client.connect();
+        await client.query(`LISTEN ${channel}`);
+        this.logger.info({ channel }, 'listener_connected');
+        onConnect();
+      } catch (error) {
+        this.logger.warn(
+          { channel, err: errorMessage(error) },
+          'listener_connect_failed',
+        );
+        retry();
+        await client.end().catch(() => undefined);
+      }
+    };
+
+    void connect();
+  }
+
   /** Pool saturation is the thing later drills will want to watch. */
   stats(): { total: number; idle: number; waiting: number; max: number } {
     return {
@@ -231,6 +302,10 @@ export class PostgresService implements OnApplicationShutdown {
   }
 
   async onApplicationShutdown(): Promise<void> {
+    this.closing = true;
+    await Promise.all(
+      [...this.listeners].map((client) => client.end().catch(() => undefined)),
+    );
     try {
       await this.pool.end();
     } catch (error) {
