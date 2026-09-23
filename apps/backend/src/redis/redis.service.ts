@@ -159,6 +159,36 @@ export class RedisService implements OnApplicationShutdown {
     }
   }
 
+  /**
+   * A fixed window that starts at the first hit: INCR, EXPIRE NX, PTTL in one MULTI.
+   * NX keeps later hits from sliding the window. See plans/2026-09-23_drill-19-entitlement-cache.md.
+   */
+  async incrWindow(
+    key: string,
+    ttlSeconds: number,
+  ): Promise<{ count: number; pttlMs: number }> {
+    const rid = getRequestId();
+    const startedAt = performance.now();
+    try {
+      const replies = await this.client
+        .multi()
+        .incr(key)
+        .expire(key, ttlSeconds, 'NX')
+        .pttl(key)
+        .exec();
+      const failed = replies?.find(([error]) => error)?.[0];
+      if (!replies || failed) throw failed ?? new Error('MULTI aborted');
+      return { count: Number(replies[0][1]), pttlMs: Number(replies[2][1]) };
+    } finally {
+      if (this.logger.isLevelEnabled('debug')) {
+        this.logger.debug(
+          { rid, cmd: 'MULTI INCR/EXPIRE/PTTL', key, durMs: since(startedAt) },
+          'redis_command',
+        );
+      }
+    }
+  }
+
   async onApplicationShutdown(): Promise<void> {
     try {
       // quit() throws on a client that never connected, which is the normal

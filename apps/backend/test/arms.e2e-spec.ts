@@ -75,6 +75,12 @@ describe('GET /info arms (e2e)', () => {
       importBatchRows: process.env.IMPORT_BATCH_ROWS || '1000',
       importOnFail:
         process.env.IMPORT_ON_FAIL === 'restart' ? 'restart' : 'resume',
+      entitlementCache: ['off', 'ttl', 'invalidate', 'notify'].includes(
+        process.env.ENTITLEMENT_CACHE ?? '',
+      )
+        ? process.env.ENTITLEMENT_CACHE
+        : 'invalidate',
+      entitlementTtlS: process.env.ENTITLEMENT_TTL_S || '30',
       queryCounter:
         process.env.QUERY_COUNTER === 'off' ||
         process.env.QUERY_COUNTER === 'header'

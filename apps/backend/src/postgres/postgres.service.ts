@@ -106,8 +106,10 @@ export class PostgresService implements OnApplicationShutdown {
   async query<T extends QueryResultRow = QueryResultRow>(
     text: string,
     params?: unknown[],
+    // `counted: false` is a round trip but not a route's query. Drill 19's entitlement read.
+    { counted = true }: { counted?: boolean } = {},
   ): Promise<QueryResult<T>> {
-    return this.runOn(this.pool, text, params);
+    return this.runOn(this.pool, text, params, counted);
   }
 
   /**
@@ -144,12 +146,14 @@ export class PostgresService implements OnApplicationShutdown {
     executor: Pool | PoolClient,
     text: string,
     params?: unknown[],
+    counted = true,
   ): Promise<QueryResult<T>> {
     const rid = getRequestId();
     // Counted at call time, not on completion — a query that errors still
     // made the round trip, and this is meant to answer "how many did I make",
     // not "how many succeeded".
-    recordQuery();
+    if (counted) recordQuery();
+    else recordRoundTrip();
 
     // The id rides inside the statement — the only channel that reaches
     // Postgres's own log and pg_stat_activity without pinning a connection.
