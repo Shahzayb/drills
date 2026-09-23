@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { errorMessage, logger } from '../observability/logger';
 import { PostgresService } from '../postgres/postgres.service';
 import { RedisService } from '../redis/redis.service';
@@ -33,6 +33,8 @@ export type Plan = (typeof PLANS)[number];
 export const INGEST_WINDOW_S = 60;
 
 export const ENTITLEMENT_HEADER = 'x-entitlement';
+
+export const NOTIFY_CHANNEL = 'entitlements';
 
 /** Where the interceptor parks the resolved entitlements for the controller. */
 export const ENTITLEMENTS = Symbol('entitlements');
@@ -69,16 +71,27 @@ const counters = {
   lookups: { hit: 0, miss: 0, db: 0, error: 0 } as Record<LookupSource, number>,
   invalidations: { api: 0, notify: 0 },
   invalidationErrors: 0,
+  listenerConnects: 0,
   rateLimited: 0,
   rateLimitErrors: 0,
 };
 
 @Injectable()
-export class EntitlementsService {
+export class EntitlementsService implements OnModuleInit {
   constructor(
     private readonly postgres: PostgresService,
     private readonly redis: RedisService,
   ) {}
+
+  /** `notify` only: migration 1790121900000's trigger names the org, this DELs its key. */
+  onModuleInit(): void {
+    if (ENTITLEMENT_CACHE !== 'notify') return;
+    this.postgres.listen(
+      NOTIFY_CHANNEL,
+      (orgId) => void this.invalidate(orgId, 'notify'),
+      () => (counters.listenerConnects += 1),
+    );
+  }
 
   async resolve(orgId: string): Promise<Resolved> {
     if (ENTITLEMENT_CACHE === 'off') {
@@ -195,6 +208,9 @@ export class EntitlementsService {
       '# HELP entitlement_invalidation_errors_total Deletes that failed after the write committed.',
       '# TYPE entitlement_invalidation_errors_total counter',
       `entitlement_invalidation_errors_total ${counters.invalidationErrors}`,
+      '# HELP entitlement_listener_connects_total LISTEN connections opened. More than one is a reconnect.',
+      '# TYPE entitlement_listener_connects_total counter',
+      `entitlement_listener_connects_total ${counters.listenerConnects}`,
       '# HELP ingest_rate_limited_total Ingest requests answered 429.',
       '# TYPE ingest_rate_limited_total counter',
       `ingest_rate_limited_total ${counters.rateLimited}`,
