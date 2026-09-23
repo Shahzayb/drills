@@ -1,6 +1,6 @@
 # Drill 19 — Cache entitlements, then prove the invalidation
 
-**Status:** planned
+**Status:** shipped
 
 Card 19. Prereq 13. Branch `drill-19`.
 
@@ -171,3 +171,73 @@ NOTIFY, flush-on-reconnect, GCRA limiter in Lua).
 6. Memory bank: verified facts to `techContext.md`/`progress.md`, history row → `implemented`;
    judgment calls proposed first.
 7. Not in this pass unless asked: push, PR, `drill/19` release.
+
+## Results
+
+Measured 2026-09-23, one sitting, dev server, seeded volume. Org 150 is `basic` in the seed.
+
+### DONE WHEN 1–2 — hit ratio and DB reads per request, card 05's profile
+
+`pnpm load list`, 10 VUs, 20s warm-up, 60s measured, 3 interleaved rounds, both arms restarted
+every round, `pg_stat_statements` reset before each run. `/metrics` deltas count the warm-up too.
+
+| org | arm | DB reads / request | hit ratio | pgss calls / run | p50 (median) | req/s (median) |
+|---|---|---|---|---|---|---|
+| 1 | `off` | 1.00000 ×3 | — | 23,172 · 23,059 · 22,964 | 34.26ms | 286.55 |
+| 1 | `invalidate` | 0.00031 · 0.00031 · 0.00035 | 99.969 · 99.969 · 99.965% | 7 · 7 · 8 | 35.08ms | 281.28 |
+| 150 | `off` | 1.00000 ×3 | — | 144,336 · 146,482 · 146,768 | 5.31ms | 1,831.63 |
+| 150 | `invalidate` | 0.00009 · 0.00006 · 0.00005 | 99.991 · 99.994 · 99.995% | 14 · 9 · 8 | 5.14ms | 1,888.48 |
+
+`pg_stat_statements` calls equal `/metrics` (miss + db) on every run. The statement costs
+0.012–0.027ms. Reports: `k6/reports/2026-09-23-21*-ent-*` and
+`apps/backend/db/reports/2026-09-23-16*-ent-*-entitle-metrics`. `off`/org 150 reads 109,898
+measured requests in rounds 2 and 3: distinct runs (lookups 146,482 vs 146,768, different p50s).
+
+### DONE WHEN 3 — the test
+
+`pnpm db:test` 147/147 (141 → 147). `pnpm db:test:nocache` fails **1** (the hit assertion:
+`db` for `miss`). `pnpm db:test:ttlonly` fails **2** (the API plan change reads `free`; the
+post-upgrade ingest is 429). `pnpm db:test:notify` 147/147, out-of-band within 500ms.
+
+### DONE WHEN 4 — the out-of-band window, TTL 30s
+
+| run | result |
+|---|---|
+| `oob --rounds 10`, `invalidate` | 3,993 / 16,887 / 25,692ms min/median/max; staleness − PTTL ≤ 60ms (poll 50ms) |
+| `upgrade --via oob`, `invalidate` | 189 × 429 after the upgrade, first 2xx at 19,006ms; PTTL 18,995ms |
+| `upgrade --via api`, `invalidate` | 0 × 429, first 2xx at 98ms |
+| `upgrade --via api`, `ttl` | 189 × 429, first 2xx at 18,993ms; PTTL 18,989ms |
+| `race`, `invalidate` / `notify` | stale 30,022ms / 30,036ms after the DEL |
+| `ratio` 0.1 / 1 / 10 req/s | 70.0 / 96.7 / 99.7%, 3 misses each (periodic model 60.0 / 95.6 / 99.6%) |
+| `oob --rounds 5`, `notify` | 9 / 10 / 12ms, 0 stale reads |
+| `upgrade --via oob`, `notify` | 0 × 429, first 2xx at 103ms |
+| `lost --rounds 3`, `notify` | listener up 10–11ms; killed 24,371 / 16,187 / 17,226ms against PTTL 24,302 / 16,145 / 17,162 |
+
+Reports: `apps/backend/db/reports/2026-09-23-17*-{invalidate,ttl,notify}-entitle-*`.
+
+### Predictions
+
+1. Right on 1.00 and >99%. Half right on misses per expiry: not isolated; 7–8 per run on the
+   whale implies ~2–3 per fill, because ten VUs start together against an empty key.
+2. Right: whale p50 +2.4%, tail −3.2%.
+3. Right: PTTL predicts staleness within one poll plus a request.
+4. Right. 5. Right: 189 against 10 × 18.995. 6. Right. 7. Right.
+8. Close: 70.0% against 75%. The 75% is the random-arrival model; evenly spaced requests land
+   60–70% depending on where the TTL boundary falls.
+
+### Divergences from the plan
+
+- `ENTITLEMENT_TTL_S=2` is fixed in `test:e2e`, not defaulted, so a TTL set for a measurement
+  never leaks into the suite.
+- `src/entitlements/entitlements.service.ts` joins the `no-restricted-imports` exemptions in
+  `eslint.config.mjs`: it reads `organizations` and `plan_limits`, neither of which is tenant data.
+- `ratio` prints the finite-run periodic prediction `1 − ⌈N / ⌈R·T⌉⌉ / N` beside the Poisson one.
+- The listener lives in `PostgresService.listen()` with `application_name = 'listen:<channel>'`,
+  which is what `db:entitle lost` terminates.
+- The guide was drafted in the worktree's gitignored `drills/` and copied to main: a harness hook
+  blocks direct writes to the main checkout.
+
+## Write-up
+
+The card's three questions and the stretch are answered in the drill 19 guide, with every
+command above.

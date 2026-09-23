@@ -91,6 +91,24 @@ the same flag and **the last call wins** — `expireAfterWrite` in `actions.ts` 
 `refresh()` only when nothing was tagged. `/api/revalidate` is unauthenticated. Numbers:
 `plans/2026-09-21_drill-18-next-cache-layers.md`.
 
+Drill 19 resolves entitlements on every org-scoped request in `EntitlementsInterceptor`, a
+global `APP_INTERCEPTOR` registered after `LoggingInterceptor`. It is an interceptor because
+global guards run before controller guards, so a global guard cannot see `ApiKeyGuard`'s org.
+Org = the API-key org, else a valid `X-Org-Id`, else skip. The read is `organizations ⋈
+plan_limits` (migration `1790121600000`, FK on `organizations.plan`), cached in Redis as
+`ent:v1:org:<id>` (`v1` = value shape; unknown orgs cached as `{plan:null}`) for
+`ENTITLEMENT_TTL_S` (30), behind `ENTITLEMENT_CACHE=off|ttl|invalidate|notify` (default
+`invalidate`). `PUT /entitlements/plan` commits, then `DEL`s. `notify` adds migration
+`1790121900000`'s trigger (`pg_notify('entitlements', id)` on a plan change) and a LISTEN client
+from `PostgresService.listen()` (`application_name = listen:entitlements`, reconnects after 1s,
+no flush on reconnect). Only API-key traffic is rate-limited (`plan_limits.ingest_per_minute`,
+NULL = unlimited; pro is NULL so every storm/quota instrument on org 1 is unaffected). The read
+runs with `{ counted: false }`: it is a round trip, not a route query, so `x-query-count` and
+`@QueryBudget` do not see it; `x-entitlement: hit|miss|db|error` and `GET /metrics` do. **The TTL
+is the only worst-case bound on every arm** — a psql write, a lost NOTIFY and the cache-aside fill
+race (measured beating the `DEL` for 30s) all fall back to it. Numbers:
+`plans/2026-09-23_drill-19-entitlement-cache.md`.
+
 `app/imports/page.tsx` is the UI half and is zero application JavaScript: a job table and a `<meta http-equiv="refresh" content="2">` rendered **only while a job is running**, so the page stops polling on its own. Uploads go through `app/api/imports/route.ts`, a Route Handler that pipes `request.body` on with `duplex: 'half'` for `text/csv` and falls back to `request.formData()` for a browser file input — which buffers, and the page says so. A Server Action was rejected: Next buffers a Server Action's body and caps it at `serverActions.bodySizeLimit`, 1MB by default.
 
 `src/observability` owns request correlation and query counting. One id (`x-request-id`) is generated or accepted at the Next edge and threads every layer via `AsyncLocalStorage`; `PostgresService.query()` appends it as a trailing `/* rid=… */`. Both apps log structured JSON via pino, every line carrying `time`/`level`/`svc`/`msg`/`rid` (`durMs`/`status` named consistently). `LOG_LEVEL` is per-service in `docker-compose.yml`, shell first.
@@ -155,6 +173,12 @@ two live sessions and a chosen interleaving, the shape `db:storm race` already u
 `BATCHES` × `SCAN` (`keyset`|`isnull`) and reads the plan off `EXPLAIN` on the statement the
 backfill actually runs, VACUUMing between cells. `index` is the stretch and ships no index.
 
+`db:entitle <oob|upgrade|race|ratio|metrics|lost>` is drill 19's. `oob` reads the key's `PTTL`
+before an owner-side `UPDATE` and polls `GET /entitlements` until it flips — PTTL predicts the
+staleness to within one poll. `metrics` prints `/metrics` and the delta since its last snapshot
+(`/tmp` in the container, so a recreate resets it); bracket a k6 run with it. `race` exits 1 if the
+API does not serve the stale value it plants, and `lost` needs the `notify` arm.
+
 `pnpm ui:paint` is drill 17's instrument and the first browser-side one: `apps/frontend/perf/
 paint.mts`, host-run Playwright driving Chromium over CDP against the **production build**
 (`pnpm docker:up:prod`; it reads `/health`'s `mode` and refuses `development` unless
@@ -175,7 +199,7 @@ statement as `app_user`, default vs `max_parallel_workers_per_gather = 0` vs `en
 = off`, buffers hit/read, the full plan.
 
 `db:test:naive` runs the e2e suite with `LIST_STRATEGY=naive`, expected to fail **two** query-budget assertions. `db:test:notiebreak` runs it with `KEYSET_TIEBREAK=off` and is expected to fail **one**, the tie-block walk. `db:test:like` fails **one**, the stemming assertion. Drill 12 adds four more: `db:test:constraint` and `db:test:donothing` are expected **green** (they are the card's DONE WHEN as a test), `db:test:redis` fails **one** on purpose — a concurrent duplicate gets 202 instead of a conversation id, which is the failure mode the constraint does not have — and `db:test:noidem` fails **three**. Drill 13 adds `db:test:rmw` (fails **two**), `db:test:locking` and `db:test:serializable` (green). Drill 14 adds `db:test:lww` (fails **four** — every assertion in the concurrent block) and `db:test:pessimistic` (green), plus a required red run on the UI half: `ASSIGN=lww … && pnpm test:ui` fails the conflict test. Drill 15 adds `db:test:buffer` (`IMPORT=buffer`), which fails **four**, and `db:test:restart` (`IMPORT_ON_FAIL=restart`), which is expected **green** — a correct answer that is merely slower. Drill 16 adds `db:test:skiplast` (`LAST_MESSAGE=skip`), which fails **15** across two suites. Drill 17 adds a red run on the UI half: `E2E_STATS=blocking pnpm test:ui` fails **one** —
-the fallback markup never exists in a blocking document. Drill 18 adds `E2E_CACHE=cached pnpm test:ui`, which fails **three** — the status action's own re-render and both assign tests, every one at the render after a write — while `nostore` and `blanket` are green. Backend suite is 141 tests;
+the fallback markup never exists in a blocking document. Drill 18 adds `E2E_CACHE=cached pnpm test:ui`, which fails **three** — the status action's own re-render and both assign tests, every one at the render after a write — while `nostore` and `blanket` are green. Drill 19 adds `db:test:nocache` (fails **1**, the hit assertion), `db:test:ttlonly` (fails **2**, both API-path upgrade tests) and `db:test:notify` (green). `test:e2e` pins `ENTITLEMENT_TTL_S=2` so the out-of-band test waits ≤2s. Backend suite is 147 tests;
 Playwright is 6 more, outside it.
 
 Formatting is root Prettier: `pnpm format`/`format:check`, resolved per file nearest-wins (backend keeps its own `.prettierrc`; both apps' ESLint configs untouched). `.prettierignore` excludes `*.md` (prose is hand-wrapped; Prettier would pad tables to a uniform width) and `k6/reports` (machine-written).

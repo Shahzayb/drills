@@ -9,12 +9,9 @@ None.
 
 ## Next step
 
-Card 19 (entitlement cache) or SQ1 are drill 18's stated alternatives. Drill 18 put
-`GET /messages/stats` behind Next's data cache with a 60s budget, so card 19's victim is now
-the API-side cost that Next cannot see — `POST /ingest`'s per-request key lookup (known issue 9)
-is the obvious entitlement-shaped read. Card 30 (the noisy-neighbour bulk import) has the path
-it needs — drill 15's worker is an in-process async function sharing the pool with every
-request. Card 26 (the outbox) is still open from drill 12.
+Card 19 shipped. Its stated alternatives are SQ3 (ADRs) and SQ1. Card 26 (the outbox) is still
+open from drill 12 and is also the durable replacement for drill 19's `NOTIFY`. Card 30 (the
+noisy-neighbour bulk import) has the path it needs in drill 15's in-process worker.
 
 ## Active plan
 
@@ -25,7 +22,7 @@ None open — every plan file in `plans/` is shipped. `history.md` lists them wi
 `pnpm docker:up`, then `pnpm db:migrate` and `pnpm db:seed` — or `pnpm db:reset` for both.
 Every instrument and toggle is listed in `techContext.md` under Commands.
 
-`pnpm db:test` runs the e2e suite inside the container (140 tests). Nine arms are *expected* to
+`pnpm db:test` runs the e2e suite inside the container (147 tests). Nine arms are *expected* to
 fail, and a green run of any of them means the switch stopped switching: `pnpm db:test:naive`
 (`LIST_STRATEGY=naive`) fails **two** query-budget assertions, `pnpm db:test:notiebreak`
 (`KEYSET_TIEBREAK=off`) fails **one** — the tie-block walk, which returns 9 of 12 rows with no error
@@ -121,7 +118,7 @@ or after a `VACUUM`.
 
 ## Known issues
 
-**Drill 17 added five (36-40). Drill 18 added seven (41-47).**
+**Drill 17 added five (36-40). Drill 18 added seven (41-47). Drill 19 added seven (48-54).**
 
 1. Frontend coverage is one page and one flow. Drill 14 gave it a test runner (Playwright,
    `pnpm test:ui`) and three tests, all about the assign conflict. The Route Handler, load-more,
@@ -153,11 +150,14 @@ or after a `VACUUM`.
    duplicate storm that is about to be discarded. The Redis guard removes the *write* from the
    duplicate path, not the read. Caching the key lookup is the obvious next move and belongs to a
    caching drill; the cost is visible in `db:storm`'s numbers rather than hidden.
+   Drill 19 cached entitlements and left this lookup alone: a cached key would keep a revoked key
+   working for the TTL, so revocation needs its own path first.
 10. **The ingest partial-failure case is named and not built.** Once a side effect exists, the row
    and the effect are no longer one atomic unit and `ON CONFLICT` stops being sufficient — a retry
    that finds the row returns 200 and the effect never runs. Needs an outbox. Card 26.
 11. **Nothing enforces the quota.** `usage_counters.quota_limit` exists and no code reads it. Counting
-   correctly and rejecting at the limit are different jobs, and drill 13 only did the first.
+   correctly and rejecting at the limit are different jobs, and drill 13 only did the first. Drill 19
+   added a per-plan ingest *rate* limit on API-key traffic; the monthly quota is still unread.
 12. **The billing period is UTC.** `date_trunc('month', now() AT TIME ZONE 'UTC')` — a real meter
    truncates in the org's billing timezone, which the schema does not carry. Invisible for eleven
    months at a time.
@@ -274,6 +274,23 @@ or after a `VACUUM`.
 47. **`x-request-id` no longer reaches the API on a cache-eligible fetch.** A cached page's
    `pnpm logs:trace <rid>` finds no API line, by design; the fill request's id is on the page.
    The `traceparent` still travels on a miss, so Jaeger joins where the log grep does not.
+48. **The cache-aside fill race is demonstrated and undefended.** A reader that reads Postgres
+   before a plan change and `SET`s after its `DEL` serves the old plan for a full TTL
+   (`pnpm db:entitle race`, 30s, every cache arm). A versioned fill or a lease is the fix.
+49. **`plan_limits` edits invalidate nothing on any arm.** The `notify` trigger is on
+   `organizations` only; changing a plan's limit waits out every key's TTL.
+50. **Redis sits on every org-scoped request with a 2s `commandTimeout`.** A slow Redis adds up to
+   2s per request. No circuit breaker, no short hot-path timeout.
+51. **The ingest limiter is a fixed window and fails open.** 2× the limit fits across a window
+   boundary, and a Redis error disables the limit (`ingest_rate_limit_errors_total`).
+52. **`PUT /entitlements/plan` is unauthenticated** — the `X-Org-Id` stub, so any caller can
+   upgrade any org.
+53. **`notify` drops messages while its listener is disconnected** and does not flush on
+   reconnect, so a missed change waits out the TTL (`pnpm db:entitle lost`). The listener is one
+   connection per API process outside the pool. A listener stuck in a transaction lets the NOTIFY
+   queue fill, and then every plan-changing commit fails.
+54. **Concurrent misses are not coalesced.** Ten VUs starting together against an empty key made
+   ten Postgres reads; 7–14 misses per 80s run where three fills would do.
 
 ## Releases
 
