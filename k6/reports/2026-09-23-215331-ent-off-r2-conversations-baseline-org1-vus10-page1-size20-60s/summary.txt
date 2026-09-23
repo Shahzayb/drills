@@ -1,0 +1,10 @@
+
+  name=ent-off-r2 org=1 vus=10 warmup=20s measured=60s page=1 pageSize=20
+  measured requests : 17193
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 34.26 / 45.23 / 51.40 ms
+  min / avg / max   : 18.08 / 34.83 / 86.45 ms
+  throughput        : 286.55 req/s
+  (incl. warm-up)   : p50 34.07  p95 44.90  p99 50.91 ms
+
+RESULT,ent-off-r2,1,10,1,20,34.26,45.23,51.40,286.55,17193
