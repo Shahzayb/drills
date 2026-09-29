@@ -1,0 +1,100 @@
+stampede run  api http://nest_server:3002
+  ORG_ID               150                          (default)
+  RATE                 1000                         (env)
+  SECONDS              40                           (default)
+  EXPIRE_AT            20                           (default)
+  BUCKET_MS            100                          (default)
+
+  server arms  statsCache=stale statsTtlS=300 statsTtlJitter=0.2 entitlementCache=notify
+
+  pre-warm  miss  key PTTL 2,669,236ms (must outlive the run)
+
+  around the forced expiry (t = 0), 100ms buckets; requests by send time, DB calls by sample time
+     t_ms   sent  err    p50    p99   hit  miss  wait stale  refr   DB fail in-flight
+     -500    100    0    2.3    3.7   100     0     0     0     0    0    0    0  
+     -400    100    0    2.2    3.1   100     0     0     0     0    0    0    0  
+     -300    100    0    2.2    3.4   100     0     0     0     0    0    0    0  
+     -200     99    0    2.1    3.5    99     0     0     0     0    0    0    0  
+     -100    101    0    2.0    3.2    99     0     0     1     1    0    0    0  
+        0    100    0    2.3    4.3    83     0     0    17     0    1    0    0  #
+      100    100    0    2.0    3.0   100     0     0     0     0    0    0    0  
+      200     99    0    2.4    3.3    99     0     0     0     0    0    0    0  
+      300    101    0    2.5    3.5   101     0     0     0     0    0    0    0  
+      400    100    0    2.1    3.2   100     0     0     0     0    0    0    0  
+      500     99    0    2.2    3.4    99     0     0     0     0    0    0    0  
+      600    100    0    2.3    3.1   100     0     0     0     0    0    0    0  
+      700    101    0    1.9    3.2   101     0     0     0     0    0    0    0  
+      800    100    0    2.3    3.3   100     0     0     0     0    0    0    0  
+      900     99    0    1.9    4.3    99     0     0     0     0    0    0    0  
+     1000    101    0    1.9    3.0   101     0     0     0     0    0    0    0  
+     1100     99    0    1.9    3.1    99     0     0     0     0    0    0    0  
+     1200    100    0    2.5    3.5   100     0     0     0     0    0    0    0  
+     1300    101    0    2.1    3.7   101     0     0     0     0    0    0    0  
+     1400     99    0    2.0    3.2    99     0     0     0     0    0    0    0  
+     1500    101    0    2.3    3.1   101     0     0     0     0    0    0    0  
+     1600     99    0    1.9    3.0    99     0     0     0     0    0    0    0  
+     1700    101    0    2.0    3.3   101     0     0     0     0    0    0    0  
+     1800    100    0    2.2    4.9   100     0     0     0     0    0    0    0  
+     1900     99    0    2.1    3.5    99     0     0     0     0    0    0    0  
+     2000    101    0    2.2    3.4   101     0     0     0     0    0    0    0  
+     2100    100    0    1.9    3.0   100     0     0     0     0    0    0    0  
+     2200    100    0    2.3    4.0   100     0     0     0     0    0    0    0  
+     2300    100    0    2.3    3.4   100     0     0     0     0    0    0    0  
+     2400     99    0    2.0    3.5    99     0     0     0     0    0    0    0  
+
+  per second over the run
+     s    sent  err    p50     p99   DB fail  ent
+     0    999    0    2.5    13.7    0    0    0
+     1   1000    0    2.3     5.9    0    0    0
+     2   1000    0    2.3     3.7    0    0    0
+     3    999    0    2.3     4.2    0    0    0
+     4   1001    0    2.2     3.7    0    0    0
+     5    999    0    2.2     4.5    0    0    0
+     6   1001    0    2.1     3.7    0    0    0
+     7   1000    0    2.1     3.6    0    0    0
+     8    999    0    2.2     3.4    0    0    0
+     9   1001    0    2.0     3.3    0    0    0
+    10   1000    0    2.1     3.4    0    0    0
+    11   1000    0    2.1     3.3    0    0    0
+    12   1000    0    2.0     3.3    0    0    0
+    13   1000    0    2.2     3.7    0    0    0
+    14   1000    0    2.1     3.3    0    0    0
+    15   1000    0    2.1     3.5    0    0    0
+    16   1000    0    2.2     4.3    0    0    3
+    17    999    0    2.1     3.5    0    0    0
+    18   1001    0    2.2     3.5    0    0    0
+    19   1000    0    2.1     3.4    0    0    0
+    20   1000    0    2.2     3.4    1    0    0
+    21    999    0    2.1     3.5    0    0    0
+    22   1001    0    2.2     3.5    0    0    0
+    23    999    0    2.3     3.7    0    0    0
+    24   1001    0    2.1     3.4    0    0    0
+    25   1000    0    2.2     4.5    0    0    0
+    26   1000    0    2.1     3.6    0    0    0
+    27   1000    0    2.1     3.4    0    0    0
+    28   1000    0    2.2     3.8    0    0    0
+    29    999    0    2.2     3.5    0    0    0
+    30   1001    0    2.2     3.9    0    0    0
+    31   1000    0    2.1     3.6    0    0    0
+    32    999    0    2.1     3.7    0    0    0
+    33   1001    0    2.2     7.9    0    0    0
+    34   1000    0    2.3     7.4    0    0    0
+    35   1000    0    2.1     3.5    0    0    0
+    36   1000    0    2.1     3.4    0    0    0
+    37    999    0    2.1     3.5    0    0    0
+    38   1000    0    2.2     3.5    0    0    0
+    39   1001    0    2.2     3.6    0    0    0
+
+  N, the stats aggregate's executions during the run, three ways
+    pg_stat_statements calls      1
+    /metrics stats_recomputes     1
+    client miss+refresh+db        1
+  attempts that failed inside Postgres (xact_rollback)  0  → attempted 1
+  miss window: requests sent 16.9ms after the expiry still got no fresh value (17 requests)
+  peak: 1 attempts (finished + failed) in one 100ms bucket, 0 duplicates in flight
+
+  latency by send time            n      p50      p99      max  errors
+    before the expiry          20001      2.2      4.0     20.9       0
+    first 2s after              1999      2.2      3.5      4.9       0
+    the rest                   17999      2.2      3.8     10.9       0
+  sources: hit=39980 refresh=1 stale=18  dropped=0

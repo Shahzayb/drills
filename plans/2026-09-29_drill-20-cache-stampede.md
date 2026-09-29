@@ -1,6 +1,6 @@
 # Drill 20 — Cause a stampede and watch the database buckle
 
-**Status:** planned
+**Status:** shipped
 
 Card 20. Prereq 19. Branch `drill-20`.
 
@@ -174,3 +174,94 @@ mechanism, a circuit breaker on Redis, warming instead of a cold herd).
 5. `pnpm format`, `pnpm lint`, `pnpm typecheck`, `pnpm check:arms`.
 6. Memory bank: verified facts written, judgment calls proposed; history row → `implemented`.
 7. PR, then the `drill/20` release tagged on the branch before the merge.
+
+## Results
+
+Measured 2026-09-29, one sitting, dev server, seeded volume, `PG_PRELOAD=pg_stat_statements`,
+`nest_server` recreated before every run. Reports: `apps/backend/db/reports/2026-09-29-12*`.
+
+### DONE WHEN — org 150, 500 req/s, forced expiry at 20s, `STATS_TTL_S=300`
+
+N is the stats aggregate's executions during the 40s run. `pg_stat_statements` calls,
+`/metrics` `stats_recomputes_total` and the client's `miss + refresh` count agreed on all 18 runs.
+
+| arm | N per round | answers that were not a hit | p99 / max, first 2s after the expiry | errors |
+|---|---|---|---|---|
+| `naive` | **13 · 12 · 10** | miss 13 · 12 · 10 | 31.7 / 41.7 · 22.9 / 39.6 · 5.3 / 32.0ms | 0 |
+| `wait` | **1 · 1 · 1** | wait 7 · 10 · 11 | 4.2 / 28.3 · 25.4 / 29.5 · 25.7 / 28.9ms | 0 |
+| `stale` | **1 · 1 · 1** | stale 10 · 9 · 8, refresh 1 | 4.5 / 5.8 · 4.3 / 7.5 · 4.2 / 5.1ms | 0 |
+
+Steady-state p99 3.5–4.8ms. The whole stampede fits one 100ms bucket: the miss window was
+14.3–22.3ms. Same profile at 1,000 req/s: `naive` N **26 · 21 · 15**, `wait` and `stale` 1.
+N tracks rate × recompute time (~15–20ms). The pool never saturated, so there was no feedback
+loop at this org.
+
+### The buckle — org 2, 100 req/s, same method
+
+| arm | finished (pgss) | failed in Postgres (`xact_rollback`) | attempted | 5xx | p99 / max, first 2s |
+|---|---|---|---|---|---|
+| `naive` r1 | 6 | 98 | **104** | 98 | 1,601.5 / 1,871.0ms |
+| `naive` r2 | 5 | 88 | **93** | 88 | 1,776.4 / 1,827.7ms |
+| `wait` | 1 | 0 | 1 | 0 | 436.1 / 443.1ms (43 waited) |
+| `stale` | 1 | 0 | 1 | 0 | 5.9 / 5.9ms (45 served stale) |
+
+Every failure was `could not resize shared memory segment … No space left on device`. Ten
+concurrent Parallel Bitmap Heap Scans filled the Postgres container's 64MB `/dev/shm`, so
+queued duplicates that reached a connection failed at once. The pool stayed at 10 in flight for
+the whole window. pgss counts only finished statements: it reported 6 for an expiry that sent
+104 aggregates to Postgres.
+
+### Jitter — 100 orgs (11–110), 500 req/s, `STATS_TTL_S=10`, every key deleted at 5s
+
+After the first cycle (t ≥ 16s, 44 seconds):
+
+| arm | jitter | peak recomputes / s | peak / 100ms | worst per-second p99 | seconds with 0 recomputes | total recomputes |
+|---|---|---|---|---|---|---|
+| `wait` | 0 | 61 | 12 | 354.7ms | 31 | 600 |
+| `wait` | 0.2 | 37 | 8 | 122.7ms | 11 | 621 |
+| `wait` | 0.5 | 20 | 6 | 96.5ms | 0 | 780 |
+| `stale` r1 / r2 | 0 | 40 / 70 | 14 / 11 | 141.4 / 1,074.8ms | 20 / 31 | 540 / 660 |
+| `stale` r1 / r2 | 0.5 | 23 / 26 | 7 / 5 | 31.4 / 12.3ms | 0 / 0 | 847 / 789 |
+
+The flush itself cost ~100 recomputes in every run (p99 1.0–2.1s in that second), and 16
+requests hit the pool's 2s connection timeout on the `wait` j0.2 run. Jitter cannot touch the
+first cycle. `stale` r2 j0's 1,074.8ms p99 was in the run's last second and is not isolated.
+
+### Stretch — Redis stopped for ~14s under 200 req/s (`stale`, org 150)
+
+2,738 stats requests answered 503 (`stats_cache_error`, fail closed); 0 stats aggregates reached
+Postgres. 2,792 entitlement reads fell back to Postgres (`entitlement_cache_error`, fail open).
+p50 0.8–3.4s per second while ioredis gave up on each command. Back to 2.8ms p50 within a second
+of Redis returning.
+
+### Tests
+
+`pnpm db:test` 153/153 (147 → 153). `db:test:stampede` fails **2** (7 and 8 recomputes for a
+30-request burst). `db:test:nojitter` fails **1**. `db:test:statswait` 153/153. `pnpm test:ui`
+6/6; the streaming test runs through `bypass`.
+
+### Predictions
+
+1. **Wrong.** N was 10–13, not 40–80. The window stayed ~20ms because 500 × 0.02s of concurrent
+   recomputes fits a pool of 10. p99 rose 1.4–8× in the expiry's 2s, not 3–5× reliably.
+2. Right: N = 1 on all 12 single-flight runs. `wait` cost ~25ms, the poll interval, not the
+   recompute. `stale` cost nothing measurable.
+3. Half right. The outage was 5xx and pgss stayed small (6 and 5). The cause was `/dev/shm`, not
+   the pool timeout, and 93–104 aggregates reached Postgres.
+4. Right in shape: 61 → 20 per second at 0.5 on `wait`. On `stale` the unjittered bursts drift
+   wider each cycle instead of holding.
+5. Right, with one exception: herd r2 j0.5 read pgss 785 against `/metrics` 789. Background
+   refreshes finished after the last pgss sample and before the `/metrics` read.
+
+### Divergences from the plan
+
+- The sampler also reads `pg_stat_database.xact_rollback`. pgss misses failed statements, and
+  the buckle was made of them.
+- The DONE WHEN profile added 1,000 req/s: 500 alone could not show whether N grows with rate.
+- Default arm `stale` and jitter 0.2, as predicted. 0.5 flattens faster at +33% recomputes.
+- The first e2e run after a container recreate had its dev server SIGKILLed twice. The
+  container sat at its 1GB limit during the cold ts-jest compile. The rerun was clean.
+
+## Write-up
+
+The card's three questions and the stretch are answered in the drill 20 guide.
