@@ -83,7 +83,8 @@ streams the widget in one `<Suspense>` (`?stats=stream|blocking|off`). Fetches c
 `?cache=nostore|cached|tagged|blanket` (default `tagged`): the tag scheme lives in `lib/api.ts`
 and `tagsAfterWrite()` is its one home; Server Actions call `updateTag`, and
 `POST /api/revalidate` expires tags for writes outside them. Cache-eligible fetches send no
-`x-request-id`. Stats revalidate every 60s. `served` is computed from the API's `x-served-at`.
+`x-request-id`; `no-store` fetches send `cache-control: no-cache`, which bypasses the API's stats
+cache. Stats revalidate every 60s. `served` is computed from the API's `x-served-at`.
 `/imports` is zero-JS with a meta refresh only while a job runs; uploads go through a Route
 Handler because a Server Action body is buffered and capped at 1MB.
 
@@ -97,6 +98,15 @@ reconnect) deletes the key. `PUT /entitlements/plan` commits, then deletes. Only
 is rate-limited (`plan_limits.ingest_per_minute`, a fixed window via `MULTI INCR / EXPIRE NX /
 PTTL`; pro is NULL = unlimited). The read runs with `{ counted: false }`, so `@QueryBudget` does
 not see it; `x-entitlement: hit|miss|db|error` and `GET /metrics` (Prometheus counters) do.
+
+**Stats cache (drill 20).** `SearchService.stats()` caches the aggregate as `stats:v1:org:<id>`, an
+envelope `{stats, computedAt, freshUntil}`; freshness is `freshUntil`, the Redis TTL only collects.
+`STATS_CACHE=off|naive|wait|stale` (default `stale`), `STATS_TTL_S` (30), `STATS_TTL_JITTER` (0.2,
+shortens only: `ttl × (1 − j·random)`). Single-flight: `SET lock:stats:v1:org:<id> <uuid> NX EX 10`,
+re-read after winning, release via `RedisService.delIfEquals` (Lua). `wait` polls every 25ms and
+503s after 5s; `stale` refreshes in the background and keeps the value 10 TTLs. A Redis error is a
+503 (fail closed). `Cache-Control: no-cache` → `bypass`. Answers carry `x-stats-cache` and
+`x-served-at = computedAt`; `/metrics` adds `stats_cache_lookups_total` and `stats_recomputes_total`.
 
 ## Instruments and commands
 
@@ -112,7 +122,7 @@ not see it; `x-entitlement: hit|miss|db|error` and `GET /metrics` (Prometheus co
   switch cannot reach its reader; `pnpm arms` asks the running API what it resolved.
 - **Instruments.** `db:explain`, `db:paging`, `db:search`, `db:storm`, `db:quota`, `db:claim`,
   `db:import`, `db:schema` (its `backfill` is a real operation between migrations 015 and 016),
-  `db:entitle`, `db:bench`; `pnpm load list|search|write|ingest|page`; `pnpm ui:paint`. Each has
+  `db:entitle`, `db:stampede`, `db:bench`; `pnpm load list|search|write|ingest|page`; `pnpm ui:paint`. Each has
   `--help`; each plan documents its own.
 - **Observability.** `db:stats:on|stats|stats:reset` (`pg_stat_statements`), `db:log:on|off|status`,
   `db:activity`, `logs:trace <rid>`, `trace:on|off` (collector + Jaeger under the `trace` profile).
@@ -144,6 +154,8 @@ not see it; `x-entitlement: hit|miss|db|error` and `GET /metrics` (Prometheus co
 
 **Postgres configuration**
 
+- `postgres_db` has Docker's 64MB `/dev/shm`. About ten concurrent parallel scans exhaust it
+  (`could not resize shared memory segment`); one never does.
 - Settings live in `command:` on `postgres_db`, never `POSTGRES_INITDB_ARGS`. `shared_buffers=128MB`
   is small on purpose; `wal_level=minimal` rules out replicas and logical decoding.
 - `shared_preload_libraries` needs a recreate (`PG_PRELOAD=pg_stat_statements`); `ALTER SYSTEM`
@@ -221,6 +233,9 @@ not see it; `x-entitlement: hit|miss|db|error` and `GET /metrics` (Prometheus co
 - `NOTIFY` is sent at COMMIT to sessions listening at that moment, with no replay. A full notify
   queue (`max_notify_queue_pages`) fails every NOTIFY-ing commit.
 - Hit ratio follows per-tenant request rate × TTL; a TTL's database cost is active tenants ÷ TTL.
+- A stampede is rate × recompute time duplicates; it turns into failures once they exceed the pool
+  (10). Single-flight fixes one key; keys filled together (flush, key-version bump) stay in step
+  until jitter spreads them, and nothing but warming helps the first cycle.
 - Nest runs global guards before controller guards, so code that needs `ApiKeyGuard`'s org is an
   interceptor.
 
@@ -231,7 +246,9 @@ not see it; `x-entitlement: hit|miss|db|error` and `GET /metrics` (Prometheus co
 - A concurrent k6 run and an isolated `EXPLAIN (ANALYZE, BUFFERS)` can disagree; BUFFERS separates
   fast from cached.
 - `pg_stat_statements` strips comments (the rid comment does not fragment rows); the statement log
-  echoes each statement three times.
+  echoes each statement three times. It counts finished statements only; failed ones show in
+  `pg_stat_database.xact_rollback`.
+- A sub-second stampede is invisible at a 15s scrape; count it per request (`x-stats-cache`).
 - `Promise.all` of two pool queries takes two connections per request.
 - k6: `http_req_failed.passes` counts failures; `handleSummary` replaces k6's summary; a closed
   model cannot show an outage (`dropped_iterations` exists only for arrival-rate executors); a

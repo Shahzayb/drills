@@ -8,9 +8,8 @@ None.
 
 ## Next step
 
-Card 19 shipped. Its stated alternatives are SQ3 (ADRs) and SQ1. Card 26 (the outbox) is open
-from drill 12 and is also the durable replacement for drill 19's `NOTIFY`. Card 30 (the
-noisy-neighbour bulk import) has the path it needs in drill 15's in-process worker.
+Card 20 shipped (alternatives SQ3, SQ6; card 29 is its stretch in full). Card 26 (the outbox)
+replaces drill 19's `NOTIFY`. Card 30 has its path in drill 15's worker.
 
 ## Active plan
 
@@ -18,23 +17,14 @@ None open. Every plan in `plans/` is shipped.
 
 ## Live validation
 
-`pnpm docker:up`, then `pnpm db:reset`. `pnpm db:test` runs the backend e2e suite (147 tests). Each arm below MUST fail exactly as listed; a green red run
-means the switch stopped switching.
+`pnpm docker:up`, then `pnpm db:reset`. `pnpm db:test` runs the backend e2e suite (153 tests). The
+first run after a container recreate had the dev server SIGKILLed at the 1GB limit; rerun.
 
-| script | arm | expected |
-|---|---|---|
-| `db:test:naive` | `LIST_STRATEGY=naive` | 2 fail (query budget) |
-| `db:test:notiebreak` | `KEYSET_TIEBREAK=off` | 1 fail (tie-block walk) |
-| `db:test:like` | `SEARCH_STRATEGY=like` | 1 fail (stemming) |
-| `db:test:noidem` | `IDEMPOTENCY=none` | 3 fail |
-| `db:test:redis` | `IDEMPOTENCY=redis` | 1 fail (202 for a concurrent duplicate) |
-| `db:test:rmw` | `QUOTA=rmw` | 2 fail |
-| `db:test:lww` | `ASSIGN=lww` | 4 fail |
-| `db:test:buffer` | `IMPORT=buffer` | 4 fail |
-| `db:test:skiplast` | `LAST_MESSAGE=skip` | 15 fail across two suites |
-| `db:test:nocache` | `ENTITLEMENT_CACHE=off` | 1 fail (the hit assertion) |
-| `db:test:ttlonly` | `ENTITLEMENT_CACHE=ttl` | 2 fail (both API-path upgrade tests) |
-| `db:test:constraint`, `:donothing`, `:locking`, `:serializable`, `:pessimistic`, `:restart`, `:invalidate` | — | green |
+Each red run MUST fail exactly this many tests (arms in `package.json`); a green red run means the
+switch stopped switching. `db:test:naive` 2 (query budget) · `:notiebreak` 1 · `:like` 1 ·
+`:noidem` 3 · `:redis` 1 · `:rmw` 2 · `:lww` 4 · `:buffer` 4 · `:skiplast` 15 (two suites) ·
+`:nocache` 1 · `:ttlonly` 2 · `:stampede` 2 · `:nojitter` 1. Green: `:constraint`, `:donothing`,
+`:locking`, `:serializable`, `:pessimistic`, `:restart`, `:invalidate`, `:statswait`.
 
 `pnpm test:ui` runs Playwright (6 tests) on the host (`pnpm exec playwright install chromium`
 once). Red runs: `ASSIGN=lww docker compose up -d nest_server` fails the conflict test;
@@ -45,9 +35,8 @@ once). Red runs: `ASSIGN=lww docker compose up -d nest_server` fails the conflic
 Before measuring:
 
 - `pnpm ui:paint` and `pnpm load page` need `COMPOSE_PROJECT_NAME=drills pnpm docker:up:prod`
-  (`--allow-dev` overrides). The whale's aggregate ranges 1.3–3.5s across a session, so compare
-  within one sitting. Add `?stats=off` to a `/conversations` URL measuring something else and
-  `?cache=nostore` to force the API on every load.
+  (`--allow-dev` overrides). The whale's aggregate ranges 1.3–3.5s in a session. `?stats=off`
+  drops the widget; `?cache=nostore` forces the API and the database on every load.
 - A write made by hand (curl, a `db:*` instrument, a seed) leaves Next's data cache stale until
   `POST /api/revalidate {org, id, cache: "blanket"}` or the fetch-cache directory is deleted.
   Next's cache survives container recreates (bind-mounted `.next`).
@@ -59,6 +48,8 @@ Before measuring:
 - `db:search writes` leaves dead tuples; take size numbers after a `VACUUM`.
 - `pnpm db:entitle metrics` keeps its snapshot in container `/tmp`; bracket a k6 run with two
   calls.
+- `pnpm db:stampede` needs `PG_PRELOAD=pg_stat_statements`. Run `run` at `STATS_TTL_S=300` so the
+  forced expiry is the only one in the window.
 - `pnpm load ingest` leaves rows behind (k6 has no database connection). Before a drill 05/09/10
   baseline, as the owner:
 
@@ -87,7 +78,8 @@ Numbered for reference from plans; gaps are retired numbers.
 
 4. `organizations` and `users` have no RLS policy (decision, and a real leak surface).
 41. `POST /api/revalidate`, the status Server Action and `PUT /entitlements/plan` are
-    unauthenticated. `cache: "blanket"` on the whale costs the next reader a 5GB scan.
+    unauthenticated. `cache: "blanket"` on the whale, or `Cache-Control: no-cache` on
+    `GET /messages/stats`, costs a 5GB scan.
 
 **Query paths**
 
@@ -97,7 +89,8 @@ Numbered for reference from plans; gaps are retired numbers.
 7. Search results have no paging (limit only).
 8. Interior-substring search is rejected by decision (trigram index priced at 2,159MB).
 33. Nothing reads `last_message_at`; its index was priced at 118.6MB and rejected.
-36. The stats widget still costs the whale a 5GB scan per fill (every 60s, drill 18).
+36. The stats aggregate is still a 5GB scan on the whale, once per TTL per org (drill 20's
+    single-flight). The Postgres container's 64MB `/dev/shm` fails ~10 concurrent parallel scans.
 37. The sentiment split is two word lists (`method: 'lexicon'`).
 
 **Ingest, quota and billing**
@@ -145,11 +138,14 @@ Numbered for reference from plans; gaps are retired numbers.
 48. The cache-aside fill race beats the `DEL` for a full TTL on every cache arm (versioned fill or
     lease is the fix).
 49. `plan_limits` edits invalidate nothing; they wait out every key's TTL.
-50. Redis sits on every org-scoped request with a 2s command timeout and no circuit breaker.
+50. Redis sits on every org-scoped request with a 2s command timeout and no circuit breaker. Redis
+    stopped under load: p50 0.8–3.4s, stats 503, entitlements to Postgres (drill 20).
 51. The ingest limiter is a fixed window (2× burst across a boundary) and fails open.
 53. `notify` loses messages while its listener is disconnected and does not flush on reconnect;
     a listener stuck in a transaction can fill the NOTIFY queue and fail plan-changing commits.
-54. Concurrent misses are not coalesced; a cold key costs one Postgres read per concurrent request.
+54. Entitlement misses are not coalesced; a cold key costs one Postgres read per concurrent request.
+55. Stats waiters poll every 25ms (the wait floor); no in-process single-flight; a quiet org can
+    serve a value 10 TTLs old; a flushed cache refills every key at once (pool timeouts).
 
 **Instruments and observability**
 
