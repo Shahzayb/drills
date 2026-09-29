@@ -81,6 +81,13 @@ describe('GET /info arms (e2e)', () => {
         ? process.env.ENTITLEMENT_CACHE
         : 'notify',
       entitlementTtlS: process.env.ENTITLEMENT_TTL_S || '30',
+      statsCache: ['off', 'naive', 'wait', 'stale'].includes(
+        process.env.STATS_CACHE ?? '',
+      )
+        ? process.env.STATS_CACHE
+        : 'stale',
+      statsTtlS: process.env.STATS_TTL_S || '30',
+      statsTtlJitter: String(Number(process.env.STATS_TTL_JITTER || '0.2')),
       queryCounter:
         process.env.QUERY_COUNTER === 'off' ||
         process.env.QUERY_COUNTER === 'header'
