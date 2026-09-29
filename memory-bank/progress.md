@@ -165,13 +165,14 @@ From `drill/14` on, each release is tagged on its branch before the merge. No mi
 | [drill/10](https://github.com/Shahzayb/drills/releases/tag/drill/10) | 0.10.0 | Keyset pagination; milestone `drill/10`. |
 | [drill/11](https://github.com/Shahzayb/drills/releases/tag/drill/11) | 0.11.0 | Full-text search; milestone `drill/11`. |
 | [drill/12](https://github.com/Shahzayb/drills/releases/tag/drill/12) | 0.12.0 | Idempotent ingest. |
-| [drill/13](https://github.com/Shahzayb/drills/releases/tag/drill/13) | 0.13.0 | The lost update. Tagged on the merge commit. |
-| [drill/14](https://github.com/Shahzayb/drills/releases/tag/drill/14) | 0.14.0 | Optimistic locking. `--generate-notes` gave only a changelog link (no merged PR yet); body written by hand. |
+| [drill/13](https://github.com/Shahzayb/drills/releases/tag/drill/13) | 0.13.0 | The lost update. |
+| [drill/14](https://github.com/Shahzayb/drills/releases/tag/drill/14) | 0.14.0 | Optimistic locking. Pre-merge `--generate-notes` is a changelog link only; add `--notes`. |
 | [drill/15](https://github.com/Shahzayb/drills/releases/tag/drill/15) | 0.15.0 | Streaming CSV import. |
 | [drill/16](https://github.com/Shahzayb/drills/releases/tag/drill/16) | 0.16.0 | Zero-downtime schema change. |
 | [drill/17](https://github.com/Shahzayb/drills/releases/tag/drill/17) | 0.17.0 | Streaming the inbox with Suspense. |
 | [drill/18](https://github.com/Shahzayb/drills/releases/tag/drill/18) | 0.18.0 | Next's cache layers. PR #17. |
 | [drill/19](https://github.com/Shahzayb/drills/releases/tag/drill/19) | 0.19.0 | Entitlement cache and its staleness window. PR #18. |
+| [drill/20](https://github.com/Shahzayb/drills/releases/tag/drill/20) | 0.20.0 | Cache stampede, single-flight, jitter. PR #19. |
 
 ## Preferences
 
