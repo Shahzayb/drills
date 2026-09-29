@@ -1,0 +1,18 @@
+entitle upgrade  api http://nest_server:3002
+  ROUNDS               5                            (default)
+  POLL_MS              50                           (default)
+  RATE                 10                           (default)
+  AFTER                5                            (default)
+  VIA                  api                          (env)
+  RATES                0.1,1,10                     (default)
+  SECONDS              90                           (default)
+
+  server arms  entitlementCache=invalidate entitlementTtlS=30
+
+  +6,010 ms  first 429 after 60 accepted
+  +11,023 ms  upgraded to pro via api, entitlement key PTTL 18,992 ms
+  +11,121 ms  first accepted ingest after the upgrade
+
+  429s after the upgrade : 0  (rate 10/s)
+  upgrade -> first 2xx   : 98 ms
+  statuses               : {"201":61,"429":51}

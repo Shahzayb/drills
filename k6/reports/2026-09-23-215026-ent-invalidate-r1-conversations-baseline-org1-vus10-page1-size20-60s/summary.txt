@@ -1,0 +1,10 @@
+
+  name=ent-invalidate-r1 org=1 vus=10 warmup=20s measured=60s page=1 pageSize=20
+  measured requests : 16619
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 35.70 / 46.56 / 52.34 ms
+  min / avg / max   : 19.31 / 36.03 / 71.64 ms
+  throughput        : 276.98 req/s
+  (incl. warm-up)   : p50 35.33  p95 46.33  p99 52.05 ms
+
+RESULT,ent-invalidate-r1,1,10,1,20,35.70,46.56,52.34,276.98,16619

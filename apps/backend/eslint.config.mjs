@@ -70,6 +70,8 @@ export default tseslint.config(
       'src/health/**',
       'src/info/**',
       'src/ingest/api-key.guard.ts',
+      // Drill 19: organizations and plan_limits are the tenant registry and a catalog, no org_id.
+      'src/entitlements/entitlements.service.ts',
     ],
     rules: {
       'no-restricted-imports': [

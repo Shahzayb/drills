@@ -1,0 +1,25 @@
+entitle oob  api http://nest_server:3002
+  ROUNDS               10                           (env)
+  POLL_MS              50                           (default)
+  RATE                 10                           (default)
+  AFTER                5                            (default)
+  VIA                  oob                          (default)
+  RATES                0.1,1,10                     (default)
+  SECONDS              90                           (default)
+
+  server arms  entitlementCache=invalidate entitlementTtlS=30
+
+  round  wait_ms  pttl_at_write_ms  staleness_ms  stale_reads  staleness-pttl
+      1     6800             23186         23214          385              28
+      2    13812             16173         16193          270              20
+      3    25991              3980          3993           66              13
+      4    13569             16413         16449          275              36
+      5    17138             12845         12905          216              60
+      6     4348             25647         25692          432              45
+      7     8377             21611         21661          365              50
+      8    17127             12857         12894          216              37
+      9    12678             17306         17324          282              18
+     10     6501             23491         23521          390              30
+
+  staleness min / median / max : 3,993 / 16,887 / 25,692 ms  (TTL 30,000 ms)
+  |staleness - pttl| max       : 60 ms  (poll 50 ms)

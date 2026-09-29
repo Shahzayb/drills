@@ -19,6 +19,10 @@ import {
   IMPORT_ON_FAIL,
 } from '../imports/imports.service';
 import { QUOTA_MAX_RETRIES } from '../tenancy/tenant-db.service';
+import {
+  ENTITLEMENT_CACHE,
+  ENTITLEMENT_TTL_S,
+} from '../entitlements/entitlements.service';
 import { QUERY_COUNTER_MODE } from '../observability/query-counter';
 import { TRACING_ENABLED } from '../observability/trace';
 import { logger } from '../observability/logger';
@@ -48,6 +52,8 @@ export interface InfoResponse {
     import: string;
     importBatchRows: string;
     importOnFail: string;
+    entitlementCache: string;
+    entitlementTtlS: string;
     queryCounter: string;
     logLevel: string;
     tracing: string;
@@ -95,6 +101,8 @@ export class InfoController {
         import: IMPORT,
         importBatchRows: String(IMPORT_BATCH_ROWS),
         importOnFail: IMPORT_ON_FAIL,
+        entitlementCache: ENTITLEMENT_CACHE,
+        entitlementTtlS: String(ENTITLEMENT_TTL_S),
         queryCounter: QUERY_COUNTER_MODE,
         logLevel: logger.level,
         tracing: TRACING_ENABLED ? 'on' : 'off',

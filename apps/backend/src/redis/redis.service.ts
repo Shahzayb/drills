@@ -27,6 +27,8 @@ export class RedisService implements OnApplicationShutdown {
       host: process.env.REDIS_HOST ?? 'localhost',
       port: Number(process.env.REDIS_PORT ?? 6379),
       password: process.env.REDIS_PASSWORD,
+      // The e2e suite uses DB 1, so the dev server's NOTIFY listener cannot delete its keys. Drill 19.
+      db: Number(process.env.REDIS_DB || 0),
       commandTimeout: COMMAND_TIMEOUT_MS,
       connectTimeout: CONNECT_TIMEOUT_MS,
       maxRetriesPerRequest: MAX_RETRIES_PER_REQUEST,
@@ -153,6 +155,36 @@ export class RedisService implements OnApplicationShutdown {
       if (this.logger.isLevelEnabled('debug')) {
         this.logger.debug(
           { rid, cmd: 'DEL', key, durMs: since(startedAt) },
+          'redis_command',
+        );
+      }
+    }
+  }
+
+  /**
+   * A fixed window that starts at the first hit: INCR, EXPIRE NX, PTTL in one MULTI.
+   * NX keeps later hits from sliding the window. See plans/2026-09-23_drill-19-entitlement-cache.md.
+   */
+  async incrWindow(
+    key: string,
+    ttlSeconds: number,
+  ): Promise<{ count: number; pttlMs: number }> {
+    const rid = getRequestId();
+    const startedAt = performance.now();
+    try {
+      const replies = await this.client
+        .multi()
+        .incr(key)
+        .expire(key, ttlSeconds, 'NX')
+        .pttl(key)
+        .exec();
+      const failed = replies?.find(([error]) => error)?.[0];
+      if (!replies || failed) throw failed ?? new Error('MULTI aborted');
+      return { count: Number(replies[0][1]), pttlMs: Number(replies[2][1]) };
+    } finally {
+      if (this.logger.isLevelEnabled('debug')) {
+        this.logger.debug(
+          { rid, cmd: 'MULTI INCR/EXPIRE/PTTL', key, durMs: since(startedAt) },
           'redis_command',
         );
       }

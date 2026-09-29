@@ -1,0 +1,10 @@
+
+  name=ent-off-r3 org=1 vus=10 warmup=20s measured=60s page=1 pageSize=20
+  measured requests : 17080
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 34.49 / 45.58 / 51.02 ms
+  min / avg / max   : 18.92 / 35.06 / 120.29 ms
+  throughput        : 284.67 req/s
+  (incl. warm-up)   : p50 34.20  p95 45.30  p99 50.92 ms
+
+RESULT,ent-off-r3,1,10,1,20,34.49,45.58,51.02,284.67,17080

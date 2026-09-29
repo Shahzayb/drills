@@ -444,6 +444,54 @@ const INSTRUMENTS: Record<string, Instrument> = {
     ],
   },
 
+  entitle: {
+    file: 'db/entitle.mts',
+    blurb:
+      'how long a plan change takes to reach the API, by every road a write can take (drill 19)',
+    subcommands: {
+      oob: 'write straight to Postgres, poll until the API notices; PTTL predicts it',
+      upgrade: 'the customer view: 429s until the cache notices an upgrade',
+      race: 'force the cache-aside fill race; exits 1 if the stale fill is not served',
+      ratio: 'hit ratio against per-org request rate at the running TTL',
+      metrics: '/metrics now, and the delta since the last call',
+      lost: 'notify arm: kill the LISTEN connection and write during the gap',
+    },
+    knobs: [
+      { flag: 'rounds', env: 'ROUNDS', def: '5', help: 'oob/lost: rounds' },
+      {
+        flag: 'poll-ms',
+        env: 'POLL_MS',
+        def: '50',
+        help: 'how often the API is asked',
+      },
+      {
+        flag: 'rate',
+        env: 'RATE',
+        def: '10',
+        help: 'upgrade: ingests per second',
+      },
+      {
+        flag: 'after',
+        env: 'AFTER',
+        def: '5',
+        help: 'upgrade: seconds of 429s before the upgrade',
+      },
+      { flag: 'via', env: 'VIA', def: 'oob', help: 'upgrade: api | oob' },
+      {
+        flag: 'rates',
+        env: 'RATES',
+        def: '0.1,1,10',
+        help: 'ratio: requests per second, one org each',
+      },
+      {
+        flag: 'seconds',
+        env: 'SECONDS',
+        def: '90',
+        help: 'ratio: how long each rate runs',
+      },
+    ],
+  },
+
   bench: {
     file: 'db/bench-copy.mts',
     blurb: 'INSERT vs multi-row INSERT vs COPY, on a scratch table',
