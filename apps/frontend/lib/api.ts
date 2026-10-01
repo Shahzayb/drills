@@ -173,6 +173,8 @@ async function callApi(
   // dropping every header without a word.
   const headers = new Headers(init?.headers);
   if (policy === 'no-store') headers.set(REQUEST_ID_HEADER, requestId);
+  // `nostore` means no cache at any layer: the API's stats cache honours this (drill 20).
+  if (policy === 'no-store') headers.set('cache-control', 'no-cache');
   // The standard's version of the line above, and the two are not redundant.
   // x-request-id is ours and carries a flat, human-readable id. `traceparent`
   // is W3C and carries trace id *plus this span's id*, which is what makes the

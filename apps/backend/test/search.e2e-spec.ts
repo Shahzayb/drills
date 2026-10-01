@@ -4,6 +4,8 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { PostgresService } from '../src/postgres/postgres.service';
+import { RedisService } from '../src/redis/redis.service';
+import { statsKey } from '../src/search/search.service';
 import { TenantDb } from '../src/tenancy/tenant-db.service';
 
 /**
@@ -253,14 +255,22 @@ describe('GET /messages/search (e2e)', () => {
     });
 
     // Exact, like search's. The widget is slow because it is one scan of the
-    // org's messages; a second statement would be a second scan.
-    it('costs exactly one statement', async () => {
-      const response = await request(app.getHttpServer())
+    // org's messages; a second statement would be a second scan. Card 20's
+    // cache makes a hit free, so the cold read is the one with the budget.
+    it('costs exactly one statement cold, and none on a hit', async () => {
+      await app.get(RedisService).del(statsKey(orgId));
+
+      const cold = await request(app.getHttpServer())
         .get('/messages/stats')
         .set('x-org-id', orgId)
         .expect(200);
+      expect(queryCount(cold)).toBe(1);
 
-      expect(queryCount(response)).toBe(1);
+      const warm = await request(app.getHttpServer())
+        .get('/messages/stats')
+        .set('x-org-id', orgId)
+        .expect(200);
+      expect(queryCount(warm)).toBe(process.env.STATS_CACHE === 'off' ? 1 : 0);
     });
 
     it('counts only the requesting org', async () => {

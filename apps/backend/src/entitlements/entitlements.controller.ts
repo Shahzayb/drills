@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Header, Put, Req } from '@nestjs/common';
 import type { Request } from 'express';
+import { statsCacheMetrics } from '../search/search.service';
 import { OrgId } from '../tenancy/org-id.decorator';
 import { SetPlanDto } from './dto/set-plan.dto';
 import {
@@ -51,9 +52,10 @@ export class EntitlementsController {
     return this.entitlements.setPlan(orgId, body.plan);
   }
 
+  /** The process's one Prometheus page: drill 19's entitlement counters and drill 20's stats cache. */
   @Get('metrics')
   @Header('content-type', 'text/plain; version=0.0.4; charset=utf-8')
   metrics(): string {
-    return this.entitlements.metrics();
+    return this.entitlements.metrics() + statsCacheMetrics();
   }
 }

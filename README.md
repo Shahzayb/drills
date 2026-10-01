@@ -29,6 +29,8 @@ orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose
 | 16 | Zero-downtime schema change | The obvious migration locked the table for 75 seconds and failed 77% of writes; the same work, split across four transactions, failed none of them. |
 | 17 | Streaming the inbox with Suspense | A widget that reads 5GB per request made the whole page wait 1.3 seconds; one Suspense boundary put the list on screen in 35ms with the widget arriving later, and shipped no extra JavaScript. |
 | 18 | Next's cache layers | A status change that the page kept denying: the data cache answered the click that made it, with a request id from before the write. One tag per row and one per org's lists fix it; the "just disable caching" fix costs the whale a 5GB scan per view. |
+| 19 | Entitlement cache | A customer upgraded and kept getting 429s for 19 seconds, because nothing told the cache. Deleting the key after the write fixes the API path, a database trigger fixes edits made straight in Postgres, and the TTL stays the only worst-case bound. |
+| 20 | Cache stampede | One expired hot key made 13 requests run the same query at once; on a heavier tenant 104 copies reached Postgres and 98 failed. A Redis lock makes it one query every time, and TTL jitter stops a hundred keys from expiring in the same second. |
 
 Current state and what's open live in `memory-bank/progress.md`; every decision and
 number is one row in `memory-bank/history.md`, with the full reasoning in `plans/`.
@@ -63,6 +65,8 @@ pnpm db:import gen      # write a 200MB CSV, then import it (fire, bench, resume
 pnpm test:ui            # frontend Playwright suite, on the host against the container
 pnpm ui:paint           # TTFB, FCP, chunk arrival and JS bytes per ?stats= arm (needs docker:up:prod)
 pnpm load page          # the inbox through Next per ?cache= arm, with a writer (needs docker:up:prod)
+pnpm db:entitle oob     # how long a plan edit made in psql takes to reach the API (upgrade, race, ratio, metrics, lost)
+pnpm db:stampede run    # force a hot key to expire under load, count the duplicate queries (herd)
 pnpm format
 pnpm lint
 ```

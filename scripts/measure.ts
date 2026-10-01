@@ -492,6 +492,50 @@ const INSTRUMENTS: Record<string, Instrument> = {
     ],
   },
 
+  stampede: {
+    file: 'db/stampede.mts',
+    blurb:
+      'an expired hot key under open-model load, with DB calls on the same clock (drill 20)',
+    subcommands: {
+      run: 'load one org, force its stats key to expire mid-run, count the recomputes',
+      herd: 'load many orgs, delete all their keys at once, watch the refills stay in step',
+    },
+    knobs: [
+      { flag: 'org', env: 'ORG_ID', def: '150', help: 'run: the hot org' },
+      {
+        flag: 'orgs',
+        env: 'ORGS',
+        def: '11-110',
+        help: 'herd: an org id range',
+      },
+      { flag: 'rate', env: 'RATE', def: '500', help: 'requests per second' },
+      {
+        flag: 'seconds',
+        env: 'SECONDS',
+        def: '40 / 60',
+        help: 'how long the load runs (run / herd)',
+      },
+      {
+        flag: 'expire-at',
+        env: 'EXPIRE_AT',
+        def: '20',
+        help: 'run: second at which the key is forced to expire',
+      },
+      {
+        flag: 'flush-at',
+        env: 'FLUSH_AT',
+        def: '5',
+        help: 'herd: second at which every key is deleted',
+      },
+      {
+        flag: 'bucket-ms',
+        env: 'BUCKET_MS',
+        def: '100',
+        help: 'sampling and graph resolution',
+      },
+    ],
+  },
+
   bench: {
     file: 'db/bench-copy.mts',
     blurb: 'INSERT vs multi-row INSERT vs COPY, on a scratch table',

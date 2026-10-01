@@ -120,12 +120,13 @@ export class RedisService implements OnApplicationShutdown {
 
   /** Overwrites a guard, keeping a TTL. Used to replace the placeholder with
    *  the committed conversation id, so a later duplicate can be answered
-   *  without touching Postgres at all. */
+   *  without touching Postgres at all. `PX` so a jittered TTL keeps its
+   *  milliseconds (drill 20); callers still pass seconds. */
   async set(key: string, value: string, ttlSeconds: number): Promise<void> {
     const rid = getRequestId();
     const startedAt = performance.now();
     try {
-      await this.client.set(key, value, 'EX', ttlSeconds);
+      await this.client.set(key, value, 'PX', Math.round(ttlSeconds * 1000));
     } finally {
       if (this.logger.isLevelEnabled('debug')) {
         this.logger.debug(
@@ -155,6 +156,31 @@ export class RedisService implements OnApplicationShutdown {
       if (this.logger.isLevelEnabled('debug')) {
         this.logger.debug(
           { rid, cmd: 'DEL', key, durMs: since(startedAt) },
+          'redis_command',
+        );
+      }
+    }
+  }
+
+  /**
+   * Releases a lock only if this caller still holds it: GET and DEL in one Lua script, so nothing
+   * runs between them. A holder whose lock expired must not delete the next holder's. Drill 20.
+   */
+  async delIfEquals(key: string, value: string): Promise<boolean> {
+    const rid = getRequestId();
+    const startedAt = performance.now();
+    try {
+      const deleted = await this.client.eval(
+        `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0`,
+        1,
+        key,
+        value,
+      );
+      return deleted === 1;
+    } finally {
+      if (this.logger.isLevelEnabled('debug')) {
+        this.logger.debug(
+          { rid, cmd: 'EVAL DEL-IF-EQ', key, durMs: since(startedAt) },
           'redis_command',
         );
       }

@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { errorMessage, logger } from '../observability/logger';
+import { RedisService } from '../redis/redis.service';
 import { TenantDb } from '../tenancy/tenant-db.service';
 import { SearchMessagesQuery } from './dto/search-messages.query';
 
@@ -83,6 +87,100 @@ export const SEARCH_STRATEGY: SearchStrategy =
 const escapeLike = (term: string) => term.replace(/[\\%_]/g, '\\$&');
 
 /**
+ * Card 20: what a request does when the stats key has expired.
+ *
+ * - `off`    Postgres every request. Drill 17's slow widget.
+ * - `naive`  cache-aside. Every request that finds the key expired recomputes. The stampede.
+ * - `wait`   single-flight. One request holds a Redis lock and recomputes; the rest poll for its value.
+ * - `stale`  single-flight. The lock winner recomputes in the background; everyone serves the old value.
+ *
+ * See plans/2026-09-29_drill-20-cache-stampede.md.
+ */
+export type StatsCacheMode = 'off' | 'naive' | 'wait' | 'stale';
+
+const STATS_MODES: StatsCacheMode[] = ['off', 'naive', 'wait', 'stale'];
+
+export const STATS_CACHE: StatsCacheMode = STATS_MODES.includes(
+  process.env.STATS_CACHE as StatsCacheMode,
+)
+  ? (process.env.STATS_CACHE as StatsCacheMode)
+  : 'stale';
+
+/** Seconds a stats value stays fresh. Jitter only shortens it, so this stays the bound on a fresh value's age. */
+export const STATS_TTL_S = Number(process.env.STATS_TTL_S || '30');
+
+/** The share of the TTL removed at random from each fill, so keys filled together do not expire together. */
+export const STATS_TTL_JITTER = Number(process.env.STATS_TTL_JITTER || '0.2');
+
+export const STATS_CACHE_HEADER = 'x-stats-cache';
+
+/** `refresh` served an expired value and started the recompute. `db` is the `off` arm. */
+export type StatsSource =
+  'hit' | 'miss' | 'wait' | 'stale' | 'refresh' | 'db' | 'bypass';
+
+export interface StatsAnswer {
+  stats: MessageStats;
+  source: StatsSource;
+  /** When Postgres answered, epoch ms. */
+  computedAt: number;
+}
+
+/** Freshness lives in the value, so db/stampede.mts can expire a key on every arm by rewriting it. */
+interface Envelope {
+  stats: MessageStats;
+  computedAt: number;
+  freshUntil: number;
+}
+
+export const statsKey = (orgId: string) => `stats:v1:org:${orgId}`;
+
+const statsLockKey = (orgId: string) => `lock:stats:v1:org:${orgId}`;
+
+/** Longer than any recompute measured (whale 3.2s). A lock outliving its holder costs one duplicate, never a wrong answer. */
+const LOCK_TTL_S = 10;
+/** A waiter gives up with a 503 here, before a dead holder's lock expires. */
+const WAIT_MS = 5_000;
+const POLL_MS = 25;
+/** The stale arm keeps an expired value this many TTLs, so a quiet org still has something to serve. */
+const STALE_TTLS = 10;
+
+const isFresh = (envelope: Envelope | null): envelope is Envelope =>
+  envelope !== null && Date.now() < envelope.freshUntil;
+
+/** Per process, like the entitlement counters. `recomputes` counts completed aggregates, as pg_stat_statements does. */
+const statsCounters = {
+  lookups: {
+    hit: 0,
+    miss: 0,
+    wait: 0,
+    stale: 0,
+    refresh: 0,
+    db: 0,
+    bypass: 0,
+    timeout: 0,
+    error: 0,
+  } as Record<StatsSource | 'timeout' | 'error', number>,
+  recomputes: 0,
+};
+
+export function statsCacheMetrics(): string {
+  return [
+    '# HELP stats_cache_info The running arm, TTL and jitter.',
+    '# TYPE stats_cache_info gauge',
+    `stats_cache_info{mode="${STATS_CACHE}",ttl_seconds="${STATS_TTL_S}",jitter="${STATS_TTL_JITTER}"} 1`,
+    '# HELP stats_cache_lookups_total Stats requests by how they were answered.',
+    '# TYPE stats_cache_lookups_total counter',
+    ...Object.entries(statsCounters.lookups).map(
+      ([result, n]) => `stats_cache_lookups_total{result="${result}"} ${n}`,
+    ),
+    '# HELP stats_recomputes_total Stats aggregates Postgres completed.',
+    '# TYPE stats_recomputes_total counter',
+    `stats_recomputes_total ${statsCounters.recomputes}`,
+    '',
+  ].join('\n');
+}
+
+/**
  * Stems, not words, because that is what the tsvector holds. `failing`,
  * `failed` and `fails` are all the lexeme `fail`, so one entry matches every
  * form — and the words come from the seed corpus, so the split describes the
@@ -103,7 +201,10 @@ const toHit = (row: HitRow): MessageHit => ({
 
 @Injectable()
 export class SearchService {
-  constructor(private readonly tenants: TenantDb) {}
+  constructor(
+    private readonly tenants: TenantDb,
+    private readonly redis: RedisService,
+  ) {}
 
   /**
    * One statement, one transaction, whichever arm is configured.
@@ -140,21 +241,164 @@ export class SearchService {
   }
 
   /**
+   * The widget's aggregate through card 20's cache. `bypass` is a request's
+   * `Cache-Control: no-cache`: the frontend's `?cache=nostore` arm sends it.
+   */
+  async stats(orgId: string, bypass = false): Promise<StatsAnswer> {
+    if (STATS_CACHE === 'off' || bypass) {
+      const stats = await this.computeStats(orgId);
+      return this.answer(bypass ? 'bypass' : 'db', {
+        stats,
+        computedAt: Date.now(),
+      });
+    }
+
+    const cached = await this.readStats(orgId);
+    if (isFresh(cached)) return this.answer('hit', cached);
+    if (STATS_CACHE === 'naive') {
+      return this.answer('miss', await this.recompute(orgId));
+    }
+
+    const token = randomUUID();
+    if (cached && STATS_CACHE === 'stale') {
+      const claim = await this.claim(orgId, token);
+      if (claim.fresh) return this.answer('hit', claim.fresh);
+      if (!claim.won) return this.answer('stale', cached);
+      void this.recomputeAndRelease(orgId, token).catch((error) =>
+        logger.error(
+          { orgId, err: errorMessage(error) },
+          'stats_refresh_failed',
+        ),
+      );
+      return this.answer('refresh', cached);
+    }
+
+    const deadline = Date.now() + WAIT_MS;
+    for (;;) {
+      const claim = await this.claim(orgId, token);
+      if (claim.fresh) return this.answer('hit', claim.fresh);
+      if (claim.won) {
+        return this.answer(
+          'miss',
+          await this.recomputeAndRelease(orgId, token),
+        );
+      }
+      if (Date.now() >= deadline) {
+        statsCounters.lookups.timeout += 1;
+        throw new ServiceUnavailableException({
+          error: 'stats_timeout',
+          message: `no stats for org ${orgId} after ${WAIT_MS}ms`,
+        });
+      }
+      await sleep(POLL_MS);
+      const current = await this.readStats(orgId);
+      if (isFresh(current)) return this.answer('wait', current);
+    }
+  }
+
+  /**
+   * Takes the lock, then re-reads: the last holder may have filled the key between our read and
+   * our lock. Without the second read that request recomputes a fresh value (double-checked locking).
+   */
+  private async claim(
+    orgId: string,
+    token: string,
+  ): Promise<{ won: boolean; fresh: Envelope | null }> {
+    let won: boolean;
+    try {
+      won = await this.redis.setIfAbsent(
+        statsLockKey(orgId),
+        token,
+        LOCK_TTL_S,
+      );
+    } catch (error) {
+      throw this.cacheDown(error);
+    }
+    if (!won) return { won: false, fresh: null };
+
+    const current = await this.readStats(orgId);
+    if (!isFresh(current)) return { won: true, fresh: null };
+    await this.release(orgId, token);
+    return { won: false, fresh: current };
+  }
+
+  private async recomputeAndRelease(
+    orgId: string,
+    token: string,
+  ): Promise<Envelope> {
+    try {
+      return await this.recompute(orgId);
+    } finally {
+      await this.release(orgId, token);
+    }
+  }
+
+  /** A failed release leaves the lock to its TTL: waiters stall up to 10s, nobody gets a wrong answer. */
+  private async release(orgId: string, token: string): Promise<void> {
+    await this.redis
+      .delIfEquals(statsLockKey(orgId), token)
+      .catch(() => undefined);
+  }
+
+  private async recompute(orgId: string): Promise<Envelope> {
+    const stats = await this.computeStats(orgId);
+    const computedAt = Date.now();
+    const ttlS = STATS_TTL_S * (1 - STATS_TTL_JITTER * Math.random());
+    const envelope = {
+      stats,
+      computedAt,
+      freshUntil: computedAt + ttlS * 1000,
+    };
+    const keepS = STATS_CACHE === 'stale' ? ttlS * STALE_TTLS : ttlS;
+    // A failed SET costs the next request a recompute. The answer is already correct.
+    await this.redis
+      .set(statsKey(orgId), JSON.stringify(envelope), keepS)
+      .catch(() => undefined);
+    return envelope;
+  }
+
+  /** Fails closed. Falling back to Postgres when Redis is down makes every request a recompute. */
+  private async readStats(orgId: string): Promise<Envelope | null> {
+    try {
+      const raw = await this.redis.get(statsKey(orgId));
+      return raw ? (JSON.parse(raw) as Envelope) : null;
+    } catch (error) {
+      throw this.cacheDown(error);
+    }
+  }
+
+  private cacheDown(error: unknown): ServiceUnavailableException {
+    statsCounters.lookups.error += 1;
+    logger.warn({ err: errorMessage(error) }, 'stats_cache_error');
+    return new ServiceUnavailableException({
+      error: 'stats_unavailable',
+      message: 'the stats cache is unreachable',
+    });
+  }
+
+  private answer(
+    source: StatsSource,
+    { stats, computedAt }: Pick<Envelope, 'stats' | 'computedAt'>,
+  ): StatsAnswer {
+    statsCounters.lookups[source] += 1;
+    return { stats, source, computedAt };
+  }
+
+  /**
    * The inbox widget's aggregate. Card 17.
    *
    * One statement, and it is expensive on purpose — the card asks for a widget
    * that is genuinely slow rather than one with a sleep in it. `messages.org_id`
    * has a foreign key and no index (drill 02 left it out for exactly this), so
-   * for the whale this is a sequential scan of the whole `messages` heap, every
-   * request, with nothing cached in front of it. Caching is a later card; this
-   * one measures what the page does while the query runs.
+   * for the whale this is a sequential scan of the whole `messages` heap.
+   * Card 20 puts a cache in front of it: `stats()` above.
    *
    * Every aggregate rides the same scan: the FILTER clauses evaluate `@@`
    * against the stored tsvector per row rather than through the GIN index,
    * because the WHERE is only `org_id` and the index cannot help a query that
    * wants 40% of the table. `pnpm db:search aggregate` records the plan.
    */
-  async stats(orgId: string): Promise<MessageStats> {
+  private async computeStats(orgId: string): Promise<MessageStats> {
     const { rows } = await this.tenants.withOrg(orgId, (tx) =>
       tx.query<StatsRow>(
         `SELECT count(*)                                                   AS messages,
@@ -170,6 +414,7 @@ export class SearchService {
       ),
     );
 
+    statsCounters.recomputes += 1;
     const row = rows[0];
     return {
       messages: Number(row.messages),
