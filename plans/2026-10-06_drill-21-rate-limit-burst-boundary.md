@@ -1,6 +1,6 @@
 # Drill 21 — Rate limit accurately at the burst boundary
 
-**Status:** planned
+**Status:** shipped
 
 Card 21. Prereq 19. Branch `drill-21`.
 
@@ -137,3 +137,92 @@ with its result, a tech stack cheat sheet, and `Is this production ready?`, `Hon
 - `curl -i` an ingest with a minted key shows `RateLimit-Policy`, `RateLimit` and, on 429,
   `Retry-After`.
 - The instrument's client counts match the `/metrics` delta on every run.
+
+## Results
+
+Measured 2026-10-06 in one sitting. Dev server, seeded volume, `COMPOSE_PROJECT_NAME=drills`. Each
+round minted a `basic` org (`L = B = 600`, `r = 10/s`). `nest_server` recreated per arm, arms
+interleaved. Reports: `apps/backend/db/reports/2026-10-05-2115*` to `…-2126*` (container clock, UTC).
+
+### DONE WHEN — limiter × attack × admitted vs contract
+
+Contract `B + r·T`, `T` the attack's outer span (first send to last response). Error =
+`admitted / contract − 1`. Boundary admits exclude the opener.
+
+| limiter | attack | admitted | contract | error |
+|---|---|---|---|---|
+| `fixed` | boundary, 2 × 600 | 1,199 · 1,199 | 625.1 · 625.0 | **+91.82% · +91.82%** |
+| `fixed-rmw` | boundary | 1,200 · 1,200 | 624.8 · 625.0 | +92.05% · +92.00% |
+| `bucket-rmw` | boundary | 1,200 · 1,200 | 624.7 · 626.2 | +92.10% · +91.64% |
+| `bucket` | boundary | 621 · 621 | 622.6 · 622.2 | **−0.25% · −0.19%** |
+| `fixed` | concurrent, 2,000 | 600 · 600 · 600 | 616.5 · 610.0 · 608.6 | −2.67% · −1.64% · −1.42% |
+| `fixed-rmw` | concurrent | 2,000 · 2,000 · 2,000 | 619.5 · 614.6 · 613.7 | +222.86% · +225.43% · +225.88% |
+| `bucket-rmw` | concurrent | 1,475 · 2,000 · 2,000 | 618.6 · 614.9 · 613.9 | +138.45% · +225.23% · +225.81% |
+| `bucket` | concurrent | 614 · 605 · 605 | 616.2 · 609.0 · 609.5 | **−0.36% · −0.66% · −0.73%** |
+
+Boundary detail: burst 1 finished 75–447ms before the edge on every run. On `bucket`, burst 1
+admitted 600 and burst 2 admitted 21 (two seconds of refill). On `fixed`, the opener took one
+slot of window 1, so burst 1 admitted 599 and burst 2 admitted 600. Client counts matched the
+`/metrics` delta on every run. Zero 5xx, zero unmetered responses.
+
+### The count itself is wrong
+
+One extra concurrent round per arm read the arm's key back after the attack:
+
+| arm | admitted | stored after |
+|---|---|---|
+| `fixed` | 600 | `2000` (INCR counts refused requests too) |
+| `fixed-rmw` | 1,429 | `{"count":600}`: 829 increments lost |
+| `bucket-rmw` | 2,000 | `{"tokens":270.3}`: the bucket believes ~350 were taken |
+| `bucket` | 615 | `{"tokens":0.68}` |
+
+### Stretch — a cold entitlement key under the concurrent attack (`bucket`, `COLD=1`)
+
+`x-entitlement: miss` on 209 · 40 · 114 of 2,000 requests. Each miss is one Postgres read of
+`organizations ⋈ plan_limits`. The limiter still held: 611 · 604 · 603 admitted, −0.72% ·
+−0.93% · −0.95%.
+
+### Tests
+
+`pnpm db:test` 155/155 (153 → 155). Red runs: `db:test:fixed` fails 1 (boundary),
+`db:test:fixedrmw` 2, `db:test:bucketrmw` 1 (concurrent: 200 of 200 admitted against a bound of
+61). `pnpm test:ui` 6/6.
+
+### Predictions
+
+1. Boundary: **hit.** `fixed` +91.82% against a predicted +92%; `bucket` −0.25% / −0.19%;
+   `bucket-rmw` admitted all of burst 2; `fixed-rmw` matched `fixed`.
+2. Concurrent: `fixed` exactly 600 and `bucket` within 1%, **hit**. The rmw arms through HTTP:
+   **miss.** Predicted +10–100%; measured +138% to +226%, usually the whole burst. The guard's
+   Postgres lookup did not stagger arrivals enough to matter. In process: 200 of 200, hit.
+3. Stretch: **miss.** Predicted 10–50 misses; measured 40, 114, 209.
+
+### Divergences from the plan
+
+- The instrument gained a stored-state readout after the matrix ran (`stored after:`), and four
+  extra concurrent rounds were run to capture it.
+- The `RateLimit` header test sits in the drill 19 upgrade test instead of a third test in
+  `rate-limit.e2e-spec.ts`. That test already sends real requests on a free plan.
+- An invalid body (400) still costs a token: the interceptor runs before the validation pipe.
+  Found by `curl`.
+
+## Write-up
+
+**Why Lua solves a problem MULTI/EXEC or a pipeline doesn't.** A token bucket's write depends
+on its read. A pipeline only batches round trips, and other clients interleave. MULTI/EXEC runs
+queued commands back to back, but every command is queued before any runs, so nothing inside it
+can branch on a value it read. WATCH + MULTI can, with a retry per conflict, and WATCH is per
+connection, which ioredis shares across the process. A Lua script runs on Redis's one command
+thread to completion: read, refill, take and write are one step. Drill 19's fixed window was
+safe in MULTI only because `INCR` writes and returns in one command and the decision happens
+after.
+
+**Refill rate, burst size, headers.** `B = L`, `r = L/60`: free 60 + 1/s, basic 600 + 10/s,
+pro unlimited. `RateLimit-Policy: "ingest";q=600;w=60`, `RateLimit: "ingest";r=<whole tokens
+left>;t=<seconds until full>`, and on a 429 `Retry-After: ⌈1/r⌉`. Over any 60s the bucket still
+admits up to `2L`. It caps the instant at `L`, where the fixed window allowed 1,199 in 2.5s.
+
+**What Durable Objects gave for free.** One single-threaded instance per key: the input gate
+makes `get → compute → put` atomic in plain JavaScript, the state lives in the instance, and it
+has one clock. The Lua script and Redis `TIME` rebuild those three here. The price there was a
+hop to wherever the object lives and a soft limit of ~1,000 requests a second per object.
