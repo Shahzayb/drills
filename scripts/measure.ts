@@ -536,6 +536,55 @@ const INSTRUMENTS: Record<string, Instrument> = {
     ],
   },
 
+  ratelimit: {
+    file: 'db/ratelimit.mts',
+    blurb:
+      'the ingest limiter under a boundary burst and a concurrent burst, scored against B + r·T (drill 21)',
+    subcommands: {
+      boundary:
+        'an opener, then a burst just before the 60s boundary and one just after',
+      concurrent: 'REQUESTS at once on a fresh key',
+    },
+    knobs: [
+      {
+        flag: 'plan',
+        env: 'PLAN',
+        def: 'basic',
+        help: 'the minted org plan (basic = 600/min)',
+      },
+      {
+        flag: 'rounds',
+        env: 'ROUNDS',
+        def: '1 / 3',
+        help: 'rounds (boundary / concurrent)',
+      },
+      {
+        flag: 'burst',
+        env: 'BURST',
+        def: '(the limit)',
+        help: 'boundary: requests per burst',
+      },
+      {
+        flag: 'gap-ms',
+        env: 'GAP_MS',
+        def: '1000',
+        help: 'boundary: each burst sits this far from the edge',
+      },
+      {
+        flag: 'requests',
+        env: 'REQUESTS',
+        def: '2000',
+        help: 'concurrent: requests fired at once',
+      },
+      {
+        flag: 'cold',
+        env: 'COLD',
+        def: '0',
+        help: 'concurrent: 1 leaves the entitlement key cold (stretch)',
+      },
+    ],
+  },
+
   bench: {
     file: 'db/bench-copy.mts',
     blurb: 'INSERT vs multi-row INSERT vs COPY, on a scratch table',
