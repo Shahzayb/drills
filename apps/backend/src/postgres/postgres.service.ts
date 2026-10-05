@@ -183,6 +183,8 @@ export class PostgresService implements OnApplicationShutdown {
     try {
       client = await this.pool.connect();
     } catch (error) {
+      // A timed-out waiter still waited; leaving it out would cut the tail off the histogram.
+      recordPoolWait(performance.now() - askedAt);
       recordPoolError(
         errorMessage(error).startsWith('timeout exceeded')
           ? 'timeout'
