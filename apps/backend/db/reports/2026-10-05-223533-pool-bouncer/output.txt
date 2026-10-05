@@ -1,0 +1,18 @@
+pool bouncer  via pgbouncer:6432
+  BOUNCER              pgbouncer:6432               (default)
+
+max_prepared_statements = 0
+  sessionSet         direct   ok     {"aSees":"77MB","bSees":"4MB"}
+  sessionSet         bouncer  BROKEN {"aSees":"77MB","bSees":"77MB"}
+  advisoryLock       direct   ok     {"bGotLock":false,"aUnlocked":true,"locksLeft":0}
+  advisoryLock       bouncer  BROKEN {"bGotLock":true,"aUnlocked":false,"locksLeft":1}  notice: you don't own a lock of type ExclusiveLock
+  listen             direct   ok     {"listener":1,"notifier":0}
+  listen             bouncer  BROKEN {"listener":0,"notifier":1}
+  preparedStatement  direct   ok     {"second":"ok"}
+  preparedStatement  bouncer  BROKEN {"second":"prepared statement \"pool_probe\" does not exist"}
+  tenantGuc          direct   ok     {"afterLocal":{"org":null,"rows":0},"afterSession":{"org":null,"rows":0}}
+  tenantGuc          bouncer  BROKEN {"afterLocal":{"org":"","rows":0},"afterSession":{"org":"7","rows":111111}}
+
+max_prepared_statements = 200
+  preparedStatement  direct   ok     {"second":"ok"}
+  preparedStatement  bouncer  ok     {"second":"ok"}

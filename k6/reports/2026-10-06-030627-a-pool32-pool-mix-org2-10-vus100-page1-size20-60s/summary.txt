@@ -1,0 +1,13 @@
+
+  name=a-pool32 org=2-10 vus=100 warmup=20s measured=60s mix=list:keyset:search 2:1:1 q=export pageSize=20
+  measured requests : 20057
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 219.98 / 596.12 / 648.89 ms
+  min / avg / max   : 38.48 / 299.96 / 851.15 ms
+  throughput        : 334.28 req/s
+  (incl. warm-up)   : p50 217.67  p95 591.22  p99 641.85 ms
+  pool wait         : p50 201.73 / p99 281.42 / mean 203.00 ms (20057 samples)
+  pool hold         : p50 7.44 / p99 410.57 / mean 95.67 ms
+  p99 by endpoint   : list 294.20 · keyset 286.31 · search 704.91 ms
+
+RESULT,a-pool32,2-10,100,export,203.00,281.42,95.67,410.57,219.98,596.12,648.89,334.28,20057

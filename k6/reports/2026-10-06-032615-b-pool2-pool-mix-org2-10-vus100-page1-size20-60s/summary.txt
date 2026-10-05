@@ -1,0 +1,13 @@
+
+  name=b-pool2 org=2-10 vus=100 warmup=20s measured=60s mix=list:keyset:search 2:1:1 q=export pageSize=20
+  measured requests : 8260
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 715.14 / 891.53 / 1250.89 ms
+  min / avg / max   : 382.44 / 730.68 / 1425.01 ms
+  throughput        : 137.67 req/s
+  (incl. warm-up)   : p50 716.97  p95 876.93  p99 1272.88 ms
+  pool wait         : p50 701.75 / p99 1234.63 / mean 715.17 ms (8260 samples)
+  pool hold         : p50 5.48 / p99 56.85 / mean 14.52 ms
+  p99 by endpoint   : list 1245.18 · keyset 1239.64 · search 1282.95 ms
+
+RESULT,b-pool2,2-10,100,export,715.17,1234.63,14.52,56.85,715.14,891.53,1250.89,137.67,8260
