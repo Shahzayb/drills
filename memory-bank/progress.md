@@ -8,9 +8,9 @@ None.
 
 ## Next step
 
-Card 21 shipped. Card 24 re-runs `pnpm db:ratelimit` across replicas. Card 29 is card 20's
-stretch in full. Card 26 (the outbox) replaces drill 19's `NOTIFY`. Card 30 starts from drill 15's
-worker.
+Card 22 shipped. Card 24 re-runs `pnpm db:ratelimit` and drill 22's sweep across replicas. Card 29
+is card 20's stretch in full. Card 26 (the outbox) replaces drill 19's `NOTIFY`. Card 30 starts from
+drill 15's worker.
 
 ## Active plan
 
@@ -18,7 +18,7 @@ None open. Every plan in `plans/` is shipped.
 
 ## Live validation
 
-`pnpm docker:up`, then `pnpm db:reset`. `pnpm db:test` runs the backend e2e suite (155 tests). The
+`pnpm docker:up`, then `pnpm db:reset`. `pnpm db:test` runs the backend e2e suite (157 tests). The
 first run after a container recreate had the dev server SIGKILLed at the 1GB limit; rerun.
 
 Each red run MUST fail exactly this many tests (arms in `package.json`); a green red run means the
@@ -26,7 +26,7 @@ switch stopped switching. `db:test:naive` 2 (query budget) · `:notiebreak` 1 ·
 `:noidem` 3 · `:redis` 1 · `:rmw` 2 · `:lww` 4 · `:buffer` 4 · `:skiplast` 15 (two suites) ·
 `:nocache` 1 · `:ttlonly` 2 · `:stampede` 2 · `:nojitter` 1 · `:fixed` 1 · `:fixedrmw` 2 ·
 `:bucketrmw` 1. Green: `:constraint`, `:donothing`, `:locking`, `:serializable`, `:pessimistic`,
-`:restart`, `:invalidate`, `:statswait`.
+`:restart`, `:invalidate`, `:statswait`, `:pool2`.
 
 `pnpm test:ui` runs Playwright (6 tests) on the host (`pnpm exec playwright install chromium`
 once). Red runs: `ASSIGN=lww docker compose up -d nest_server` fails the conflict test;
@@ -37,16 +37,16 @@ once). Red runs: `ASSIGN=lww docker compose up -d nest_server` fails the conflic
 Before measuring:
 
 - `pnpm ui:paint` and `pnpm load page` need `COMPOSE_PROJECT_NAME=drills pnpm docker:up:prod`
-  (`--allow-dev` overrides). The whale's aggregate ranges 1.3–3.5s in a session. `?stats=off`
-  drops the widget; `?cache=nostore` forces the API and the database on every load.
+  (`--allow-dev` overrides). `?stats=off` drops the widget; `?cache=nostore` forces the API and the
+  database on every load.
 - A write made by hand (curl, a `db:*` instrument, a seed) leaves Next's data cache stale until
   `POST /api/revalidate {org, id, cache: "blanket"}` or the fetch-cache directory is deleted.
   Next's cache survives container recreates (bind-mounted `.next`).
 - `pnpm db:import` files and the API's spooled uploads live in container `/tmp`; a recreate
   wipes them. Import runs clean up their rows at the start of the next run, not the end.
 - `IMPORT=buffer` kills the API process; `docker compose restart nest_server` after each run.
-- `pnpm db:quota bench` needs `PG_MAX_CONNECTIONS=200` on `postgres_db`, repeated on every
-  compose call for the sweep.
+- `pnpm db:quota bench`, and `pnpm load pool` past pool 96, need `PG_MAX_CONNECTIONS=200` on
+  `postgres_db`, repeated on every compose call.
 - `db:search writes` leaves dead tuples; take size numbers after a `VACUUM`.
 - `pnpm db:entitle metrics` keeps its snapshot in container `/tmp`; bracket a k6 run with two
   calls.
@@ -94,11 +94,12 @@ Numbered for reference from plans; gaps are retired numbers.
 36. The stats aggregate is still a 5GB scan on the whale, once per TTL per org (drill 20's
     single-flight). The Postgres container's 64MB `/dev/shm` fails ~10 concurrent parallel scans.
 37. The sentiment split is two word lists (`method: 'lexicon'`).
+56. Search and list reads share one pool, so a saturated search queue delays cheap reads (FIFO).
 
 **Ingest, quota and billing**
 
-9. The API-key lookup is uncached, so a 429 still costs a Postgres query. Caching it would keep a revoked key working for the TTL, so
-   revocation needs its own path first.
+9. The API-key lookup is uncached (a 429 still costs a Postgres query); caching it needs a
+   revocation path first.
 10. The ingest partial-failure case needs an outbox (card 26).
 11. The monthly quota (`quota_limit`) is never enforced; drill 19 added only a per-plan rate limit.
 12. The billing period truncates in UTC; orgs carry no billing timezone.
@@ -159,8 +160,8 @@ Numbered for reference from plans; gaps are retired numbers.
 
 ## Releases
 
-From `drill/14` on, each release is tagged on its branch before the merge. No milestones since
-`drill/11`: there were no open issues to attach.
+Since `drill/14`, releases are tagged on the branch before the merge. No milestones since
+`drill/11` (no open issues).
 
 | Tag | Version | Notes |
 |---|---|---|
@@ -173,10 +174,10 @@ From `drill/14` on, each release is tagged on its branch before the merge. No mi
 | [drill/15](https://github.com/Shahzayb/drills/releases/tag/drill/15) | 0.15.0 | — |
 | [drill/16](https://github.com/Shahzayb/drills/releases/tag/drill/16) | 0.16.0 | — |
 | [drill/17](https://github.com/Shahzayb/drills/releases/tag/drill/17) | 0.17.0 | — |
-| [drill/18](https://github.com/Shahzayb/drills/releases/tag/drill/18) | 0.18.0 | PR #17. |
-| [drill/19](https://github.com/Shahzayb/drills/releases/tag/drill/19) | 0.19.0 | PR #18. |
-| [drill/20](https://github.com/Shahzayb/drills/releases/tag/drill/20) | 0.20.0 | PR #19. |
-| [drill/21](https://github.com/Shahzayb/drills/releases/tag/drill/21) | 0.21.0 | PR #20. |
+| [drill/18](https://github.com/Shahzayb/drills/releases/tag/drill/18) | 0.18.0 | — |
+| [drill/19](https://github.com/Shahzayb/drills/releases/tag/drill/19) | 0.19.0 | — |
+| [drill/20](https://github.com/Shahzayb/drills/releases/tag/drill/20) | 0.20.0 | — |
+| [drill/21](https://github.com/Shahzayb/drills/releases/tag/drill/21) | 0.21.0 | — |
 
 ## Preferences
 

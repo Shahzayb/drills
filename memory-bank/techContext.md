@@ -17,8 +17,13 @@ pnpm workspace under Turborepo; `packages/` is empty.
 
 ## Architecture
 
-**Chokepoints.** `src/postgres` owns the `pg` Pool (`max: 10`, 2s connect timeout); every statement
-goes through `query()` or `withClient()`, and `listen()` opens a dedicated LISTEN client.
+**Chokepoints.** `src/postgres` owns the `pg` Pool (`max: PG_POOL_MAX`, default 10; 2s connect
+timeout, which also fails a queued acquire); every statement goes through `query()` or
+`withClient()`, both via one timed `acquire()`, and `listen()` opens a dedicated LISTEN client.
+Acquire wait and hold are always on `/metrics` (`pg_pool_acquire_wait_seconds`,
+`pg_pool_hold_seconds`, `pg_pool_acquire_errors_total`) and, in `QUERY_COUNTER=header` mode, on
+every response (`x-pool-wait-ms`, `x-pool-hold-ms`). Drill 22 measured the knee at 32–48 for one
+replica; the default stays 10 so earlier baselines stay comparable.
 `src/redis` owns the ioredis client (2s command timeout, one retry, `lazyConnect`) and grows one
 method per command. Both are `@Global()`. ESLint forbids importing `PostgresService` outside
 `tenancy/`, `postgres/`, `health/`, `info/`, `ingest/api-key.guard.ts` and
@@ -125,7 +130,8 @@ re-read after winning, release via `RedisService.delIfEquals` (Lua). `wait` poll
   switch cannot reach its reader; `pnpm arms` asks the running API what it resolved.
 - **Instruments.** `db:explain`, `db:paging`, `db:search`, `db:storm`, `db:quota`, `db:claim`,
   `db:import`, `db:schema` (its `backfill` is a real operation between migrations 015 and 016),
-  `db:entitle`, `db:stampede`, `db:ratelimit`, `db:bench`; `pnpm load list|search|write|ingest|page`; `pnpm ui:paint`. Each has
+  `db:entitle`, `db:stampede`, `db:ratelimit`, `db:pool`, `db:bench`;
+  `pnpm load list|search|write|ingest|page|pool`; `pnpm ui:paint`. Each has
   `--help`; each plan documents its own.
 - **Observability.** `db:stats:on|stats|stats:reset` (`pg_stat_statements`), `db:log:on|off|status`,
   `db:activity`, `logs:trace <rid>`, `trace:on|off` (collector + Jaeger under the `trace` profile).
@@ -163,6 +169,11 @@ re-read after winning, release via `RedisService.delIfEquals` (Lua). `wait` poll
   is small on purpose; `wal_level=minimal` rules out replicas and logical decoding.
 - `shared_preload_libraries` needs a recreate (`PG_PRELOAD=pg_stat_statements`); `ALTER SYSTEM`
   persists in the volume across `down`.
+- PG 18's `io_method = worker` sends every read that misses `shared_buffers` through 3 `io_workers`
+  (`IO:AioIoCompletion`, `LWLock:AioWorkerSubmissionQueue`). The mid-org search is read-bound at
+  ~1.5M blocks/s.
+- `max_connections` (100) minus 3 superuser slots leaves the app role 97, shared by every replica's
+  pool and LISTEN client. Past it each new connection fails (53300) and so does its request.
 - `pnpm db:reset` keeps roles (cluster objects); migration 003 guards `CREATE ROLE`.
 - A table with an FK to `organizations` must join `seed.mts`'s TRUNCATE list or the seed fails
   with 0A000.
@@ -178,6 +189,10 @@ re-read after winning, release via `RedisService.delIfEquals` (Lua). `wait` poll
 - RLS blocks index paths for non-leakproof operators. Only `@@` is fixed, and LEAKPROOF does not
   survive `pg_dump`/restore or a major upgrade.
 - Inside the scope `count(*)` counts one tenant, and `pg_stats` is empty for non-owners.
+- Behind a transaction pooler only `set_config(…, true)` is safe: a session-level GUC stays on the
+  pooled server connection and scopes the next client to the wrong tenant. LISTEN, session `SET`,
+  session advisory locks and named prepared statements (unless `max_prepared_statements` > 0) break
+  too (`pnpm db:pool bouncer`, pgbouncer under `profiles: ['pgbouncer']`).
 - SECURITY DEFINER needs `SET search_path = pg_catalog, public`. `app_user` has no SELECT on
   `api_keys`: a WHERE or RETURNING is `permission denied`, a filterless DELETE in `withOrg` works.
 
@@ -256,6 +271,8 @@ re-read after winning, release via `RedisService.delIfEquals` (Lua). `wait` poll
   `pg_stat_database.xact_rollback`.
 - A sub-second stampede is invisible at a 15s scrape; count it per request (`x-stats-cache`).
 - `Promise.all` of two pool queries takes two connections per request.
+- Under a closed model, instant failures inflate req/s; count commits. Behind a pooler the app's
+  acquire wait reads ~0 and the queue hides in hold time; read pgbouncer's `SHOW POOLS`.
 - k6: `http_req_failed.passes` counts failures; `handleSummary` replaces k6's summary; a closed
   model cannot show an outage (`dropped_iterations` exists only for arrival-rate executors); a
   tagged sub-metric needs a threshold; a counter's `rate` includes warm-up; p99 needs
