@@ -1,0 +1,20 @@
+ratelimit concurrent  api http://nest_server:3002
+  PLAN                 basic                        (default)
+  ROUNDS               3                            (default)
+  BURST                0                            (default)
+  GAP_MS               1000                         (default)
+  REQUESTS             2000                         (default)
+  COLD                 0                            (default)
+
+  server arm  rateLimit=bucket-rmw
+
+  round 1  org 1072  limit 600  admitted 1475/2000 in 1.86s  contract 618.6  error +138.45%
+    statuses {"201":1475,"429":525}  x-entitlement {"hit":2000}  unmetered 0  /metrics allowed 1475 limited 525
+
+  round 2  org 1073  limit 600  admitted 2000/2000 in 1.49s  contract 614.9  error +225.23%
+    statuses {"201":2000}  x-entitlement {"hit":2000}  unmetered 0  /metrics allowed 2000 limited 0
+
+  round 3  org 1074  limit 600  admitted 2000/2000 in 1.39s  contract 613.9  error +225.81%
+    statuses {"201":2000}  x-entitlement {"hit":2000}  unmetered 0  /metrics allowed 2000 limited 0
+
+  bucket-rmw concurrent: admitted median 2000  error median +225.23%  min +138.45%  max +225.81%

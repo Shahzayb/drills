@@ -140,6 +140,15 @@ async function decisions(): Promise<{ allowed: number; limited: number }> {
   };
 }
 
+/** What the arm's key holds after the attack. On an rmw arm it is far below what was admitted. */
+async function stored(org: string): Promise<string> {
+  const key = `rl:v2:ingest:${armState?.rateLimit ?? '?'}:org:${org}`;
+  if ((await redis.type(key)) === 'hash') {
+    return JSON.stringify(await redis.hgetall(key));
+  }
+  return (await redis.get(key)) ?? '(none)';
+}
+
 /** Admitted against B + r·T, with B = L and r = L/60 per second. T is the attack's outer span. */
 function score(shots: Shot[], limit: number) {
   const spanMs =
@@ -232,12 +241,14 @@ async function concurrent() {
     const before = await decisions();
     const shots = await burst(org, key, REQUESTS);
     const after = await decisions();
+    const state = await stored(org);
 
     const s = score(shots, limit);
     const row = {
       round,
       limit,
       requests: REQUESTS,
+      stored: state,
       ...s,
       ...tally(shots),
       metrics: {
@@ -250,8 +261,9 @@ async function concurrent() {
       `  round ${round}  org ${org}  limit ${limit}  admitted ${s.admitted}/${REQUESTS} in ${(s.spanMs / 1000).toFixed(2)}s  contract ${s.contract.toFixed(1)}  error ${pct(s.error)}`,
     );
     console.log(
-      `    statuses ${JSON.stringify(row.statuses)}  x-entitlement ${JSON.stringify(row.entitlement)}  unmetered ${row.unmetered}  /metrics allowed ${row.metrics.allowed} limited ${row.metrics.limited}\n`,
+      `    statuses ${JSON.stringify(row.statuses)}  x-entitlement ${JSON.stringify(row.entitlement)}  unmetered ${row.unmetered}  /metrics allowed ${row.metrics.allowed} limited ${row.metrics.limited}`,
     );
+    console.log(`    stored after: ${state}\n`);
   }
   return rows;
 }

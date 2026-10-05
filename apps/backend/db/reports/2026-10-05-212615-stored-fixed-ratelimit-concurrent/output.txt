@@ -1,0 +1,15 @@
+ratelimit concurrent  api http://nest_server:3002
+  PLAN                 basic                        (default)
+  ROUNDS               1                            (env)
+  BURST                0                            (default)
+  GAP_MS               1000                         (default)
+  REQUESTS             2000                         (default)
+  COLD                 0                            (default)
+
+  server arm  rateLimit=fixed
+
+  round 1  org 1089  limit 600  admitted 600/2000 in 1.78s  contract 617.9  error -2.89%
+    statuses {"201":600,"429":1400}  x-entitlement {"hit":2000}  unmetered 0  /metrics allowed 600 limited 1400
+    stored after: 2000
+
+  fixed concurrent: admitted median 600  error median -2.89%  min -2.89%  max -2.89%

@@ -1,0 +1,17 @@
+ratelimit boundary  api http://nest_server:3002
+  PLAN                 basic                        (default)
+  ROUNDS               1                            (default)
+  BURST                0                            (default)
+  GAP_MS               1000                         (default)
+  REQUESTS             2000                         (default)
+  COLD                 0                            (default)
+
+  server arm  rateLimit=fixed-rmw
+
+  round 1  org 1082  limit 600  opener 201  boundary in 60s
+    burst 1 at edge-1000ms: 600/600 admitted, done 246ms before the edge
+    burst 2 at edge+1000ms: 600/600 admitted
+    admitted 1200 in 2.50s  contract 625.0  error +92.00%
+    statuses {"201":1200}  unmetered 0  /metrics allowed 1200 limited 0
+
+  fixed-rmw boundary: admitted median 1200  error median +92.00%  min +92.00%  max +92.00%

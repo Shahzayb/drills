@@ -1,0 +1,17 @@
+ratelimit boundary  api http://nest_server:3002
+  PLAN                 basic                        (default)
+  ROUNDS               1                            (default)
+  BURST                0                            (default)
+  GAP_MS               1000                         (default)
+  REQUESTS             2000                         (default)
+  COLD                 0                            (default)
+
+  server arm  rateLimit=bucket
+
+  round 1  org 1079  limit 600  opener 201  boundary in 60s
+    burst 1 at edge-1000ms: 600/600 admitted, done 392ms before the edge
+    burst 2 at edge+1000ms: 21/600 admitted
+    admitted 621 in 2.26s  contract 622.6  error -0.25%
+    statuses {"201":621,"429":579}  unmetered 0  /metrics allowed 621 limited 579
+
+  bucket boundary: admitted median 621  error median -0.25%  min -0.25%  max -0.25%

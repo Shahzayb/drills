@@ -1,0 +1,15 @@
+ratelimit concurrent  api http://nest_server:3002
+  PLAN                 basic                        (default)
+  ROUNDS               1                            (env)
+  BURST                0                            (default)
+  GAP_MS               1000                         (default)
+  REQUESTS             2000                         (default)
+  COLD                 0                            (default)
+
+  server arm  rateLimit=fixed-rmw
+
+  round 1  org 1087  limit 600  admitted 1429/2000 in 1.85s  contract 618.5  error +131.03%
+    statuses {"201":1429,"429":571}  x-entitlement {"hit":2000}  unmetered 0  /metrics allowed 1429 limited 571
+    stored after: {"count":600,"resetAt":1791235607397}
+
+  fixed-rmw concurrent: admitted median 1429  error median +131.03%  min +131.03%  max +131.03%
