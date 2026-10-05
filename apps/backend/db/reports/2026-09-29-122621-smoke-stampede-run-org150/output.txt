@@ -1,0 +1,67 @@
+stampede run  api http://nest_server:3002
+  ORG_ID               150                          (default)
+  RATE                 200                          (env)
+  SECONDS              8                            (env)
+  EXPIRE_AT            4                            (env)
+  BUCKET_MS            100                          (default)
+
+  server arms  statsCache=stale statsTtlS=30 statsTtlJitter=0.2 entitlementCache=notify
+
+  pre-warm  miss  key PTTL 259,031ms (must outlive the run)
+
+  around the forced expiry (t = 0), 100ms buckets; requests by send time, DB calls by sample time
+     t_ms   sent  err    p50    p99   hit  miss  wait stale  refr   DB  in-flight
+     -500     19    0    2.5    3.6    19     0     0     0     0    0    0  
+     -400     20    0    2.6    5.1    20     0     0     0     0    0    0  
+     -300     20    0    2.9    4.5    20     0     0     0     0    0    0  
+     -200     21    0    2.5    3.5    21     0     0     0     0    0    0  
+     -100     19    0    2.6    3.3    19     0     0     0     0    0    0  
+        0     20    0    2.8    4.3    15     0     0     4     1    0    1  
+      100     21    0    2.5    3.4    21     0     0     0     0    1    0  #
+      200     19    0    2.5    3.0    19     0     0     0     0    0    0  
+      300     20    0    2.5    4.4    20     0     0     0     0    0    0  
+      400     20    0    2.4    3.2    20     0     0     0     0    0    0  
+      500     20    0    2.5    3.5    20     0     0     0     0    0    0  
+      600     21    0    3.0    4.4    21     0     0     0     0    0    0  
+      700     19    0    2.6    5.7    19     0     0     0     0    0    0  
+      800     20    0    3.3    4.6    20     0     0     0     0    0    0  
+      900     21    0    2.7    4.0    21     0     0     0     0    0    0  
+     1000     19    0    2.8    4.9    19     0     0     0     0    0    0  
+     1100     21    0    2.3    2.6    21     0     0     0     0    0    0  
+     1200     20    0    2.8   10.3    20     0     0     0     0    0    0  
+     1300     19    0    2.5    4.4    19     0     0     0     0    0    0  
+     1400     20    0    2.6    3.9    20     0     0     0     0    0    0  
+     1500     21    0    2.6    3.7    21     0     0     0     0    0    0  
+     1600     20    0    2.3    3.3    20     0     0     0     0    0    0  
+     1700     20    0    2.3    3.4    20     0     0     0     0    0    0  
+     1800     19    0    2.4    3.8    19     0     0     0     0    0    0  
+     1900     21    0    2.5    3.8    21     0     0     0     0    0    0  
+     2000     19    0    3.0    4.2    19     0     0     0     0    0    0  
+     2100     20    0    2.5    3.7    20     0     0     0     0    0    0  
+     2200     20    0    2.5    3.3    20     0     0     0     0    0    0  
+     2300     21    0    2.5    3.3    21     0     0     0     0    0    0  
+     2400     20    0    2.4    3.4    20     0     0     0     0    0    0  
+
+  per second over the run
+     s    sent  err    p50     p99   DB  ent
+     0    199    0    2.6     5.3    0    0
+     1    200    0    2.7     4.9    0    0
+     2    200    0    2.7     4.8    0    0
+     3    200    0    2.6     5.0    0    0
+     4    200    0    2.6     4.6    1    0
+     5    200    0    2.4     5.6    0    0
+     6    200    0    2.5     4.8    0    0
+     7    200    0    2.5     4.5    0    0
+
+  N, the stats aggregate's executions during the run, three ways
+    pg_stat_statements calls      1
+    /metrics stats_recomputes     1
+    client miss+refresh+db        1
+  miss window: requests sent 20.6ms after the expiry still got no fresh value (5 requests)
+  peak: 1 executions in one 100ms bucket, 1 duplicates in flight
+
+  latency by send time            n      p50      p99      max  errors
+    before the expiry            799      2.6      4.9      6.8       0
+    first 2s after               401      2.5      4.8     10.3       0
+    the rest                     399      2.5      4.5      5.0       0
+  sources: hit=1594 refresh=1 stale=4  dropped=0

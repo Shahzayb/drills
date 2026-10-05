@@ -1,11 +1,14 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Headers, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { QueryBudget } from '../observability/query-budget.decorator';
+import { SERVED_AT_HEADER } from '../observability/request-context';
 import { OrgId } from '../tenancy/org-id.decorator';
 import { SearchMessagesQuery } from './dto/search-messages.query';
 import {
   MessageSearchResult,
   MessageStats,
   SearchService,
+  STATS_CACHE_HEADER,
 } from './search.service';
 
 /**
@@ -39,13 +42,29 @@ export class SearchController {
 
   /**
    * Card 17's widget. One aggregate over the org's messages, one statement,
-   * and slow for the whale by design — see SearchService.stats(). The budget
-   * is exact for the same reason search's is: a second statement here would be
-   * a second scan of ten million rows.
+   * and slow for the whale by design — see SearchService.stats(). A recompute
+   * costs exactly one statement and a cache hit costs none; a second statement
+   * here would be a second scan of ten million rows.
+   *
+   * A cached answer carries the time Postgres computed it in `x-served-at`, so
+   * drill 18's "predates the question" predicate reports its true age.
    */
   @Get('stats')
   @QueryBudget(1)
-  stats(@OrgId() orgId: string): Promise<MessageStats> {
-    return this.search.stats(orgId);
+  async stats(
+    @OrgId() orgId: string,
+    @Headers('cache-control') cacheControl: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<MessageStats> {
+    const answer = await this.search.stats(
+      orgId,
+      /\bno-cache\b/i.test(cacheControl ?? ''),
+    );
+    response.setHeader(STATS_CACHE_HEADER, answer.source);
+    response.setHeader(
+      SERVED_AT_HEADER,
+      new Date(answer.computedAt).toISOString(),
+    );
+    return answer.stats;
   }
 }

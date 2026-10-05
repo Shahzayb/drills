@@ -5,7 +5,12 @@ import {
   KEYSET_TIEBREAK,
   LIST_STRATEGY,
 } from '../conversations/conversations.service';
-import { SEARCH_STRATEGY } from '../search/search.service';
+import {
+  SEARCH_STRATEGY,
+  STATS_CACHE,
+  STATS_TTL_JITTER,
+  STATS_TTL_S,
+} from '../search/search.service';
 import {
   IDEMPOTENCY,
   IDEMPOTENCY_TTL_SECONDS,
@@ -54,6 +59,9 @@ export interface InfoResponse {
     importOnFail: string;
     entitlementCache: string;
     entitlementTtlS: string;
+    statsCache: string;
+    statsTtlS: string;
+    statsTtlJitter: string;
     queryCounter: string;
     logLevel: string;
     tracing: string;
@@ -103,6 +111,9 @@ export class InfoController {
         importOnFail: IMPORT_ON_FAIL,
         entitlementCache: ENTITLEMENT_CACHE,
         entitlementTtlS: String(ENTITLEMENT_TTL_S),
+        statsCache: STATS_CACHE,
+        statsTtlS: String(STATS_TTL_S),
+        statsTtlJitter: String(STATS_TTL_JITTER),
         queryCounter: QUERY_COUNTER_MODE,
         logLevel: logger.level,
         tracing: TRACING_ENABLED ? 'on' : 'off',
