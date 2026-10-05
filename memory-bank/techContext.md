@@ -95,8 +95,11 @@ are cached as `{plan:null}`. `ENTITLEMENT_CACHE=off|ttl|invalidate|notify`, defa
 trigger from migration `1790121900000` sends `pg_notify('entitlements', id)` on a plan change and
 a LISTEN client (`application_name = listen:entitlements`, reconnect after 1s, no flush on
 reconnect) deletes the key. `PUT /entitlements/plan` commits, then deletes. Only API-key traffic
-is rate-limited (`plan_limits.ingest_per_minute`, a fixed window via `MULTI INCR / EXPIRE NX /
-PTTL`; pro is NULL = unlimited). The read runs with `{ counted: false }`, so `@QueryBudget` does
+is rate-limited (`plan_limits.ingest_per_minute` = L; pro is NULL = unlimited).
+`RATE_LIMIT=fixed|fixed-rmw|bucket-rmw|bucket` (drill 21, default `bucket`): a token bucket with
+burst L and refill L/60 per second in one Lua script (`RedisService.takeToken`) on Redis `TIME`.
+Keys `rl:v2:ingest:<arm>:org:<id>`. Headers: IETF draft-11 `RateLimit-Policy`/`RateLimit`, and
+`Retry-After` on a 429. The read runs with `{ counted: false }`, so `@QueryBudget` does
 not see it; `x-entitlement: hit|miss|db|error` and `GET /metrics` (Prometheus counters) do.
 
 **Stats cache (drill 20).** `SearchService.stats()` caches the aggregate as `stats:v1:org:<id>`, an
@@ -122,7 +125,7 @@ re-read after winning, release via `RedisService.delIfEquals` (Lua). `wait` poll
   switch cannot reach its reader; `pnpm arms` asks the running API what it resolved.
 - **Instruments.** `db:explain`, `db:paging`, `db:search`, `db:storm`, `db:quota`, `db:claim`,
   `db:import`, `db:schema` (its `backfill` is a real operation between migrations 015 and 016),
-  `db:entitle`, `db:stampede`, `db:bench`; `pnpm load list|search|write|ingest|page`; `pnpm ui:paint`. Each has
+  `db:entitle`, `db:stampede`, `db:ratelimit`, `db:bench`; `pnpm load list|search|write|ingest|page`; `pnpm ui:paint`. Each has
   `--help`; each plan documents its own.
 - **Observability.** `db:stats:on|stats|stats:reset` (`pg_stat_statements`), `db:log:on|off|status`,
   `db:activity`, `logs:trace <rid>`, `trace:on|off` (collector + Jaeger under the `trace` profile).
@@ -236,6 +239,9 @@ re-read after winning, release via `RedisService.delIfEquals` (Lua). `wait` poll
 - A stampede is rate × recompute time duplicates; it turns into failures once they exceed the pool
   (10). Single-flight fixes one key; keys filled together (flush, key-version bump) stay in step
   until jitter spreads them, and nothing but warming helps the first cycle.
+- A Redis read-compute-write is atomic only in Lua (or WATCH on a dedicated connection). MULTI
+  cannot branch on a read; ioredis puts every command of the process on one socket, so concurrent
+  GET-then-SET callers all read the same value. INCR-first windows are atomic without either.
 - Nest runs global guards before controller guards, so code that needs `ApiKeyGuard`'s org is an
   interceptor.
 

@@ -8,8 +8,9 @@ None.
 
 ## Next step
 
-Card 20 shipped (alternatives SQ3, SQ6; card 29 is its stretch in full). Card 26 (the outbox)
-replaces drill 19's `NOTIFY`. Card 30 has its path in drill 15's worker.
+Card 21 shipped. Card 24 re-runs `pnpm db:ratelimit` across replicas. Card 29 is card 20's
+stretch in full. Card 26 (the outbox) replaces drill 19's `NOTIFY`. Card 30 starts from drill 15's
+worker.
 
 ## Active plan
 
@@ -17,14 +18,15 @@ None open. Every plan in `plans/` is shipped.
 
 ## Live validation
 
-`pnpm docker:up`, then `pnpm db:reset`. `pnpm db:test` runs the backend e2e suite (153 tests). The
+`pnpm docker:up`, then `pnpm db:reset`. `pnpm db:test` runs the backend e2e suite (155 tests). The
 first run after a container recreate had the dev server SIGKILLed at the 1GB limit; rerun.
 
 Each red run MUST fail exactly this many tests (arms in `package.json`); a green red run means the
 switch stopped switching. `db:test:naive` 2 (query budget) · `:notiebreak` 1 · `:like` 1 ·
 `:noidem` 3 · `:redis` 1 · `:rmw` 2 · `:lww` 4 · `:buffer` 4 · `:skiplast` 15 (two suites) ·
-`:nocache` 1 · `:ttlonly` 2 · `:stampede` 2 · `:nojitter` 1. Green: `:constraint`, `:donothing`,
-`:locking`, `:serializable`, `:pessimistic`, `:restart`, `:invalidate`, `:statswait`.
+`:nocache` 1 · `:ttlonly` 2 · `:stampede` 2 · `:nojitter` 1 · `:fixed` 1 · `:fixedrmw` 2 ·
+`:bucketrmw` 1. Green: `:constraint`, `:donothing`, `:locking`, `:serializable`, `:pessimistic`,
+`:restart`, `:invalidate`, `:statswait`.
 
 `pnpm test:ui` runs Playwright (6 tests) on the host (`pnpm exec playwright install chromium`
 once). Red runs: `ASSIGN=lww docker compose up -d nest_server` fails the conflict test;
@@ -95,7 +97,7 @@ Numbered for reference from plans; gaps are retired numbers.
 
 **Ingest, quota and billing**
 
-9. The API-key lookup is uncached. Caching it would keep a revoked key working for the TTL, so
+9. The API-key lookup is uncached, so a 429 still costs a Postgres query. Caching it would keep a revoked key working for the TTL, so
    revocation needs its own path first.
 10. The ingest partial-failure case needs an outbox (card 26).
 11. The monthly quota (`quota_limit`) is never enforced; drill 19 added only a per-plan rate limit.
@@ -129,7 +131,7 @@ Numbered for reference from plans; gaps are retired numbers.
     `AND col IS NULL` guard protects them, untested.
 34. `lock_timeout` is on migration 016 only; nothing checks later migrations.
 
-**Caching (drills 18, 19)**
+**Caching (drills 18–21)**
 
 42. Writes outside the Server Actions never revalidate Next's cache (ingest, imports, curl,
     instruments); the list and row stay stale until a tag expires.
@@ -140,10 +142,11 @@ Numbered for reference from plans; gaps are retired numbers.
 49. `plan_limits` edits invalidate nothing; they wait out every key's TTL.
 50. Redis sits on every org-scoped request with a 2s command timeout and no circuit breaker. Redis
     stopped under load: p50 0.8–3.4s, stats 503, entitlements to Postgres (drill 20).
-51. The ingest limiter is a fixed window (2× burst across a boundary) and fails open.
+51. The ingest limiter fails open, and a 400 costs a token.
 53. `notify` loses messages while its listener is disconnected and does not flush on reconnect;
     a listener stuck in a transaction can fill the NOTIFY queue and fail plan-changing commits.
-54. Entitlement misses are not coalesced; a cold key costs one Postgres read per concurrent request.
+54. Entitlement misses are not coalesced; a cold key under 2,000 concurrent ingests cost 40–209
+    Postgres reads (drill 21).
 55. Stats waiters poll every 25ms (the wait floor); no in-process single-flight; a quiet org can
     serve a value 10 TTLs old; a flushed cache refills every key at once (pool timeouts).
 
@@ -162,17 +165,17 @@ From `drill/14` on, each release is tagged on its branch before the merge. No mi
 | Tag | Version | Notes |
 |---|---|---|
 | [drill/09](https://github.com/Shahzayb/drills/releases/tag/drill/09) | 0.9.0 | First release cut; milestone `drill/09` (closed). `drill/01`/`drill/02` exist locally only. |
-| [drill/10](https://github.com/Shahzayb/drills/releases/tag/drill/10) | 0.10.0 | Keyset pagination; milestone `drill/10`. |
-| [drill/11](https://github.com/Shahzayb/drills/releases/tag/drill/11) | 0.11.0 | Full-text search; milestone `drill/11`. |
-| [drill/12](https://github.com/Shahzayb/drills/releases/tag/drill/12) | 0.12.0 | Idempotent ingest. |
-| [drill/13](https://github.com/Shahzayb/drills/releases/tag/drill/13) | 0.13.0 | The lost update. |
-| [drill/14](https://github.com/Shahzayb/drills/releases/tag/drill/14) | 0.14.0 | Optimistic locking. Pre-merge `--generate-notes` is a changelog link only; add `--notes`. |
-| [drill/15](https://github.com/Shahzayb/drills/releases/tag/drill/15) | 0.15.0 | Streaming CSV import. |
-| [drill/16](https://github.com/Shahzayb/drills/releases/tag/drill/16) | 0.16.0 | Zero-downtime schema change. |
-| [drill/17](https://github.com/Shahzayb/drills/releases/tag/drill/17) | 0.17.0 | Streaming the inbox with Suspense. |
-| [drill/18](https://github.com/Shahzayb/drills/releases/tag/drill/18) | 0.18.0 | Next's cache layers. PR #17. |
-| [drill/19](https://github.com/Shahzayb/drills/releases/tag/drill/19) | 0.19.0 | Entitlement cache and its staleness window. PR #18. |
-| [drill/20](https://github.com/Shahzayb/drills/releases/tag/drill/20) | 0.20.0 | Cache stampede, single-flight, jitter. PR #19. |
+| [drill/10](https://github.com/Shahzayb/drills/releases/tag/drill/10) | 0.10.0 | Milestone `drill/10`. |
+| [drill/11](https://github.com/Shahzayb/drills/releases/tag/drill/11) | 0.11.0 | Milestone `drill/11`. |
+| [drill/12](https://github.com/Shahzayb/drills/releases/tag/drill/12) | 0.12.0 | — |
+| [drill/13](https://github.com/Shahzayb/drills/releases/tag/drill/13) | 0.13.0 | — |
+| [drill/14](https://github.com/Shahzayb/drills/releases/tag/drill/14) | 0.14.0 | Pre-merge `--generate-notes` is a changelog link only; add `--notes`. |
+| [drill/15](https://github.com/Shahzayb/drills/releases/tag/drill/15) | 0.15.0 | — |
+| [drill/16](https://github.com/Shahzayb/drills/releases/tag/drill/16) | 0.16.0 | — |
+| [drill/17](https://github.com/Shahzayb/drills/releases/tag/drill/17) | 0.17.0 | — |
+| [drill/18](https://github.com/Shahzayb/drills/releases/tag/drill/18) | 0.18.0 | PR #17. |
+| [drill/19](https://github.com/Shahzayb/drills/releases/tag/drill/19) | 0.19.0 | PR #18. |
+| [drill/20](https://github.com/Shahzayb/drills/releases/tag/drill/20) | 0.20.0 | PR #19. |
 
 ## Preferences
 
