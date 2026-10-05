@@ -176,6 +176,7 @@ From `drill/14` on, each release is tagged on its branch before the merge. No mi
 | [drill/18](https://github.com/Shahzayb/drills/releases/tag/drill/18) | 0.18.0 | PR #17. |
 | [drill/19](https://github.com/Shahzayb/drills/releases/tag/drill/19) | 0.19.0 | PR #18. |
 | [drill/20](https://github.com/Shahzayb/drills/releases/tag/drill/20) | 0.20.0 | PR #19. |
+| [drill/21](https://github.com/Shahzayb/drills/releases/tag/drill/21) | 0.21.0 | PR #20. |
 
 ## Preferences
 
