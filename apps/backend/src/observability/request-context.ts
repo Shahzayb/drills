@@ -35,6 +35,10 @@ export interface RequestContext {
   // request legitimately breaches its @QueryBudget. See
   // plans/2026-09-07_drill-13-lost-update.md.
   retries: number;
+  // Card 22. Time this request spent waiting for a pool connection, and holding
+  // one. Summed over every acquire. See plans/2026-10-06_drill-22-connection-pool-knee.md.
+  poolWaitMs: number;
+  poolHoldMs: number;
 }
 
 const storage = new AsyncLocalStorage<RequestContext>();
@@ -80,6 +84,91 @@ export function recordRoundTrip(): void {
 export function recordRetry(): void {
   const store = storage.getStore();
   if (store) store.retries += 1;
+}
+
+// Seconds, Prometheus-style cumulative buckets: from an idle connection handed
+// over at once to the 2s acquire timeout.
+const POOL_BUCKETS = [
+  0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5,
+];
+
+interface Histogram {
+  buckets: number[];
+  sum: number;
+  count: number;
+}
+
+const histogram = (): Histogram => ({
+  buckets: POOL_BUCKETS.map(() => 0),
+  sum: 0,
+  count: 0,
+});
+
+// Process-wide, always on: unlike the per-request sums, these are the shipped
+// metric, so QUERY_COUNTER=off does not hide them.
+const poolWait = histogram();
+const poolHold = histogram();
+const poolErrors = { timeout: 0, connect: 0 };
+
+function observe(h: Histogram, ms: number): void {
+  const s = ms / 1000;
+  h.sum += s;
+  h.count += 1;
+  for (let i = 0; i < POOL_BUCKETS.length; i++) {
+    if (s <= POOL_BUCKETS[i]) h.buckets[i] += 1;
+  }
+}
+
+/** Called once per pool acquire, with how long `pool.connect()` took. Card 22. */
+export function recordPoolWait(ms: number): void {
+  observe(poolWait, ms);
+  if (!COUNTING_ENABLED) return;
+  const store = storage.getStore();
+  if (store) store.poolWaitMs += ms;
+}
+
+/** Called once per release, with how long the connection was held. */
+export function recordPoolHold(ms: number): void {
+  observe(poolHold, ms);
+  if (!COUNTING_ENABLED) return;
+  const store = storage.getStore();
+  if (store) store.poolHoldMs += ms;
+}
+
+/** An acquire that failed: pg-pool's queue timeout, or a refused new connection. */
+export function recordPoolError(reason: keyof typeof poolErrors): void {
+  poolErrors[reason] += 1;
+}
+
+const renderHistogram = (name: string, help: string, h: Histogram) => [
+  `# HELP ${name} ${help}`,
+  `# TYPE ${name} histogram`,
+  ...POOL_BUCKETS.map((le, i) => `${name}_bucket{le="${le}"} ${h.buckets[i]}`),
+  `${name}_bucket{le="+Inf"} ${h.count}`,
+  `${name}_sum ${h.sum}`,
+  `${name}_count ${h.count}`,
+];
+
+/** Card 22's lines on GET /metrics. Lives here because ESLint keeps postgres.service out of controllers. */
+export function poolMetrics(): string {
+  return [
+    ...renderHistogram(
+      'pg_pool_acquire_wait_seconds',
+      'Time from asking the pool for a connection to holding one.',
+      poolWait,
+    ),
+    ...renderHistogram(
+      'pg_pool_hold_seconds',
+      'Time a connection was checked out, acquire to release.',
+      poolHold,
+    ),
+    '# HELP pg_pool_acquire_errors_total Acquires that failed: queue timeout or a refused connection.',
+    '# TYPE pg_pool_acquire_errors_total counter',
+    ...Object.entries(poolErrors).map(
+      ([reason, n]) => `pg_pool_acquire_errors_total{reason="${reason}"} ${n}`,
+    ),
+    '',
+  ].join('\n');
 }
 
 /**

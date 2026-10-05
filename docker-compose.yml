@@ -214,6 +214,9 @@ services:
       - STATS_TTL_S=${STATS_TTL_S:-}
       # Share of the TTL removed at random per fill, 0 to 1. Empty means 0.2.
       - STATS_TTL_JITTER=${STATS_TTL_JITTER:-}
+      # Card 22: connections in the API's pg pool. Empty means 10. The sweep and the knee are in
+      # plans/2026-10-06_drill-22-connection-pool-knee.md.
+      - PG_POOL_MAX=${PG_POOL_MAX:-}
       # off | on | header — see apps/backend/src/observability/query-counter.ts.
       # Empty forwards through to that module's own default ('on').
       - QUERY_COUNTER=${QUERY_COUNTER:-}

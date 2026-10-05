@@ -93,6 +93,7 @@ describe('GET /info arms (e2e)', () => {
         : 'stale',
       statsTtlS: process.env.STATS_TTL_S || '30',
       statsTtlJitter: String(Number(process.env.STATS_TTL_JITTER || '0.2')),
+      poolMax: process.env.PG_POOL_MAX || '10',
       queryCounter:
         process.env.QUERY_COUNTER === 'off' ||
         process.env.QUERY_COUNTER === 'header'

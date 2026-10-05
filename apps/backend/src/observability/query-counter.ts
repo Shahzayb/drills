@@ -27,6 +27,10 @@ export const QUERY_COUNTER_MODE: QueryCounterMode =
  *  production — see the mode's own comment above. */
 export const QUERY_COUNT_HEADER = 'x-query-count';
 
+/** Card 22, same mode as above: milliseconds this request waited for, and held, pool connections. */
+export const POOL_WAIT_HEADER = 'x-pool-wait-ms';
+export const POOL_HOLD_HEADER = 'x-pool-hold-ms';
+
 /**
  * Transaction restarts, on every response that had any.
  *
