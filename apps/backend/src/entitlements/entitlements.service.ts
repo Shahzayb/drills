@@ -29,7 +29,32 @@ export const ENTITLEMENT_TTL_S = Number(process.env.ENTITLEMENT_TTL_S || '30');
 export const PLANS = ['free', 'basic', 'pro'] as const;
 export type Plan = (typeof PLANS)[number];
 
-/** The rate-limit window. Fixed, anchored at the first request in it. */
+/**
+ * How API-key ingest is metered: algorithm × atomicity.
+ *
+ * - `fixed`       drill 19's window: INCR first, then compare. Atomic; admits 2× across a boundary.
+ * - `fixed-rmw`   GET, compare, SET. The naive window: the boundary bug plus a race.
+ * - `bucket-rmw`  a token bucket computed in Node between a GET and a SET. The race alone.
+ * - `bucket`      the same bucket in one Lua script. Shipped.
+ *
+ * See plans/2026-10-06_drill-21-rate-limit-burst-boundary.md.
+ */
+export type RateLimitMode = 'fixed' | 'fixed-rmw' | 'bucket-rmw' | 'bucket';
+
+const RATE_LIMIT_MODES: RateLimitMode[] = [
+  'fixed',
+  'fixed-rmw',
+  'bucket-rmw',
+  'bucket',
+];
+
+export const RATE_LIMIT: RateLimitMode = RATE_LIMIT_MODES.includes(
+  process.env.RATE_LIMIT as RateLimitMode,
+)
+  ? (process.env.RATE_LIMIT as RateLimitMode)
+  : 'bucket';
+
+/** A fixed window's length, anchored at its first request. A bucket holds `L` and refills `L` per window. */
 export const INGEST_WINDOW_S = 60;
 
 export const ENTITLEMENT_HEADER = 'x-entitlement';
@@ -55,16 +80,24 @@ export interface Resolved {
   source: LookupSource;
 }
 
-export interface WindowUse {
+export interface Decision {
   limit: number;
-  count: number;
-  resetMs: number;
+  allowed: boolean;
+  remaining: number;
+  /** Seconds until the window resets, or until the bucket is full. */
+  resetS: number;
+  /** Seconds until a retry can be admitted. 0 when allowed. */
+  retryAfterS: number;
 }
 
 /** `v1` versions the value's shape: a deploy that changes it reads a new key, never an old shape. */
 export const entitlementKey = (orgId: string) => `ent:v1:org:${orgId}`;
 
-const ingestWindowKey = (orgId: string) => `rl:v1:ingest:org:${orgId}`;
+/** Per arm, because each arm stores a different shape. */
+export const rateLimitKey = (orgId: string, mode: RateLimitMode = RATE_LIMIT) =>
+  `rl:v2:ingest:${mode}:org:${orgId}`;
+
+const seconds = (ms: number) => Math.ceil(ms / 1000);
 
 /** Per process. Prometheus sums replicas; a ratio is a rate() of these, not a stored number. */
 const counters = {
@@ -73,6 +106,7 @@ const counters = {
   invalidationErrors: 0,
   listenerConnects: 0,
   rateLimited: 0,
+  rateLimitAllowed: 0,
   rateLimitErrors: 0,
 };
 
@@ -166,26 +200,103 @@ export class EntitlementsService implements OnModuleInit {
     }
   }
 
-  /** Null when the plan is unlimited or Redis failed (fail open). Otherwise the window after this hit. */
+  /** Null when the plan is unlimited or Redis failed (fail open). Otherwise this request's decision. */
   async consumeIngest(
     orgId: string,
     entitlements: Entitlements,
-  ): Promise<WindowUse | null> {
+  ): Promise<Decision | null> {
     const limit = entitlements.ingestPerMinute;
     if (limit === null) return null;
 
     try {
-      const { count, pttlMs } = await this.redis.incrWindow(
-        ingestWindowKey(orgId),
-        INGEST_WINDOW_S,
-      );
-      if (count > limit) counters.rateLimited += 1;
-      return { limit, count, resetMs: pttlMs };
+      const decision = await this.decide(rateLimitKey(orgId), limit);
+      if (decision.allowed) counters.rateLimitAllowed += 1;
+      else counters.rateLimited += 1;
+      return decision;
     } catch (error) {
       counters.rateLimitErrors += 1;
       logger.warn({ err: errorMessage(error) }, 'rate_limit_failed_open');
       return null;
     }
+  }
+
+  private async decide(key: string, limit: number): Promise<Decision> {
+    if (RATE_LIMIT === 'fixed') {
+      const { count, pttlMs } = await this.redis.incrWindow(
+        key,
+        INGEST_WINDOW_S,
+      );
+      const allowed = count <= limit;
+      return {
+        limit,
+        allowed,
+        remaining: Math.max(0, limit - count),
+        resetS: seconds(pttlMs),
+        retryAfterS: allowed ? 0 : seconds(pttlMs),
+      };
+    }
+
+    if (RATE_LIMIT === 'bucket') {
+      const { allowed, tokens, fullMs, retryMs } = await this.redis.takeToken(
+        key,
+        limit,
+        limit / INGEST_WINDOW_S,
+      );
+      return {
+        limit,
+        allowed,
+        remaining: tokens,
+        resetS: seconds(fullMs),
+        retryAfterS: seconds(retryMs),
+      };
+    }
+
+    // The rmw arms: anything that runs between this GET and the SET below reads the same state.
+    const now = Date.now();
+    const raw = await this.redis.get(key);
+
+    if (RATE_LIMIT === 'fixed-rmw') {
+      const window = raw
+        ? (JSON.parse(raw) as { count: number; resetAt: number })
+        : { count: 0, resetAt: now + INGEST_WINDOW_S * 1000 };
+      const resetMs = Math.max(1, window.resetAt - now);
+      const allowed = window.count < limit;
+      if (allowed) {
+        window.count += 1;
+        await this.redis.set(key, JSON.stringify(window), resetMs / 1000);
+      }
+      return {
+        limit,
+        allowed,
+        remaining: Math.max(0, limit - window.count),
+        resetS: seconds(resetMs),
+        retryAfterS: allowed ? 0 : seconds(resetMs),
+      };
+    }
+
+    const perMs = limit / INGEST_WINDOW_S / 1000;
+    const state = raw
+      ? (JSON.parse(raw) as { tokens: number; ts: number })
+      : { tokens: limit, ts: now };
+    let tokens = Math.min(
+      limit,
+      state.tokens + Math.max(0, now - state.ts) * perMs,
+    );
+    const allowed = tokens >= 1;
+    if (allowed) tokens -= 1;
+    const fullMs = Math.ceil((limit - tokens) / perMs);
+    await this.redis.set(
+      key,
+      JSON.stringify({ tokens, ts: now }),
+      Math.max(fullMs, 1) / 1000,
+    );
+    return {
+      limit,
+      allowed,
+      remaining: Math.floor(tokens),
+      resetS: seconds(fullMs),
+      retryAfterS: allowed ? 0 : seconds((1 - tokens) / perMs),
+    };
   }
 
   metrics(): string {
@@ -214,6 +325,9 @@ export class EntitlementsService implements OnModuleInit {
       '# HELP ingest_rate_limited_total Ingest requests answered 429.',
       '# TYPE ingest_rate_limited_total counter',
       `ingest_rate_limited_total ${counters.rateLimited}`,
+      '# HELP ingest_rate_limit_allowed_total Metered ingest requests the limiter admitted.',
+      '# TYPE ingest_rate_limit_allowed_total counter',
+      `ingest_rate_limit_allowed_total ${counters.rateLimitAllowed}`,
       '# HELP ingest_rate_limit_errors_total Limiter checks that failed open because Redis errored.',
       '# TYPE ingest_rate_limit_errors_total counter',
       `ingest_rate_limit_errors_total ${counters.rateLimitErrors}`,

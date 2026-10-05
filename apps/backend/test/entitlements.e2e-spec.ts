@@ -8,6 +8,7 @@ import {
   ENTITLEMENT_CACHE,
   ENTITLEMENT_TTL_S,
   entitlementKey,
+  rateLimitKey,
 } from '../src/entitlements/entitlements.service';
 import { API_KEY_PREFIX, hashApiKey } from '../src/ingest/api-key.guard';
 import { PostgresService } from '../src/postgres/postgres.service';
@@ -123,7 +124,7 @@ describe('entitlements (e2e)', () => {
     for (const id of [...ids, unknownOrg]) {
       await redis.del(entitlementKey(id));
     }
-    await redis.del(`rl:v1:ingest:org:${org.limit}`);
+    await redis.del(rateLimitKey(org.limit));
     await app.close();
   });
 
@@ -153,15 +154,28 @@ describe('entitlements (e2e)', () => {
   });
 
   it('stops answering 429 the moment the customer upgrades', async () => {
-    for (let i = 1; i <= 60; i++) {
-      const response = await ingest(`ok-${i}`).expect(201);
-      if (i === 60) {
-        expect(response.headers['x-ratelimit-limit']).toBe('60');
-        expect(response.headers['x-ratelimit-remaining']).toBe('0');
+    // A bucket refills 1/s on free: the bound is 60 plus whatever refilled while this loop ran.
+    const startedAt = Date.now();
+    let admitted = 0;
+    let last: Awaited<ReturnType<typeof ingest>> | undefined;
+    let limited: Awaited<ReturnType<typeof ingest>> | undefined;
+    while (!limited && admitted < 200) {
+      const response = await ingest(`ok-${admitted}`);
+      if (response.status === 429) {
+        limited = response;
+      } else {
+        expect(response.status).toBe(201);
+        admitted += 1;
+        last = response;
       }
     }
+    const refilled = Math.ceil((Date.now() - startedAt) / 1000);
 
-    const limited = await ingest('over').expect(429);
+    expect(admitted).toBeGreaterThanOrEqual(60);
+    expect(admitted).toBeLessThanOrEqual(60 + refilled);
+    expect(last?.headers['ratelimit-policy']).toBe('"ingest";q=60;w=60');
+    expect(last?.headers['ratelimit']).toMatch(/^"ingest";r=0;t=\d+$/);
+    if (!limited) throw new Error('never limited');
     expect(limited.body).toMatchObject({ error: 'rate_limited', limit: 60 });
     const retryAfter = Number(limited.headers['retry-after']);
     expect(retryAfter).toBeGreaterThan(0);
