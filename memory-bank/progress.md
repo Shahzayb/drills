@@ -178,6 +178,7 @@ Since `drill/14`, releases are tagged on the branch before the merge. No milesto
 | [drill/19](https://github.com/Shahzayb/drills/releases/tag/drill/19) | 0.19.0 | — |
 | [drill/20](https://github.com/Shahzayb/drills/releases/tag/drill/20) | 0.20.0 | — |
 | [drill/21](https://github.com/Shahzayb/drills/releases/tag/drill/21) | 0.21.0 | — |
+| [drill/22](https://github.com/Shahzayb/drills/releases/tag/drill/22) | 0.22.0 | — |
 
 ## Preferences
 
