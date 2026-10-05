@@ -1,6 +1,6 @@
 # Drill 22 — Find the knee in the connection pool
 
-**Status:** planned
+**Status:** shipped
 
 Card 22. Prereq 05. Branch `drill-22`. Saved as `plans/2026-10-06_drill-22-connection-pool-knee.md`.
 
@@ -198,3 +198,175 @@ ready?`, `Honest gaps`, and `What I'd do differently at 10x`.
   `x-pool-wait-ms` and `x-pool-hold-ms`.
 - `pnpm arms` reports `poolMax` before every sweep run.
 - The `db:pool watch` commit rate agrees with k6 throughput within a few percent on every run.
+
+## Results
+
+Measured 2026-10-06 in one sitting. Dev server, seeded volume, `COMPOSE_PROJECT_NAME=drills`,
+`PG_MAX_CONNECTIONS=200`, `QUERY_COUNTER=header`, `pg_stat_statements` off. `nest_server` was
+recreated per arm. Load: `pnpm load pool --org 2-10 --vus 100`, 20s warm-up, 60s measured. Reports:
+`k6/reports/2026-10-06-0257*` to `…-0326*` (host clock) and
+`apps/backend/db/reports/2026-10-05-2158*` to `…-2227*` (container clock, UTC). Pass `a` ran
+ascending, pass `b` descending.
+
+### Characterisation (pgss on, pool 10 and 100)
+
+| statement | calls | mean ms | blocks read per call | share of DB time |
+|---|---|---|---|---|
+| search (`messages … @@ … ORDER BY created_at DESC`) | 3,373 | 221.79 | 17,483.6 | 96% |
+| `count(*)` (offset list) | 6,745 | 4.05 | 94.7 | 3.5% |
+| list page, tags, keyset page | — | 0.07–0.14 | < 8 | < 0.3% |
+
+The API spent 0.33 cores at 177 req/s (pool 10) and 0.72 at 485 req/s (pool 100): ~1.5–1.9ms of
+Node CPU per request. The decision rule (API below 0.8 cores at pool 100) held, so the mix was not
+changed. A lighter mix would have saturated Node's one thread near 530 req/s before Postgres.
+
+### DONE WHEN: the sweep
+
+| pool | req/s (a · b) | p50 ms | p99 ms (a · b) | acquire wait mean ms | hold mean ms | Postgres cores | API cores | active backends | runnable tasks | involuntary switches/s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2 | 140 · 138 | 713 | 985 · 1,251 | 710 | 14 | 3.3 | 0.21 | 1.9 | 4.7 | 18 |
+| 4 | 160 · 160 | 611 | 840 · 1,105 | 601 | 25 | 4.8 | 0.27 | 3.9 | 6.2 | 20 |
+| 8 | 162 · 161 | 584 | 928 · 966 | 571 | 49 | 6.1 | 0.28 | 7.8 | 7.6 | 93 |
+| 12 | 193 · 197 | 460 | 816 · 765 | 452 | 61 | 7.4 | 0.34 | 11.8 | 9.8 | 1,403 |
+| 16 | 231 · 237 | 370 | 708 · 649 | 360 | 68 | 8.3 | 0.38 | 15.7 | 13.4 | 7,625 |
+| 24 | 289 · 298 | 270 | 662 · 591 | 258 | 82 | 9.7 | 0.44 | 23.5 | 20.6 | 20,991 |
+| **32** | **334 · 339** | **217** | **649 · 611** | 201 | 95 | 10.7 | 0.49 | 31.3 | 26.1 | 29,236 |
+| 48 | 387 · 378 | 153 | 690 · 694 | 135 | 125 | 11.7 | 0.56 | 46.7 | 39.2 | 30,497 |
+| 64 | 401 · 403 | 109 | 773 · 765 | 89 | 159 | 12.0 | 0.62 | 62.2 | 51.8 | 25,187 |
+| 100 | 468 · 472 | 28 | 953 · 934 | 1 | 210 | 12.2 | 0.72 | 95.5 | 68.5 | 20,653 |
+
+Throughput spread between passes: 0.1–3.1% at every size. p99 spread: up to 32% at pools 2 and 4,
+12% or less elsewhere. Zero errors and zero acquire timeouts in all 20 runs. Little's law holds on
+every row: pool ≈ req/s × hold (48: 383 × 0.125 = 48), and 100 VUs ≈ req/s × (wait + hold).
+
+Active waits (pass `a`), share of `active` samples:
+
+| pool | `IO:AioIoCompletion` | `LWLock:AioWorkerSubmissionQueue` | CPU | `IO:DataFileRead` | `LWLock:BufferMapping` |
+|---|---|---|---|---|---|
+| 2 | 3% | 6% | 91% | — | — |
+| 16 | 36% | 23% | 30% | 8% | 0% |
+| 32 | 42% | 19% | 22% | 10% | 6% |
+| 64 | 36% | 25% | 17% | 10% | 11% |
+| 100 | 39% | 16% | 13% | 7% | 24% |
+
+### Why throughput kept rising past 48
+
+Diagnostic runs (30s, outside the sweep):
+
+- **Parallel query is not the reason.** `pg_stat_activity` showed 0 parallel workers at pool 32 and
+  at pool 100. No plan in the mix runs parallel. The extra cores at small pools are PG 18's three
+  `io_method = worker` processes copying pages from the OS cache.
+- **Cache sharing is.** `pg_stat_database` deltas per commit:
+
+  | pool | blocks read | blocks hit | hit ratio | req/s | blocks read/s |
+  |---|---|---|---|---|---|
+  | 32 | 4,389 | 318 | 6.7% | 339 | ~1.49M |
+  | 100 | 3,177 | 1,538 | 32.6% | 479 | ~1.52M |
+
+  Postgres reads the same ~1.5M blocks/s (~12 GB/s) at both sizes: the read path is the ceiling.
+  At pool 100 about 25 searches run at once across 9 orgs, so concurrent searches on one org hit
+  each other's pages. Each request reads 28% less, and 339 × 4,389 / 3,177 = 468 req/s. That is an
+  artifact of a mix with 9 hot tenants.
+
+### The knee and the number
+
+**The knee is at 32–48 connections. Ship 32.**
+
+- p99 is lowest at 24–32 (626–630ms mean of passes). 24 is 13% less throughput for the same p99.
+- At 32 Postgres burns 10.7 of the ~12.5 cores left after Node, k6 and Redis, and acquire wait is
+  still two-thirds of latency. By 48 the cores are pinned (11.7) and stay there.
+- Past 32, every added connection buys throughput only by slowing the slowest requests:
+  48 is +14% req/s for +10% p99, 64 +19% for +22%, 100 +40% for +50%. Search p99 goes 691 → 1,153ms.
+- The default (10) leaves half the cores idle: requests wait 450–570ms for a connection to run
+  60ms of work.
+
+The code default stays 10 so drill 05's baselines remain comparable; `PG_POOL_MAX=32` is the
+recommendation.
+
+### `max_connections` relative to these numbers
+
+`max_connections = 100` with 3 superuser slots reserved gives the app role 97. Pool 100 at that
+default (`maxconn100-pool100`): 95 connections opened; 23,497 acquires failed with `remaining
+connection slots are reserved for roles with the SUPERUSER attribute` (19,678 in the Postgres log)
+or `sorry, too many clients already` (10,917). **47.5% of requests failed**, each as a fast 500, so
+k6 sent 823 req/s and Postgres committed 435/s. The knee (32) is a third of `max_connections`; the
+oversized pool (100) is past it.
+
+### Stretch: pgbouncer 1.25.2, transaction mode, `default_pool_size = 32`
+
+`pnpm db:pool bouncer` (report `apps/backend/db/reports/2026-10-05-223533-pool-bouncer`). Two app-role
+clients, A then B; pgbouncer hands B the server connection A just released.
+
+| probe | direct | through pgbouncer |
+|---|---|---|
+| `SET work_mem = '77MB'` on A | B sees 4MB | **B sees 77MB** |
+| `pg_advisory_lock(22)` on A, `pg_try_advisory_lock(22)` on B | B false, A unlocks | **B true; A's unlock false** (`you don't own a lock of type ExclusiveLock`); 1 lock left on a pooled server connection |
+| `LISTEN` on A, `NOTIFY` on B | listener 1, notifier 0 | **listener 0, notifier 1** |
+| named prepared statement, `max_prepared_statements = 0` | ok | **`prepared statement "pool_probe" does not exist`** |
+| same, `max_prepared_statements = 200` | ok | ok |
+| `set_config('app.org_id', '7', true)` (what the API does) | B sees 0 rows | B sees 0 rows |
+| `set_config('app.org_id', '7', false)` | B sees 0 rows | **B sees org 7: 111,111 rows** |
+
+The e2e suite through pgbouncer (`-e POSTGRES_HOST=pgbouncer -e POSTGRES_PORT=6432`): 156 of 157
+pass. The one failure is drill 19's `notify` arm: the entitlements `LISTEN` client connects and
+never hears a plan change. RLS survives because `withOrg` scopes the GUC to the transaction.
+
+A second API process (port 3003, `PG_POOL_MAX=100`) through pgbouncer: 338 req/s, p99 607ms, 0
+errors, 33 server connections. Direct pool 32 measured 337 req/s, p99 630ms. The app's acquire
+wait read 0.86ms and its hold 294ms: the queue moved into pgbouncer, where the app's metric cannot
+see it (`SHOW POOLS` `cl_waiting`/`maxwait` can).
+
+### Tests
+
+`pnpm db:test` 157/157 (155 → 157); `db:test:pool2` 157/157 (green by design). With `max: 10`
+hard-coded and `PG_POOL_MAX=2`, the saturation test failed (`Expected: >= 2, Received: 0`).
+`pnpm test:ui` 6/6.
+
+### Predictions
+
+1. Knee at 12–24, flat after: **miss.** Postgres saturates at 32–48 and throughput never went flat
+   (+40% from 32 to 100, from cache sharing).
+2. p99 U-shaped: **hit** (minimum 626–630ms at 24–32, 943ms at 100). Pool 2 p99 above 1s: hit
+   (985 · 1,251ms). Some 2s timeouts: **miss**, zero. Mean latency flat past the knee: **miss**,
+   because throughput rose.
+3. Involuntary switches several-fold from 16 to 100: **partial.** 7,625 → 20,653/s (2.7×), with a
+   peak of 30,497/s at 48. From pool 2 to 48 they rose 1,700×. CPU pinned from the knee on: hit.
+4. Parallel query lowers the knee: **miss.** No query in the mix ran parallel.
+5. Pool 100 at `max_connections = 100` fails some acquires all run: **hit**, larger than predicted
+   (47.5% of requests).
+6. Stretch: transaction-local `set_config` survives transaction pooling: **hit.**
+
+### Divergences from the plan
+
+- `test/pool.e2e-spec.ts` has two tests: the switch check is inside the saturation test, which reads
+  `poolMax` from `/info` and fails when the pool ignores it.
+- A failed acquire still records its wait, so timeouts reach the histogram's tail.
+- `db:pool watch` gained blocks read and hit per commit after the sweep. The cache-sharing numbers
+  above came from a `psql` diagnostic first.
+- Two diagnostic run pairs (parallel workers, blocks per commit) were added to explain the right
+  side of the curve.
+- The stretch's load run used a second API process on port 3003 instead of re-pointing
+  `nest_server`, so compose needed no `POSTGRES_HOST` override.
+
+## Write-up
+
+**Where is the knee, and what limits each side?** 32–48 connections. Left of it the pool is the
+limit: at pool 8 a request waits 571ms for a connection and holds it 49ms, while Postgres uses 6 of
+~12.5 cores. Throughput is pool ÷ hold. Right of it Postgres is the limit: cores pinned at 12, reads
+pinned at ~1.5M blocks/s through three I/O workers, `LWLock:BufferMapping` contention climbing from
+0% to 24%. The acquire wait falls to zero and the same queue reappears inside Postgres as a longer
+hold (95 → 210ms).
+
+**What does p99 do past the knee, and why doesn't throughput improve?** p99 climbs 630 → 943ms.
+100 backends time-slice 12 cores and three I/O workers, and a time-sliced scheduler stretches the
+longest request most: search p99 691 → 1,153ms while list p99 fell 285 → 93ms. Here throughput did
+improve 40%, but no capacity was added: Postgres read the same 1.5M blocks/s. Concurrent searches on
+the same 9 orgs shared buffers and needed 28% fewer reads each. With a realistic tenant spread that
+gain shrinks toward zero and the curve goes flat.
+
+**With 3 replicas?** The knee belongs to Postgres, not to a replica. Three replicas at pool 32 put
+96 active connections on Postgres: the pool-100 row (p99 943ms). At the default `max_connections`
+96 app connections plus three LISTEN clients exceed the role's 97 slots, which is the 47.5%-failure
+run. So per-replica pool = knee ÷ replicas (≈ 11, close to today's 10), and `max_connections` is a
+budget for the whole fleet: knee + listeners + migrations + admin headroom. Raising it does not move
+the knee. A transaction pooler decouples the two: the app pools at 100 and Postgres still sees 32.
