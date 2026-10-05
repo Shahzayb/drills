@@ -591,6 +591,8 @@ const INSTRUMENTS: Record<string, Instrument> = {
       'the server side of one pool-size run: Postgres CPU, context switches, waits, acquire wait (drill 22)',
     subcommands: {
       watch: 'wait DELAY s, then read Postgres and the API for SECONDS s',
+      bouncer:
+        'probe what transaction pooling breaks: SET, advisory locks, LISTEN, prepared statements, the tenant GUC',
     },
     knobs: [
       {
@@ -610,6 +612,12 @@ const INSTRUMENTS: Record<string, Instrument> = {
         env: 'SAMPLE_MS',
         def: '1000',
         help: 'pg_stat_activity sample interval',
+      },
+      {
+        flag: 'bouncer',
+        env: 'BOUNCER',
+        def: 'pgbouncer:6432',
+        help: 'bouncer: host:port of pgbouncer',
       },
     ],
   },
