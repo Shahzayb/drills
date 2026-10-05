@@ -204,6 +204,9 @@ services:
       - ENTITLEMENT_CACHE=${ENTITLEMENT_CACHE:-}
       # Seconds an entitlement lives in Redis. Empty means 30. The bound on out-of-band staleness.
       - ENTITLEMENT_TTL_S=${ENTITLEMENT_TTL_S:-}
+      # Card 21: fixed | fixed-rmw | bucket-rmw | bucket, how API-key ingest is metered.
+      # Empty means 'bucket'. See plans/2026-10-06_drill-21-rate-limit-burst-boundary.md.
+      - RATE_LIMIT=${RATE_LIMIT:-}
       # Card 20: off | naive | wait | stale, what a request does with an expired stats key.
       # Empty means 'stale'. See plans/2026-09-29_drill-20-cache-stampede.md.
       - STATS_CACHE=${STATS_CACHE:-}

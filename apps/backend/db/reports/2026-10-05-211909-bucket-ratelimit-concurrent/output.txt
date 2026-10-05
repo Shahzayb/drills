@@ -1,0 +1,20 @@
+ratelimit concurrent  api http://nest_server:3002
+  PLAN                 basic                        (default)
+  ROUNDS               3                            (default)
+  BURST                0                            (default)
+  GAP_MS               1000                         (default)
+  REQUESTS             2000                         (default)
+  COLD                 0                            (default)
+
+  server arm  rateLimit=bucket
+
+  round 1  org 1076  limit 600  admitted 614/2000 in 1.62s  contract 616.2  error -0.36%
+    statuses {"201":614,"429":1386}  x-entitlement {"hit":2000}  unmetered 0  /metrics allowed 614 limited 1386
+
+  round 2  org 1077  limit 600  admitted 605/2000 in 0.90s  contract 609.0  error -0.66%
+    statuses {"201":605,"429":1395}  x-entitlement {"hit":2000}  unmetered 0  /metrics allowed 605 limited 1395
+
+  round 3  org 1078  limit 600  admitted 605/2000 in 0.94s  contract 609.5  error -0.73%
+    statuses {"201":605,"429":1395}  x-entitlement {"hit":2000}  unmetered 0  /metrics allowed 605 limited 1395
+
+  bucket concurrent: admitted median 605  error median -0.66%  min -0.73%  max -0.36%

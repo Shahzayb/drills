@@ -27,6 +27,7 @@ import { QUOTA_MAX_RETRIES } from '../tenancy/tenant-db.service';
 import {
   ENTITLEMENT_CACHE,
   ENTITLEMENT_TTL_S,
+  RATE_LIMIT,
 } from '../entitlements/entitlements.service';
 import { QUERY_COUNTER_MODE } from '../observability/query-counter';
 import { TRACING_ENABLED } from '../observability/trace';
@@ -59,6 +60,7 @@ export interface InfoResponse {
     importOnFail: string;
     entitlementCache: string;
     entitlementTtlS: string;
+    rateLimit: string;
     statsCache: string;
     statsTtlS: string;
     statsTtlJitter: string;
@@ -111,6 +113,7 @@ export class InfoController {
         importOnFail: IMPORT_ON_FAIL,
         entitlementCache: ENTITLEMENT_CACHE,
         entitlementTtlS: String(ENTITLEMENT_TTL_S),
+        rateLimit: RATE_LIMIT,
         statsCache: STATS_CACHE,
         statsTtlS: String(STATS_TTL_S),
         statsTtlJitter: String(STATS_TTL_JITTER),

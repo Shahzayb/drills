@@ -11,6 +11,29 @@ const CONNECT_TIMEOUT_MS = 2000;
 // second instead of being retried into a timeout.
 const MAX_RETRIES_PER_REQUEST = 1;
 
+// KEYS[1] the bucket, ARGV capacity and tokens per ms. Returns allowed, whole tokens left, ms to full, ms to a token.
+const TAKE_TOKEN = `
+local capacity = tonumber(ARGV[1])
+local perMs = tonumber(ARGV[2])
+local clock = redis.call('TIME')
+local now = clock[1] * 1000 + math.floor(clock[2] / 1000)
+local state = redis.call('HMGET', KEYS[1], 'tokens', 'ts')
+local tokens = tonumber(state[1]) or capacity
+local ts = tonumber(state[2]) or now
+tokens = math.min(capacity, tokens + math.max(0, now - ts) * perMs)
+local allowed = 0
+if tokens >= 1 then
+  tokens = tokens - 1
+  allowed = 1
+end
+local fullMs = math.ceil((capacity - tokens) / perMs)
+redis.call('HSET', KEYS[1], 'tokens', tokens, 'ts', now)
+redis.call('PEXPIRE', KEYS[1], math.max(fullMs, 1))
+local retryMs = 0
+if allowed == 0 then retryMs = math.ceil((1 - tokens) / perMs) end
+return { allowed, math.floor(tokens), fullMs, retryMs }
+`;
+
 /**
  * Owns the Redis client. The client stays private on purpose — when a drill
  * needs a new command, it gets a method here rather than a handle to the raw
@@ -211,6 +234,42 @@ export class RedisService implements OnApplicationShutdown {
       if (this.logger.isLevelEnabled('debug')) {
         this.logger.debug(
           { rid, cmd: 'MULTI INCR/EXPIRE/PTTL', key, durMs: since(startedAt) },
+          'redis_command',
+        );
+      }
+    }
+  }
+
+  /**
+   * One token from a bucket of `capacity` refilling at `perSecond`. Read, refill, take and write run as
+   * one Lua script, so no other command lands between the read and the write. The clock is Redis's
+   * `TIME`, one clock for every app replica. See plans/2026-10-06_drill-21-rate-limit-burst-boundary.md.
+   */
+  async takeToken(
+    key: string,
+    capacity: number,
+    perSecond: number,
+  ): Promise<{
+    allowed: boolean;
+    tokens: number;
+    fullMs: number;
+    retryMs: number;
+  }> {
+    const rid = getRequestId();
+    const startedAt = performance.now();
+    try {
+      const [allowed, tokens, fullMs, retryMs] = (await this.client.eval(
+        TAKE_TOKEN,
+        1,
+        key,
+        capacity,
+        perSecond / 1000,
+      )) as number[];
+      return { allowed: allowed === 1, tokens, fullMs, retryMs };
+    } finally {
+      if (this.logger.isLevelEnabled('debug')) {
+        this.logger.debug(
+          { rid, cmd: 'EVAL TAKE-TOKEN', key, durMs: since(startedAt) },
           'redis_command',
         );
       }

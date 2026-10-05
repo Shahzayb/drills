@@ -14,6 +14,7 @@ import {
   ENTITLEMENT_HEADER,
   ENTITLEMENTS,
   EntitlementsService,
+  INGEST_WINDOW_S,
   Resolved,
 } from './entitlements.service';
 
@@ -52,24 +53,28 @@ export class EntitlementsInterceptor implements NestInterceptor {
 
     // The rule is "API-key traffic is metered", not a route list. First-party X-Org-Id calls are not.
     if (keyOrg) {
-      const use = await this.entitlements.consumeIngest(
+      const decision = await this.entitlements.consumeIngest(
         orgId,
         resolved.entitlements,
       );
-      if (use) {
-        response.setHeader('x-ratelimit-limit', use.limit);
+      if (decision) {
+        // IETF draft-ietf-httpapi-ratelimit-headers-11. Not an RFC yet.
         response.setHeader(
-          'x-ratelimit-remaining',
-          Math.max(0, use.limit - use.count),
+          'RateLimit-Policy',
+          `"ingest";q=${decision.limit};w=${INGEST_WINDOW_S}`,
         );
-        if (use.count > use.limit) {
-          response.setHeader('retry-after', Math.ceil(use.resetMs / 1000));
+        response.setHeader(
+          'RateLimit',
+          `"ingest";r=${decision.remaining};t=${decision.resetS}`,
+        );
+        if (!decision.allowed) {
+          response.setHeader('Retry-After', decision.retryAfterS);
           throw new HttpException(
             {
               error: 'rate_limited',
-              message: `plan ${resolved.entitlements.plan} allows ${use.limit} ingests per minute`,
+              message: `plan ${resolved.entitlements.plan} allows ${decision.limit} ingests per minute`,
               plan: resolved.entitlements.plan,
-              limit: use.limit,
+              limit: decision.limit,
             },
             HttpStatus.TOO_MANY_REQUESTS,
           );

@@ -31,6 +31,7 @@ orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose
 | 18 | Next's cache layers | A status change that the page kept denying: the data cache answered the click that made it, with a request id from before the write. One tag per row and one per org's lists fix it; the "just disable caching" fix costs the whale a 5GB scan per view. |
 | 19 | Entitlement cache | A customer upgraded and kept getting 429s for 19 seconds, because nothing told the cache. Deleting the key after the write fixes the API path, a database trigger fixes edits made straight in Postgres, and the TTL stays the only worst-case bound. |
 | 20 | Cache stampede | One expired hot key made 13 requests run the same query at once; on a heavier tenant 104 copies reached Postgres and 98 failed. A Redis lock makes it one query every time, and TTL jitter stops a hundred keys from expiring in the same second. |
+| 21 | Rate limiting at the burst boundary | A limit of 600 a minute let 1,199 requests through in 2.5 seconds across a fixed window's edge, and the naive check-then-set version let 2,000 of 2,000 concurrent requests through. A token bucket in one Redis Lua script holds both attacks within 1%. |
 
 Current state and what's open live in `memory-bank/progress.md`; every decision and
 number is one row in `memory-bank/history.md`, with the full reasoning in `plans/`.

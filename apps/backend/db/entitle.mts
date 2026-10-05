@@ -39,7 +39,10 @@ const SECONDS = knobNumber('SECONDS', 90);
 
 // Must match src/entitlements/entitlements.service.ts. `race` exits 1 if the API ignores what it plants.
 const entKey = (org: string) => `ent:v1:org:${org}`;
-const rlKey = (org: string) => `rl:v1:ingest:org:${org}`;
+const rlKeys = (org: string) =>
+  ['fixed', 'fixed-rmw', 'bucket-rmw', 'bucket'].map(
+    (arm) => `rl:v2:ingest:${arm}:org:${org}`,
+  );
 const LISTENER = 'listen:entitlements';
 const SNAPSHOT = '/tmp/entitle-metrics.json';
 
@@ -487,7 +490,7 @@ try {
       await client.query(`DELETE FROM ${table} WHERE org_id = $1`, [org]);
     }
     await client.query(`DELETE FROM organizations WHERE id = $1`, [org]);
-    await redis.del(entKey(org), rlKey(org));
+    await redis.del(entKey(org), ...rlKeys(org));
   }
   await client.end();
   redis.disconnect();

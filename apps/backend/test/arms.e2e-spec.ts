@@ -81,6 +81,11 @@ describe('GET /info arms (e2e)', () => {
         ? process.env.ENTITLEMENT_CACHE
         : 'notify',
       entitlementTtlS: process.env.ENTITLEMENT_TTL_S || '30',
+      rateLimit: ['fixed', 'fixed-rmw', 'bucket-rmw', 'bucket'].includes(
+        process.env.RATE_LIMIT ?? '',
+      )
+        ? process.env.RATE_LIMIT
+        : 'bucket',
       statsCache: ['off', 'naive', 'wait', 'stale'].includes(
         process.env.STATS_CACHE ?? '',
       )
