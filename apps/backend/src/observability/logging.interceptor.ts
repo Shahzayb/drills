@@ -13,6 +13,8 @@ import {
   QUERY_BUDGET_KEY,
 } from './query-budget.decorator';
 import {
+  POOL_HOLD_HEADER,
+  POOL_WAIT_HEADER,
   QUERY_COUNT_HEADER,
   QUERY_COUNTER_MODE,
   TXN_RETRY_HEADER,
@@ -69,6 +71,8 @@ export class LoggingInterceptor implements NestInterceptor {
         queries = 0,
         roundTrips = 0,
         retries = 0,
+        poolWaitMs = 0,
+        poolHoldMs = 0,
       } = getRequestContext() ?? {};
 
       if (countingOn && queries > budget) {
@@ -93,7 +97,10 @@ export class LoggingInterceptor implements NestInterceptor {
       }
 
       if (QUERY_COUNTER_MODE === 'header') {
-        http.getResponse<Response>().setHeader(QUERY_COUNT_HEADER, queries);
+        const response = http.getResponse<Response>();
+        response.setHeader(QUERY_COUNT_HEADER, queries);
+        response.setHeader(POOL_WAIT_HEADER, poolWaitMs.toFixed(2));
+        response.setHeader(POOL_HOLD_HEADER, poolHoldMs.toFixed(2));
       }
 
       // Always, and on the error path too — finish() runs before the exception

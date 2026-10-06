@@ -1,0 +1,13 @@
+
+  name=char-pool10 org=2-10 vus=100 warmup=20s measured=60s mix=list:keyset:search 2:1:1 q=export pageSize=20
+  measured requests : 10620
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 523.93 / 739.34 / 788.88 ms
+  min / avg / max   : 459.02 / 567.52 / 1266.23 ms
+  throughput        : 177.00 req/s
+  (incl. warm-up)   : p50 524.53  p95 749.05  p99 2006.09 ms
+  pool wait         : p50 503.88 / p99 621.98 / mean 509.84 ms (10620 samples)
+  pool hold         : p50 6.32 / p99 224.34 / mean 56.44 ms
+  p99 by endpoint   : list 638.36 · keyset 625.92 · search 847.91 ms
+
+RESULT,char-pool10,2-10,100,export,509.84,621.98,56.44,224.34,523.93,739.34,788.88,177.00,10620

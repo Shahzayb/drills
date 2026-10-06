@@ -24,7 +24,14 @@ export function requestContextMiddleware(
   res.setHeader(REQUEST_ID_HEADER, requestId);
   res.setHeader(SERVED_AT_HEADER, new Date().toISOString());
   runWithRequestContext(
-    { requestId, queries: 0, roundTrips: 0, retries: 0 },
+    {
+      requestId,
+      queries: 0,
+      roundTrips: 0,
+      retries: 0,
+      poolWaitMs: 0,
+      poolHoldMs: 0,
+    },
     next,
   );
 }

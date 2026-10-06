@@ -1,5 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
-import { PostgresService } from '../postgres/postgres.service';
+import { POOL_MAX, PostgresService } from '../postgres/postgres.service';
 import {
   ASSIGN,
   KEYSET_TIEBREAK,
@@ -64,6 +64,7 @@ export interface InfoResponse {
     statsCache: string;
     statsTtlS: string;
     statsTtlJitter: string;
+    poolMax: string;
     queryCounter: string;
     logLevel: string;
     tracing: string;
@@ -117,6 +118,7 @@ export class InfoController {
         statsCache: STATS_CACHE,
         statsTtlS: String(STATS_TTL_S),
         statsTtlJitter: String(STATS_TTL_JITTER),
+        poolMax: String(POOL_MAX),
         queryCounter: QUERY_COUNTER_MODE,
         logLevel: logger.level,
         tracing: TRACING_ENABLED ? 'on' : 'off',

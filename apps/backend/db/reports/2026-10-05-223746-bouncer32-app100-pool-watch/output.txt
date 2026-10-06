@@ -1,0 +1,25 @@
+pool watch  api http://localhost:3003  poolMax 100
+  DELAY                20                           (env)
+  SECONDS              60                           (env)
+  SAMPLE_MS            1000                         (default)
+
+  max_connections                  200
+  max_parallel_workers             8
+  max_parallel_workers_per_gather  2
+  max_worker_processes             8
+  reserved_connections             0
+  superuser_reserved_connections   3
+
+  connections at window start: app_user 33 · app_user/listen:entitlements 1 · postgres/db:pool 1
+
+  window            : 60.0s, 60 samples
+  postgres cpu      : 10.69 cores
+  api cpu           : 0.52 cores
+  runnable tasks    : 27.0 mean (VM-wide, /proc/loadavg)
+  app backends      : 34.0 connected · 31.3 active (max 32) · 0.7 idle in transaction
+  active waits      : IO:AioIoCompletion 40% · CPU 22% · LWLock:AioWorkerSubmissionQueue 22% · IO:DataFileRead 12% · LWLock:BufferMapping 2% · Timeout:SpinDelay 2%
+  ctx switches      : 250,998/s VM · backends 29,699/s involuntary, 153,116/s voluntary (34 tracked)
+  commits           : 343/s
+  blocks per commit : 4,375 read, 324 hit in shared_buffers
+  acquire wait      : 20,448 acquires, mean 0.85ms, p50 ≤0.5ms, p99 ≤0.5ms; 0 timeouts, 0 connect errors
+  connection hold   : mean 292.30ms, p50 ≤250ms, p99 ≤1000ms

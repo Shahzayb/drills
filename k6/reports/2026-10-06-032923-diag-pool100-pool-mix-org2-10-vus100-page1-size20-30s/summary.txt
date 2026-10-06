@@ -1,0 +1,13 @@
+
+  name=diag-pool100 org=2-10 vus=100 warmup=10s measured=30s mix=list:keyset:search 2:1:1 q=export pageSize=20
+  measured requests : 14195
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 27.30 / 867.10 / 929.77 ms
+  min / avg / max   : 1.51 / 212.45 / 1120.16 ms
+  throughput        : 473.17 req/s
+  (incl. warm-up)   : p50 28.20  p95 865.32  p99 931.34 ms
+  pool wait         : p50 0.01 / p99 108.05 / mean 2.41 ms (14195 samples)
+  pool hold         : p50 24.82 / p99 923.08 / mean 208.06 ms
+  p99 by endpoint   : list 143.75 · keyset 126.47 · search 978.16 ms
+
+RESULT,diag-pool100,2-10,100,export,2.41,108.05,208.06,923.08,27.30,867.10,929.77,473.17,14195

@@ -1,0 +1,13 @@
+
+  name=b-pool8 org=2-10 vus=100 warmup=20s measured=60s mix=list:keyset:search 2:1:1 q=export pageSize=20
+  measured requests : 9668
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 586.64 / 772.08 / 965.73 ms
+  min / avg / max   : 225.43 / 623.93 / 1374.74 ms
+  throughput        : 161.13 req/s
+  (incl. warm-up)   : p50 587.09  p95 772.04  p99 943.97 ms
+  pool wait         : p50 577.02 / p99 913.51 / mean 573.20 ms (9668 samples)
+  pool hold         : p50 6.15 / p99 190.28 / mean 49.63 ms
+  p99 by endpoint   : list 926.08 · keyset 927.46 · search 1107.99 ms
+
+RESULT,b-pool8,2-10,100,export,573.20,913.51,49.63,190.28,586.64,772.08,965.73,161.13,9668

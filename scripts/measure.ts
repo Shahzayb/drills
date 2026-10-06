@@ -585,6 +585,43 @@ const INSTRUMENTS: Record<string, Instrument> = {
     ],
   },
 
+  pool: {
+    file: 'db/pool.mts',
+    blurb:
+      'the server side of one pool-size run: Postgres CPU, context switches, waits, acquire wait (drill 22)',
+    subcommands: {
+      watch: 'wait DELAY s, then read Postgres and the API for SECONDS s',
+      bouncer:
+        'probe what transaction pooling breaks: SET, advisory locks, LISTEN, prepared statements, the tenant GUC',
+    },
+    knobs: [
+      {
+        flag: 'delay',
+        env: 'DELAY',
+        def: '20',
+        help: "seconds before the window opens (k6's warm-up)",
+      },
+      {
+        flag: 'seconds',
+        env: 'SECONDS',
+        def: '60',
+        help: "the window (k6's measured phase)",
+      },
+      {
+        flag: 'sample-ms',
+        env: 'SAMPLE_MS',
+        def: '1000',
+        help: 'pg_stat_activity sample interval',
+      },
+      {
+        flag: 'bouncer',
+        env: 'BOUNCER',
+        def: 'pgbouncer:6432',
+        help: 'bouncer: host:port of pgbouncer',
+      },
+    ],
+  },
+
   bench: {
     file: 'db/bench-copy.mts',
     blurb: 'INSERT vs multi-row INSERT vs COPY, on a scratch table',

@@ -247,7 +247,14 @@ export class ImportsService {
    */
   private detach(orgId: string, jobId: string): void {
     void runWithRequestContext(
-      { requestId: `import-${jobId}`, queries: 0, roundTrips: 0, retries: 0 },
+      {
+        requestId: `import-${jobId}`,
+        queries: 0,
+        roundTrips: 0,
+        retries: 0,
+        poolWaitMs: 0,
+        poolHoldMs: 0,
+      },
       () =>
         this.run(orgId, jobId).catch((error: unknown) => {
           // Already recorded on the job row by run(); this line is so a failed

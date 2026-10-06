@@ -10,6 +10,9 @@ import {
 import { errorMessage, logger, since } from '../observability/logger';
 import {
   getRequestId,
+  recordPoolError,
+  recordPoolHold,
+  recordPoolWait,
   recordQuery,
   recordRoundTrip,
 } from '../observability/request-context';
@@ -18,9 +21,12 @@ import { TRACING_ENABLED } from '../observability/trace';
 // Every number here is chosen, not inherited. Reasoning lives in
 // plans/2026-08-06_drill-01-health-endpoint.md under "Numbers we chose".
 //
-const POOL_MAX = 10;
+// Card 22's only variable. The sweep and the knee are in
+// plans/2026-10-06_drill-22-connection-pool-knee.md.
+export const POOL_MAX = Number(process.env.PG_POOL_MAX || 10);
 // Long enough to survive a GC pause, short enough that /health answers inside
-// its own 2s probe budget instead of hanging.
+// its own 2s probe budget instead of hanging. pg-pool applies it to a queued
+// acquire too: a waiter fails with `timeout exceeded when trying to connect`.
 const CONNECTION_TIMEOUT_MS = 2000;
 // pg defaults this to 10s. 30s keeps connections warm between the sparse
 // requests a dev stack sees, without holding them open indefinitely.
@@ -124,7 +130,17 @@ export class PostgresService implements OnApplicationShutdown {
     // `counted: false` is a round trip but not a route's query. Drill 19's entitlement read.
     { counted = true }: { counted?: boolean } = {},
   ): Promise<QueryResult<T>> {
-    return this.runOn(this.pool, text, params, counted);
+    // What pool.query() does inside pg-pool, done here so the acquire can be timed. Same release:
+    // a failed statement discards its connection.
+    const { client, release } = await this.acquire();
+    try {
+      const result = await this.runOn<T>(client, text, params, counted);
+      release();
+      return result;
+    } catch (error) {
+      release(error);
+      throw error;
+    }
   }
 
   /**
@@ -136,7 +152,7 @@ export class PostgresService implements OnApplicationShutdown {
    * is two. The caller gets a ClientHandle, not the client.
    */
   async withClient<T>(fn: (client: ClientHandle) => Promise<T>): Promise<T> {
-    const client: PoolClient = await this.pool.connect();
+    const { client, release } = await this.acquire();
 
     const handle: ClientHandle = {
       query: (text, params) => this.runOn(client, text, params),
@@ -153,12 +169,43 @@ export class PostgresService implements OnApplicationShutdown {
     } finally {
       // Always, including when fn threw. A client that is not released is a
       // permanent -1 on a pool of 10, and the tenth one hangs the process.
-      client.release();
+      release();
     }
   }
 
+  /** Times the wait for a connection; the returned release times the hold. Card 22. */
+  private async acquire(): Promise<{
+    client: PoolClient;
+    release: (error?: unknown) => void;
+  }> {
+    const askedAt = performance.now();
+    let client: PoolClient;
+    try {
+      client = await this.pool.connect();
+    } catch (error) {
+      // A timed-out waiter still waited; leaving it out would cut the tail off the histogram.
+      recordPoolWait(performance.now() - askedAt);
+      recordPoolError(
+        errorMessage(error).startsWith('timeout exceeded')
+          ? 'timeout'
+          : 'connect',
+      );
+      throw error;
+    }
+    const acquiredAt = performance.now();
+    recordPoolWait(acquiredAt - askedAt);
+
+    return {
+      client,
+      release: (error) => {
+        recordPoolHold(performance.now() - acquiredAt);
+        client.release(error instanceof Error ? error : undefined);
+      },
+    };
+  }
+
   private async runOn<T extends QueryResultRow = QueryResultRow>(
-    executor: Pool | PoolClient,
+    executor: PoolClient,
     text: string,
     params?: unknown[],
     counted = true,

@@ -135,6 +135,21 @@ const SCRIPTS: Record<string, Script> = {
     ],
   },
 
+  pool: {
+    file: 'pool-mix.ts',
+    blurb:
+      'a fixed read mix across --org N-M, run once per PG_POOL_MAX (drill 22)',
+    knobs: [
+      {
+        flag: 'q',
+        env: 'Q',
+        def: 'export',
+        help: 'the search term in the mix',
+      },
+      { flag: 'page-size', env: 'PAGE_SIZE', def: '20', help: 'rows per page' },
+    ],
+  },
+
   ingest: {
     file: 'ingest-storm.ts',
     blurb: 'POST /ingest under a duplicate storm (drill 12)',

@@ -1,0 +1,13 @@
+
+  name=maxconn100-pool100 org=2-10 vus=100 warmup=20s measured=60s mix=list:keyset:search 2:1:1 q=export pageSize=20
+  measured requests : 49419
+  errors            : 23479 (47.51%)
+  p50 / p95 / p99   : 17.33 / 839.31 / 964.88 ms
+  min / avg / max   : 1.39 / 121.70 / 1162.77 ms
+  throughput        : 823.65 req/s
+  (incl. warm-up)   : p50 17.67  p95 837.11  p99 961.93 ms
+  pool wait         : p50 0.15 / p99 35.94 / mean 5.35 ms (49419 samples)
+  pool hold         : p50 6.70 / p99 960.71 / mean 114.08 ms
+  p99 by endpoint   : list 75.87 · keyset 45.16 · search 1024.74 ms
+
+RESULT,maxconn100-pool100,2-10,100,export,5.35,35.94,114.08,960.71,17.33,839.31,964.88,823.65,49419

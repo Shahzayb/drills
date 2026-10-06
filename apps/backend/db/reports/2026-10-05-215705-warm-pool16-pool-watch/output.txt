@@ -1,0 +1,24 @@
+pool watch  api http://nest_server:3002  poolMax 16
+  DELAY                20                           (default)
+  SECONDS              60                           (default)
+  SAMPLE_MS            1000                         (default)
+
+  max_connections                  200
+  max_parallel_workers             8
+  max_parallel_workers_per_gather  2
+  max_worker_processes             8
+  reserved_connections             0
+  superuser_reserved_connections   3
+
+  connections at window start: app_user 16 · app_user/listen:entitlements 1 · postgres/db:pool 1
+
+  window            : 60.0s, 60 samples
+  postgres cpu      : 8.30 cores
+  api cpu           : 0.38 cores
+  runnable tasks    : 13.4 mean (VM-wide, /proc/loadavg)
+  app backends      : 17.0 connected · 15.7 active (max 16) · 0.3 idle in transaction
+  active waits      : IO:AioIoCompletion 39% · CPU 32% · LWLock:AioWorkerSubmissionQueue 21% · IO:DataFileRead 4% · Timeout:SpinDelay 2% · LWLock:BufferMapping 2%
+  ctx switches      : 300,326/s VM · backends 7,724/s involuntary, 142,579/s voluntary (17 tracked)
+  commits           : 240/s
+  acquire wait      : 14,294 acquires, mean 353.42ms, p50 ≤500ms, p99 ≤500ms; 0 timeouts, 0 connect errors
+  connection hold   : mean 67.18ms, p50 ≤10ms, p99 ≤500ms

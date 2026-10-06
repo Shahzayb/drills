@@ -214,6 +214,9 @@ services:
       - STATS_TTL_S=${STATS_TTL_S:-}
       # Share of the TTL removed at random per fill, 0 to 1. Empty means 0.2.
       - STATS_TTL_JITTER=${STATS_TTL_JITTER:-}
+      # Card 22: connections in the API's pg pool. Empty means 10. The sweep and the knee are in
+      # plans/2026-10-06_drill-22-connection-pool-knee.md.
+      - PG_POOL_MAX=${PG_POOL_MAX:-}
       # off | on | header — see apps/backend/src/observability/query-counter.ts.
       # Empty forwards through to that module's own default ('on').
       - QUERY_COUNTER=${QUERY_COUNTER:-}
@@ -301,6 +304,32 @@ services:
       - app-network
     profiles: ['test']
     entrypoint: ['k6']
+
+  # Drill 22's stretch: transaction pooling in front of postgres_db, off unless
+  # `--profile pgbouncer`. Tag PINNED, same reasoning as k6. Nothing points at it by
+  # default; `pnpm db:pool bouncer` and the e2e suite reach it by host name.
+  # See plans/2026-10-06_drill-22-connection-pool-knee.md.
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.25.2-p0
+    container_name: drills_pgbouncer
+    env_file: .env
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+    # The userlist is written from .env at start, so no password lives in the repo.
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        printf '"%s" "%s"\n' "$$POSTGRES_USER" "$$POSTGRES_PASSWORD"
+        "$$POSTGRES_APP_USER" "$$POSTGRES_APP_PASSWORD" > /tmp/userlist.txt
+        && exec pgbouncer /etc/pgbouncer/pgbouncer.ini
+    depends_on:
+      postgres_db:
+        condition: service_healthy
+    networks:
+      - app-network
+    profiles: ['pgbouncer']
+    mem_limit: 256m
 
   # Tracing, phase 2 of drill 06. Both services are behind `profiles: ['trace']`
   # so `docker compose up` never starts them: an always-on collector would
