@@ -1,6 +1,6 @@
 # Drill 23 — Shut down without dropping a request
 
-**Status:** planned
+**Status:** shipped
 
 Card 23. Prereq 15. Branch `drill-23` (from `main` at `0ce8935`). Saved as
 `plans/2026-10-11_drill-23-graceful-shutdown.md`.
@@ -216,3 +216,134 @@ directly. Anything that removes a judgment or open decision gets proposed to you
 - `pnpm drain --arm exit` and `--arm nest`: nonzero errors with timestamps clustered at each
   SIGTERM.
 - `pnpm db:test` green, `db:test:nodrain` red exactly 4, and `pnpm arms` shows the shutdown knobs.
+
+## Revised while shipping
+
+- `health.module.ts` needed no edit. `HttpAdapterHost` is global.
+- `SHUTDOWN_TIMEOUT_MS` defaults to 15000, from Decision 10's rule: 3s + 2 × 4.67s (the uncached
+  whale stats under load), rounded up. `DRAIN_DELAY_MS` stays 3000 (≥ 1.5 × 1.93s).
+- `scripts/load.ts` gained a per-script `env` hook (k6's log file in the run directory) and
+  `INFO_URL` (arms from the LB, not `nest_server`).
+- `pnpm drain` waits for each replica's own `/health` before trusting HAProxy. A restart faster than
+  `fall × inter` never shows as DOWN, so the LB's UP was stale twice.
+- `pnpm drain` streams `docker events` live. The daemon's event ring overflows with health-check
+  execs in ~90s.
+- `--slow` takes `stats` (a ~4.7s whale scan) or `trickle` (an 8s upload with no DB load). The stats
+  variant produced a cascade unrelated to the deadline (finding 6), so the clean deadline demo uses
+  `trickle`.
+- `test:e2e` runs `--maxWorkers=6` (your call). Jest's default 13 workers OOM-killed the 1GB dev
+  container once the suite grew to 16; it passed 161/161 at 6.
+- The shutdown suite deletes messages by `conversation_id`. By `org_id` it scans 10M rows and broke
+  the 5s hook timeout.
+
+## Results
+
+Docker Desktop, 14 CPUs. Two replicas at the default pool of 10 behind HAProxy 3.4.6. Open model,
+150 req/s (`list:search:ingest 6:2:2`, orgs 2–10, ingest on org 1), warm-up 15s, measured 75s.
+A 300,000-row import starts on the first replica 6s before its SIGTERM. Rolling restart: SIGTERM
+the import's replica, wait for it to be ready and UP, wait 10s, then the other. Reports are in
+`k6/reports/2026-10-11-*-drain-*/drain.txt`.
+
+**Calibration (one replica alone, 30s):** 100 req/s p99 89ms; 200 req/s p99 79ms; 300 req/s p99
+614ms with 101 dropped iterations. The knee is ~250, so 150 leaves one replica ~40% headroom.
+
+| Run | Arm | Rate | Failed | p99 | Import after the restart | SIGTERM → exit (a / b) |
+|---|---|---|---|---|---|---|
+| `exit` | exit | 150 | **211** (503 `SC--`) | 100.65ms | stuck `running` at 68,000 | 0.08 / 0.49s |
+| `nest` | nest | 150 | **0** | 90.78ms | stuck `running` at 223,000 | 8.03 / 7.39s |
+| `graceful-1` | graceful | 150 | **0** | 70.16ms | failed at 101,000 → retry 300,000 of 300,000 | 3.08 / 3.20s |
+| `graceful-2` | graceful | 150 | **0** | 68.95ms | failed at 103,000 → retry 300,000 of 300,000 | 3.10 / 3.26s |
+| `nest-250` | nest | 250 | **132** (503 `SC--`) | 291.61ms | stuck `running` at 196,000 | 7.43 / 8.05s |
+| `graceful-250` | graceful | 250 | **0** | 311.17ms | failed at 91,000 → retry 300,000 | 3.09 / 3.21s |
+| `deadline-4s-trickle` | graceful, 4s | 150 | **0** | 68.58ms | failed at 95,000 → retry 300,000 | 4.25 (exit 1) / 3.09s |
+| `deadline-4s` (`--slow stats`) | graceful, 4s | 150 | **535** (125 × 500, 410 × 503) | 2002ms | failed at 90,000 → retry 300,000 | 5.11 (exit 1) / 3.55s |
+| `deadline-4s-rerun` | graceful, 4s | 150 | **203** (503) | 1751ms | failed at 89,000 → retry 300,000 | 4.38 (exit 1) / 3.12s |
+
+Dropped iterations were 0 on every 150 req/s run except the two stats cascades (171, 178). The
+250 req/s runs dropped 15 (graceful) and 23 (nest) while one replica carried 250 alone.
+
+**Timings across the twelve graceful drains:** SIGTERM → HAProxy DOWN 1.20–1.93s (bound: `inter 1s ×
+fall 2`). Listener closed at 3.00–3.06s. Exit at 3.08–3.55s (3.08–3.26s outside the cascade). Restart → UP 1.69–2.81s (Node boot plus
+`rise 2`). The import stopped within 11–206ms (one batch) at a 1,000-row boundary every time.
+
+**Event-loop lag (250ms windows, resolution subtracted):** p50 0.0–2.4ms and max mostly under 15ms
+before and during every drain, with or without the import. Single windows hit 20–30ms (boot, GC).
+During the stats cascade, `b`'s in-flight count climbed 2 → 218 while its lag max stayed 0.4–4.4ms.
+
+### Findings
+
+1. **`exit`: the LB never noticed.** The replica died and booted again within ~1.5s, inside HAProxy's
+   `fall 2 × inter 1s`, so it stayed UP and half the traffic hit a refusing port. 211 × `SC--`,
+   i.e. ≈ 75 req/s × the 1.2–1.9s outage. No request in flight was cut (0 × `SH--`): at ~1–2 in
+   flight per replica, none happened to be mid-response.
+2. **`nest` is not graceful, and at 150 req/s it still dropped nothing.** `close()` refused new
+   connections. HAProxy's health checks open new connections, got refused, and marked the replica DOWN in
+   1.0–1.9s. Real traffic rode HAProxy's pooled keep-alive connections, which Node 22 keeps serving
+   after `close()`. Exit then waited for those sockets to idle out: 7.4–8.1s. At 250 req/s HAProxy
+   needed new server connections before DOWN: 132 × 503. The arm also abandons the import (finding 4).
+3. **`graceful`: 0 failed requests in four rolling restarts** (two at 150, one at 250, one with an
+   abandoned request). Readiness flips at SIGTERM, the LB drops the replica within 1.93s, and the
+   listener closes at 3.0s with nothing left to refuse.
+4. **The import.** `exit` and `nest` leave the job `running` with no worker. `retry` refuses a
+   running job, so it stays that way. `graceful` stops at the batch boundary: `failed`,
+   `interrupted by shutdown`, `resume_row` a multiple of 1,000. One retry on the other replica landed
+   exactly 300,000 every time.
+5. **The deadline does what it says.** A trickle upload still open at 4s: `shutdown_deadline_exceeded
+   inFlight=1` at 3.999s, exit code 1 at 4.25s, 0 collateral errors.
+6. **Readiness that checks Postgres through the request pool causes a full outage.** One uncached whale
+   stats scan (~4.7s) started while `a` drained. `b` carried 150 req/s alone with Postgres I/O taken
+   by the scan. Its in-flight count climbed to 218, its pool timed out (125 × 500), and `/health`'s
+   `SELECT 1` waited in the same pool queue. HAProxy marked `b` DOWN with `Layer7 timeout, check
+   duration: 1000ms … 0 active servers left`. Then 410 × 503 came from the LB itself. It reproduced
+   (203 × 503). The control is the same scan with both replicas serving: 0 errors, p99 527ms.
+7. **Event-loop lag is not this service's overload signal.** The work is I/O. A queue of 218
+   requests waiting on Postgres left the loop idle. In-flight count and pool wait show overload;
+   lag shows CPU blocking only.
+8. **Side finding: deleting conversations is O(rows × usage_events).** `usage_events.conversation_id`
+   (`ON DELETE SET NULL`) has no index, so each deleted conversation scans the ledger. A 2.96M-row
+   cleanup ran 7m55s before it was cancelled. With FK triggers off it took 1.18s.
+9. **Prediction 5 was wrong.** `pnpm` → `nest start --watch` → Node does forward SIGTERM. A 3.3s
+   request finished 200 and `docker compose stop` waited 2.4s for it.
+
+### Lag around SIGTERM (`graceful-1`, api_b, import running)
+
+```mermaid
+xychart-beta
+  title "api_b event-loop lag, 250ms windows (lower line p50, upper line max)"
+  x-axis "seconds from SIGTERM" [-4.8, -4.3, -3.8, -3.3, -2.8, -2.3, -1.8, -1.3, -0.8, -0.3, 0.2, 0.7, 1.2, 1.7, 2.2, 2.7]
+  y-axis "lag (ms)" 0 --> 5
+  line [0.11, 0.43, 0.07, 0.22, 0.21, 0.09, 0.36, 0.31, 0.13, 0.23, 0.38, 0.44, 0.28, 0.36, 0.14, 0.14]
+  line [1.4, 1.96, 1.49, 1.53, 1.02, 1.09, 2.87, 2.42, 1.28, 2.25, 1.71, 1.57, 1.31, 1.05, 1.67, 1.84]
+```
+
+Every second window from `drain.txt`. SIGTERM at 0, LB DOWN at 1.76s, listener closed at 3.01s.
+
+## Write-up
+
+**What's your drain deadline and what did you base it on?** 15s from the signal, in three parts.
+`DRAIN_DELAY_MS = 3000` covers the LB's detection window: HAProxy needs `fall 2 × inter 1s`, and
+the measured worst was 1.93s, so 1.5× is 2.9s. The in-flight drain covers the slowest legitimate
+request: the uncached whale stats aggregate ran 4.67s under load, and 2× that is 9.3s. The import
+needs one batch (≤206ms), so it does not move the number. 3 + 9.3 = 12.3, rounded up to 15. Docker's
+`stop_grace_period` is 30s, so the app's own deadline fires first and logs what it abandoned. Past
+the deadline the process logs `shutdown_deadline_exceeded` with in-flight count and phase, then
+exits 1. Open requests are cut, and a running import stays `running` (a lease would fix that,
+card 30).
+
+**What must readiness say during the drain, and what breaks if it keeps saying OK?** 503 from the
+first moment of SIGTERM, while the process keeps serving everything already routed to it. If it
+keeps saying OK, the LB learns about the shutdown only when connections fail. With `exit` that
+meant 211 refused requests. With `nest` it meant 132 at 250 req/s, because HAProxy needed new
+connections before its checks hit the closed listener. Liveness must keep saying OK, or the
+orchestrator kills the drain it is waiting for. The measured corollary runs the other way:
+readiness must not fail for reasons the instance cannot fix. Checking Postgres through the request
+pool turned one slow query into "no servers available" (finding 6). The proposal is in `progress.md`.
+
+**What did the Cloudflare runtime do for you that you just had to build by hand?** Workers have no
+process to signal. A deploy routes new requests to the new version while old isolates finish their
+in-flight requests, so readiness, detection delay, listener close and keep-alive handling are not
+your code. `ctx.waitUntil` extends a request past its response, which is the job the import drain
+does here. There is no pool to close (Hyperdrive pools connections at the edge), no PID 1, no
+`stop_grace_period`, and no load balancer health check to tune. Nothing boots beside the traffic either: an isolate starts
+inside the request that needs it. What it did not do is drain long background work: a Worker's CPU and
+duration limits mean a 40-minute import was always a queue's job there.
