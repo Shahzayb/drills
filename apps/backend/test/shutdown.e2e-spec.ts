@@ -61,7 +61,12 @@ describe('graceful shutdown (e2e)', () => {
       await tx.query(`DELETE FROM import_jobs WHERE org_id = $1::bigint`, [
         orgId,
       ]);
-      await tx.query(`DELETE FROM messages WHERE org_id = $1::bigint`, [orgId]);
+      // By conversation_id: messages.org_id is unindexed on purpose, and that delete scans 10M rows.
+      await tx.query(
+        `DELETE FROM messages WHERE conversation_id IN
+           (SELECT id FROM conversations WHERE org_id = $1::bigint)`,
+        [orgId],
+      );
       await tx.query(`DELETE FROM conversations WHERE org_id = $1::bigint`, [
         orgId,
       ]);
@@ -70,7 +75,7 @@ describe('graceful shutdown (e2e)', () => {
       .get(PostgresService)
       .query(`DELETE FROM organizations WHERE id = $1::bigint`, [orgId]);
     await main.close();
-  });
+  }, 60_000);
 
   it('answers readiness 503 and liveness 200 while draining', async () => {
     const app = await boot();
