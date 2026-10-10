@@ -124,7 +124,10 @@ shutdown`, exact `resume_row`. Nest then closes the pool and Redis. `main.ts` ar
 `SHUTDOWN_TIMEOUT_MS` (15000), then logs and calls `process.exit(1)`; an orchestrator's grace period
 MUST exceed it. `GET /health/live` is liveness: 200 while the process runs, with phase, in-flight
 count and event-loop lag (`EVENT_LOOP_LOG_MS` logs each window). Both hooks need a signal, so
-`app.close()` in tests skips them.
+`app.close()` in tests skips them. Readiness answers from the process's phase alone
+(`READINESS=local|deps`, default `local`) and never touches the pool or a dependency; the dependency
+report is `GET /health/deps`, which nothing routes on. `deps` is the control arm: under overload its
+check times out in the saturated pool and the LB can lose its last server.
 
 ## Instruments and commands
 

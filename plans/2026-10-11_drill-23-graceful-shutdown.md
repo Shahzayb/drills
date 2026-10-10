@@ -337,7 +337,8 @@ meant 211 refused requests. With `nest` it meant 132 at 250 req/s, because HAPro
 connections before its checks hit the closed listener. Liveness must keep saying OK, or the
 orchestrator kills the drain it is waiting for. The measured corollary runs the other way:
 readiness must not fail for reasons the instance cannot fix. Checking Postgres through the request
-pool turned one slow query into "no servers available" (finding 6). The proposal is in `progress.md`.
+pool turned one slow query into "no servers available" (finding 6), so readiness now answers from
+local state alone (the follow-up below).
 
 **What did the Cloudflare runtime do for you that you just had to build by hand?** Workers have no
 process to signal. A deploy routes new requests to the new version while old isolates finish their
@@ -370,3 +371,29 @@ backpressure stretch's job (503 + `Retry-After` per request), not routing's.
 **Prediction.** `--slow stats --deadline-ms 4000`, interleaved `local, deps, local, deps`: `deps`
 reproduces the cascade (hundreds of LB 503s). `local` keeps `b` UP: zero LB 503s, and only the
 500s from `b`'s pool timeouts remain (0–130). One plain `graceful` run on `local` stays at 0.
+
+### Follow-up results
+
+Same scenario as finding 6: `pnpm drain --arm graceful --deadline-ms 4000 --slow stats`, 150 req/s,
+interleaved by `--readiness`, cache warmed by a 70s load first. `drain.txt` now prints failures
+before the first SIGTERM (a run counts only at 0) and the LB's own "no server" 503s.
+
+| Run | Readiness | Failed | LB had no server | Survivor marked DOWN mid-drain |
+|---|---|---|---|---|
+| `cascade-deps-2` | deps | 322 | 303 × 503 | yes, `Layer7 timeout, 1000ms` |
+| `cascade-local-2` | local | 12 (500) | 0 | no |
+| `cascade-deps-3` | deps | 5 (500) | 0 | no |
+| `cascade-local-3` | local | 28 (500) | 0 | no |
+| `cascade-deps-4` | deps | 412 | 344 × 503 | yes, `Layer7 timeout, 1001ms` |
+| `cascade-local-4` | local | 52 (500) | 0 | no |
+| `graceful-local` (no slow request) | local | 0 | 0 | no; the import resumed to 300,000 |
+
+With the two earlier `deps` runs (535 and 203 failed), `deps` lost its last server in 4 of 5 runs.
+`local` lost it in 0 of 3. The 12–52 failures left on `local` are `b`'s 2s pool-acquire timeouts
+while it carried 150 req/s alone during the scan: overload, which readiness should not hide and
+backpressure would shed. `cascade-local-1` is excluded: it failed 3,016 requests on both replicas
+from 22s before any SIGTERM (a cold cache right after a 3M-row cleanup), so it measured something
+else. That is why the validity line exists.
+
+The prediction held: `local` had zero LB 503s and 12–52 pool-timeout 500s, inside the predicted
+0–130.

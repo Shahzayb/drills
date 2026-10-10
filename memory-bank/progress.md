@@ -10,8 +10,7 @@ None.
 
 Card 23 shipped. Card 24 re-runs `pnpm db:ratelimit` and drill 22's sweep across replicas; drill 23's
 `--profile drain` already runs two. Card 26 (the outbox) replaces drill 19's `NOTIFY`. Card 29 is card
-20's stretch in full. Card 30 starts from drill 15's worker and owes it a lease (issue 21). Open: whether
-readiness keeps its dependency checks (issue 57).
+20's stretch in full. Card 30 starts from drill 15's worker and owes it a lease (issue 21).
 
 ## Active plan
 
@@ -19,14 +18,14 @@ None open. Every plan in `plans/` is shipped.
 
 ## Live validation
 
-`pnpm docker:up`, then `pnpm db:reset`. `pnpm db:test` runs the backend e2e suite (161 tests) on 6 jest
+`pnpm docker:up`, then `pnpm db:reset`. `pnpm db:test` runs the backend e2e suite (163 tests) on 6 jest
 workers; at jest's default 13 the 1GB dev container OOMs.
 
 Each red run MUST fail exactly this many tests (arms in `package.json`); a green red run means the
 switch stopped switching. `db:test:naive` 2 (query budget) · `:notiebreak` 1 · `:like` 1 ·
 `:noidem` 3 · `:redis` 1 · `:rmw` 2 · `:lww` 4 · `:buffer` 6 · `:skiplast` 15 (two suites) ·
 `:nocache` 1 · `:ttlonly` 2 · `:stampede` 2 · `:nojitter` 1 · `:fixed` 1 · `:fixedrmw` 2 ·
-`:bucketrmw` 1 · `:nodrain` 4. Green: `:constraint`, `:donothing`, `:locking`, `:serializable`, `:pessimistic`,
+`:bucketrmw` 1 · `:nodrain` 4 · `:readydeps` 1. Green: `:constraint`, `:donothing`, `:locking`, `:serializable`, `:pessimistic`,
 `:restart`, `:invalidate`, `:statswait`, `:pool2`.
 
 `pnpm test:ui` runs Playwright (6 tests) on the host (`pnpm exec playwright install chromium`
@@ -155,8 +154,6 @@ Numbered for reference from plans; gaps are retired numbers.
 
 **Shutdown and health (drill 23)**
 
-57. Readiness checks Postgres and Redis through the request pool. Under overload the check times
-    out and the LB can mark every replica DOWN: one slow scan during a restart cost 203–535 × 503.
 58. `usage_events.conversation_id` (`ON DELETE SET NULL`) has no index, so each deleted
     conversation scans the ledger; a 2.96M-row delete ran 8 minutes before it was cancelled.
 59. In-flight requests are counted but unbounded; no 503 + `Retry-After` backpressure.
