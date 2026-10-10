@@ -1,0 +1,13 @@
+
+  name=cascade-deps-3 org=2-10 rate=150.00/s maxvus=300 warmup=15s measured=75s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 11059
+  errors            : 5 (0.05%)
+  p50 / p95 / p99   : 7.09 / 490.62 / 1918.09 ms
+  min / avg / max   : 1.03 / 90.81 / 3285.56 ms
+  throughput        : 147.45 req/s of 150.00 offered
+  dropped           : 192 iterations never started
+  (incl. warm-up)   : p50 7.12  p95 289.18  p99 1836.56 ms
+  errors by endpoint: list 3 · search 0 · ingest 2
+  p99 by endpoint   : list 1696.84 · search 2077.68 · ingest 3016.49 ms
+
+RESULT,cascade-deps-3,2-10,300,150,3,0,2,7.09,490.62,1918.09,147.45,11059

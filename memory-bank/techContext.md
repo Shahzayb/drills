@@ -116,6 +116,19 @@ re-read after winning, release via `RedisService.delIfEquals` (Lua). `wait` poll
 503 (fail closed). `Cache-Control: no-cache` → `bypass`. Answers carry `x-stats-cache` and
 `x-served-at = computedAt`; `/metrics` adds `stats_cache_lookups_total` and `stats_recomputes_total`.
 
+**Shutdown (drill 23).** `SHUTDOWN=exit|nest|graceful` (default `graceful`). On a signal,
+`HealthService.beforeApplicationShutdown` turns readiness (`GET /health`) to 503 `draining`, keeps
+serving for `DRAIN_DELAY_MS` (3000), closes the listener, and puts `Connection: close` on every open
+response. `ImportsService` stops each job before its next batch: `failed`, `interrupted by
+shutdown`, exact `resume_row`. Nest then closes the pool and Redis. `main.ts` arms
+`SHUTDOWN_TIMEOUT_MS` (15000), then logs and calls `process.exit(1)`; an orchestrator's grace period
+MUST exceed it. `GET /health/live` is liveness: 200 while the process runs, with phase, in-flight
+count and event-loop lag (`EVENT_LOOP_LOG_MS` logs each window). Both hooks need a signal, so
+`app.close()` in tests skips them. Readiness answers from the process's phase alone
+(`READINESS=local|deps`, default `local`) and never touches the pool or a dependency; the dependency
+report is `GET /health/deps`, which nothing routes on. `deps` is the control arm: under overload its
+check times out in the saturated pool and the LB can lose its last server.
+
 ## Instruments and commands
 
 - **No transpiler.** Node strips types and k6 2.1.0 transpiles its own. `scripts/*.ts` run on the
@@ -131,8 +144,11 @@ re-read after winning, release via `RedisService.delIfEquals` (Lua). `wait` poll
 - **Instruments.** `db:explain`, `db:paging`, `db:search`, `db:storm`, `db:quota`, `db:claim`,
   `db:import`, `db:schema` (its `backfill` is a real operation between migrations 015 and 016),
   `db:entitle`, `db:stampede`, `db:ratelimit`, `db:pool`, `db:bench`;
-  `pnpm load list|search|write|ingest|page|pool`; `pnpm ui:paint`. Each has
-  `--help`; each plan documents its own.
+  `pnpm load list|search|write|ingest|page|pool|drain`; `pnpm ui:paint`; `pnpm drain` (a rolling
+  restart under k6 load). Each has `--help`; each plan documents its own.
+- **Drain rig.** `--profile drain` adds `api_a`/`api_b` (`extends: nest_server`, `node dist/main`
+  under `init: true`, the dev server's `dist/`, a shared `/tmp/imports` volume) and HAProxy `lb`
+  (`:8080`, stats `:8404`, check `GET /health` at `inter 1s fall 2 rise 2`, `retries 0`).
 - **Observability.** `db:stats:on|stats|stats:reset` (`pg_stat_statements`), `db:log:on|off|status`,
   `db:activity`, `logs:trace <rid>`, `trace:on|off` (collector + Jaeger under the `trace` profile).
 - **Stack.** `pnpm docker:up`; `docker:rebuild` after a dependency change (`/app/node_modules` is an
@@ -277,6 +293,17 @@ re-read after winning, release via `RedisService.delIfEquals` (Lua). `wait` poll
   model cannot show an outage (`dropped_iterations` exists only for arrival-rate executors); a
   tagged sub-metric needs a threshold; a counter's `rate` includes warm-up; p99 needs
   `summaryTrendStats`.
+
+**Shutdown and load balancing**
+
+- `server.close()` refuses new connections only. Open keep-alive sockets keep getting requests and
+  close after 5s idle (`keepAliveTimeout`), so a drain MUST send `Connection: close`.
+- A process that dies and reboots inside the LB's `fall × inter` (2s here) is never marked DOWN, and
+  its traffic is refused. With `timeout check` unset, HAProxy's check read times out at `inter`.
+- In the dev container, `pnpm` → `nest start --watch` forwards SIGTERM to Node.
+- `monitorEventLoopDelay` values include the timer resolution (~10ms idle). This API's overload is
+  I/O queueing; in-flight count and pool wait show it, and lag does not.
+- `docker events` keeps a short history that health-check execs overflow in ~90s; stream it.
 
 **Nest, Next and logging**
 

@@ -1,0 +1,128 @@
+drain — arm=nest rate=250/s delay=3000ms deadline=10000ms rows=300000 k6 exit 0
+
+  failed requests   : 132 (132 in the measured phase)
+  by status         : 503 ×132
+  by k6 error code  : 1503 ×132
+  by endpoint       : list ×110 · ingest ×19 · search ×3
+  by replica        : lb (no server) ×132
+  per second (t=0 is the first SIGTERM): 0s:78 1s:3 20s:22 21s:27 22s:2
+
+  import 01a127d4-4d98-7f34-b7e8-5dfdb8f9a028 on a
+  after the restart : running, resume_row 196000, updated 59s ago
+  stuck             : `running` with no worker; POST /imports/:id/retry refuses a running job
+
+  timeline (seconds from the first SIGTERM)
+    -0.030  host a stop
+     0.000  a    docker kill signal 15
+     0.000  a    shutdown_started inFlight=2
+     1.032  a    lb DOWN
+     7.428  a    docker die exit 143
+     7.435  host a exited
+     7.663  a    docker start
+     7.673  host a start
+     8.798  host a ready
+    10.048  a    lb UP
+    10.137  host a UP
+    20.138  host b stop
+    20.165  b    docker kill signal 15
+    20.165  b    shutdown_started inFlight=3
+    22.046  b    lb DOWN
+    28.211  b    docker die exit 143
+    28.218  host b exited
+    28.305  b    docker start
+    28.315  host b start
+    29.384  host b ready
+    31.062  b    lb UP
+    31.130  host b UP
+
+  haproxy abnormal sessions: 136
+    172.25.0.9:43992 [10/Oct/2026:21:59:43.248] public api/b 0/0/0/-1/51 400 0 - - CH-- 51/51/3/1/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:43724 [10/Oct/2026:21:59:43.299] public api/a 0/0/0/-1/0 400 0 - - CH-- 50/50/2/1/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:43902 [10/Oct/2026:21:59:43.287] public api/b 0/0/0/-1/12 400 0 - - CH-- 48/48/1/0/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:43728 [10/Oct/2026:21:59:43.243] public api/a 0/0/0/-1/56 400 0 - - CH-- 47/47/0/0/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:35088 [10/Oct/2026:21:59:52.996] public api/a 0/0/-1/-1/0 503 0 - - SC-- 73/73/5/2/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:43836 [10/Oct/2026:21:59:53.003] public api/a 0/0/-1/-1/1 503 0 - - SC-- 73/73/6/2/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:43664 [10/Oct/2026:21:59:53.012] public api/a 0/0/-1/-1/0 503 0 - - SC-- 73/73/5/2/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:34954 [10/Oct/2026:21:59:53.028] public api/a 0/0/-1/-1/0 503 0 - - SC-- 73/73/4/2/0 0/0 "POST /ingest HTTP/1.1"
+    172.25.0.9:34986 [10/Oct/2026:21:59:53.036] public api/a 0/0/-1/-1/0 503 0 - - SC-- 73/73/5/2/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:43770 [10/Oct/2026:21:59:53.043] public api/a 0/0/-1/-1/0 503 0 - - SC-- 73/73/6/2/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:44032 [10/Oct/2026:21:59:53.052] public api/a 0/0/-1/-1/0 503 0 - - SC-- 73/73/5/2/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:35052 [10/Oct/2026:21:59:53.068] public api/a 0/0/-1/-1/0 503 0 - - SC-- 73/73/4/2/0 0/0 "POST /ingest HTTP/1.1"
+    172.25.0.9:43848 [10/Oct/2026:21:59:53.075] public api/a 0/0/-1/-1/0 503 0 - - SC-- 73/73/5/2/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:35024 [10/Oct/2026:21:59:53.084] public api/a 0/0/-1/-1/0 503 0 - - SC-- 73/73/5/2/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:43702 [10/Oct/2026:21:59:53.108] public api/a 0/0/-1/-1/0 503 0 - - SC-- 73/73/4/2/0 0/0 "POST /ingest HTTP/1.1"
+
+  event-loop lag on a, 250ms windows from 5s before its SIGTERM to its exit
+```mermaid
+xychart-beta
+  title "Event-loop lag on api_a around SIGTERM (arm nest)"
+  x-axis "seconds from SIGTERM" ["-4.94", "-4.69", "-4.44", "-4.19", "-3.94", "-3.69", "-3.44", "-3.19", "-2.94", "-2.69", "-2.44", "-2.19", "-1.94", "-1.69", "-1.44", "-1.19", "-0.94", "-0.69", "-0.44", "-0.19", "0.06", "0.31", "0.56", "0.81", "1.06", "1.31", "1.56", "1.81", "2.06", "2.31", "2.56", "2.82", "3.07", "3.31", "3.56", "3.82", "4.07", "4.32", "4.57", "4.82", "5.07", "5.32", "5.57", "5.82", "6.07", "6.32", "6.57", "6.82", "7.07"]
+  y-axis "lag (ms)"
+  line [0.2, 0.18, 0.05, 0, 0.16, 0.17, 0.12, 0.12, 0.09, 0.17, 0, 0.09, 0.02, 0, 0.2, 0.09, 0.11, 0.1, 0.05, 0, 0.09, 0.07, 0.08, 0.22, 0.08, 0.13, 0.08, 0.1, 0.1, 0.11, 0.09, 0.1, 0.1, 0.08, 0.08, 0.1, 0.08, 0.1, 0.09, 0.1, 0.13, 0.1, 0.1, 0.09, 0.09, 0.08, 0.11, 0.08, 0.11]
+  line [1.84, 1.89, 0.85, 1.39, 0.81, 0.99, 0.99, 0.86, 1.53, 1.4, 0.91, 1.2, 0.9, 0.7, 1.47, 2.03, 1.84, 1.02, 0.42, 0.85, 4.83, 1.74, 0.52, 0.89, 3.03, 1.61, 1.47, 0.32, 0.72, 0.88, 1.48, 1, 0.45, 0.84, 0.93, 1.56, 1.6, 0.9, 0.92, 1.51, 1.09, 0.94, 0.79, 0.28, 0.94, 0.77, 0.84, 0.84, 1.39]
+```
+  (first line p50, second line max; a 250ms window holds ~23 samples, so its p99 is its max)
+    -4.940  p50 0.2 p99 1.84 max 1.84 phase serving inFlight 10
+    -4.690  p50 0.18 p99 1.89 max 1.89 phase serving inFlight 7
+    -4.441  p50 0.05 p99 0.85 max 0.85 phase serving inFlight 5
+    -4.191  p50 0 p99 1.39 max 1.39 phase serving inFlight 4
+    -3.940  p50 0.16 p99 0.81 max 0.81 phase serving inFlight 3
+    -3.690  p50 0.17 p99 0.99 max 0.99 phase serving inFlight 2
+    -3.440  p50 0.12 p99 0.99 max 0.99 phase serving inFlight 2
+    -3.190  p50 0.12 p99 0.86 max 0.86 phase serving inFlight 4
+    -2.940  p50 0.09 p99 1.53 max 1.53 phase serving inFlight 3
+    -2.689  p50 0.17 p99 1.4 max 1.4 phase serving inFlight 2
+    -2.440  p50 0 p99 0.91 max 0.91 phase serving inFlight 3
+    -2.190  p50 0.09 p99 1.2 max 1.2 phase serving inFlight 4
+    -1.940  p50 0.02 p99 0.9 max 0.9 phase serving inFlight 3
+    -1.689  p50 0 p99 0.7 max 0.7 phase serving inFlight 2
+    -1.440  p50 0.2 p99 1.47 max 1.47 phase serving inFlight 2
+    -1.189  p50 0.09 p99 2.03 max 2.03 phase serving inFlight 4
+    -0.939  p50 0.11 p99 1.84 max 1.84 phase serving inFlight 3
+    -0.688  p50 0.1 p99 1.02 max 1.02 phase serving inFlight 3
+    -0.437  p50 0.05 p99 0.42 max 0.42 phase serving inFlight 3
+    -0.187  p50 0 p99 0.85 max 0.85 phase serving inFlight 4
+     0.063  p50 0.09 p99 4.83 max 4.83 phase serving inFlight 2
+     0.313  p50 0.07 p99 1.74 max 1.74 phase serving inFlight 2
+     0.563  p50 0.08 p99 0.52 max 0.52 phase serving inFlight 1
+     0.813  p50 0.22 p99 0.89 max 0.89 phase serving inFlight 2
+     1.064  p50 0.08 p99 3.03 max 3.03 phase serving inFlight 2
+     1.315  p50 0.13 p99 1.61 max 1.61 phase serving inFlight 0
+     1.565  p50 0.08 p99 1.47 max 1.47 phase serving inFlight 0
+     1.815  p50 0.1 p99 0.32 max 0.32 phase serving inFlight 0
+     2.065  p50 0.1 p99 0.72 max 0.72 phase serving inFlight 0
+     2.315  p50 0.11 p99 0.88 max 0.88 phase serving inFlight 0
+     2.565  p50 0.09 p99 1.48 max 1.48 phase serving inFlight 0
+     2.816  p50 0.1 p99 1 max 1 phase serving inFlight 0
+     3.066  p50 0.1 p99 0.45 max 0.45 phase serving inFlight 0
+     3.315  p50 0.08 p99 0.84 max 0.84 phase serving inFlight 0
+     3.565  p50 0.08 p99 0.93 max 0.93 phase serving inFlight 0
+     3.816  p50 0.1 p99 1.56 max 1.56 phase serving inFlight 0
+     4.067  p50 0.08 p99 1.6 max 1.6 phase serving inFlight 0
+     4.318  p50 0.1 p99 0.9 max 0.9 phase serving inFlight 0
+     4.568  p50 0.09 p99 0.92 max 0.92 phase serving inFlight 0
+     4.818  p50 0.1 p99 1.51 max 1.51 phase serving inFlight 0
+     5.068  p50 0.13 p99 1.09 max 1.09 phase serving inFlight 0
+     5.318  p50 0.1 p99 0.94 max 0.94 phase serving inFlight 0
+     5.568  p50 0.1 p99 0.79 max 0.79 phase serving inFlight 0
+     5.818  p50 0.09 p99 0.28 max 0.28 phase serving inFlight 0
+     6.068  p50 0.09 p99 0.94 max 0.94 phase serving inFlight 0
+     6.318  p50 0.08 p99 0.77 max 0.77 phase serving inFlight 0
+     6.568  p50 0.11 p99 0.84 max 0.84 phase serving inFlight 0
+     6.817  p50 0.08 p99 0.84 max 0.84 phase serving inFlight 0
+     7.067  p50 0.11 p99 1.39 max 1.39 phase serving inFlight 0
+
+
+  name=nest-250 org=2-10 rate=250.00/s maxvus=300 warmup=15s measured=75s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 18727
+  errors            : 132 (0.70%)
+  p50 / p95 / p99   : 8.83 / 82.59 / 291.61 ms
+  min / avg / max   : 0.16 / 28.21 / 667.99 ms
+  throughput        : 249.69 req/s of 250.00 offered
+  dropped           : 23 iterations never started
+  (incl. warm-up)   : p50 8.84  p95 84.54  p99 259.12 ms
+  errors by endpoint: list 110 · search 3 · ingest 19
+  p99 by endpoint   : list 127.36 · search 502.25 · ingest 225.89 ms
+
+RESULT,nest-250,2-10,300,250,110,3,19,8.83,82.59,291.61,249.69,18727
+

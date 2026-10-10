@@ -29,6 +29,13 @@ import {
   ENTITLEMENT_TTL_S,
   RATE_LIMIT,
 } from '../entitlements/entitlements.service';
+import {
+  DRAIN_DELAY_MS,
+  EVENT_LOOP_LOG_MS,
+  READINESS,
+  SHUTDOWN,
+  SHUTDOWN_TIMEOUT_MS,
+} from '../health/health.service';
 import { QUERY_COUNTER_MODE } from '../observability/query-counter';
 import { TRACING_ENABLED } from '../observability/trace';
 import { logger } from '../observability/logger';
@@ -65,6 +72,11 @@ export interface InfoResponse {
     statsTtlS: string;
     statsTtlJitter: string;
     poolMax: string;
+    shutdown: string;
+    readiness: string;
+    drainDelayMs: string;
+    shutdownTimeoutMs: string;
+    eventLoopLogMs: string;
     queryCounter: string;
     logLevel: string;
     tracing: string;
@@ -119,6 +131,11 @@ export class InfoController {
         statsTtlS: String(STATS_TTL_S),
         statsTtlJitter: String(STATS_TTL_JITTER),
         poolMax: String(POOL_MAX),
+        shutdown: SHUTDOWN,
+        readiness: READINESS,
+        drainDelayMs: String(DRAIN_DELAY_MS),
+        shutdownTimeoutMs: String(SHUTDOWN_TIMEOUT_MS),
+        eventLoopLogMs: String(EVENT_LOOP_LOG_MS),
         queryCounter: QUERY_COUNTER_MODE,
         logLevel: logger.level,
         tracing: TRACING_ENABLED ? 'on' : 'off',

@@ -1,0 +1,13 @@
+
+  name=exit org=2-10 rate=150.00/s maxvus=300 warmup=15s measured=75s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 11250
+  errors            : 211 (1.88%)
+  p50 / p95 / p99   : 7.58 / 68.81 / 100.65 ms
+  min / avg / max   : 0.17 / 22.15 / 1166.86 ms
+  throughput        : 150.00 req/s of 150.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 7.61  p95 71.06  p99 100.13 ms
+  errors by endpoint: list 125 · search 44 · ingest 42
+  p99 by endpoint   : list 16.94 · search 130.19 · ingest 15.54 ms
+
+RESULT,exit,2-10,300,150,125,44,42,7.58,68.81,100.65,150.00,11250

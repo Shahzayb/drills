@@ -1,0 +1,13 @@
+
+  name=cascade-local-1 org=2-10 rate=150.00/s maxvus=300 warmup=15s measured=75s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 10516
+  errors            : 2007 (19.09%)
+  p50 / p95 / p99   : 7.49 / 2674.75 / 3895.00 ms
+  min / avg / max   : 2.22 / 665.51 / 5769.28 ms
+  throughput        : 140.21 req/s of 150.00 offered
+  dropped           : 735 iterations never started
+  (incl. warm-up)   : p50 46.33  p95 3275.67  p99 3920.07 ms
+  errors by endpoint: list 1154 · search 375 · ingest 478
+  p99 by endpoint   : list 3328.73 · search 4595.29 · ingest 3951.69 ms
+
+RESULT,cascade-local-1,2-10,300,150,1154,375,478,7.49,2674.75,3895.00,140.21,10516

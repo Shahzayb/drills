@@ -1,0 +1,13 @@
+
+  name=deadline-4s org=2-10 rate=150.00/s maxvus=300 warmup=15s measured=75s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 11080
+  errors            : 535 (4.83%)
+  p50 / p95 / p99   : 8.36 / 69.67 / 2002.44 ms
+  min / avg / max   : 0.06 / 80.15 / 3951.74 ms
+  throughput        : 147.73 req/s of 150.00 offered
+  dropped           : 171 iterations never started
+  (incl. warm-up)   : p50 8.45  p95 67.00  p99 2001.82 ms
+  errors by endpoint: list 315 · search 104 · ingest 116
+  p99 by endpoint   : list 2001.54 · search 2296.47 · ingest 2564.35 ms
+
+RESULT,deadline-4s,2-10,300,150,315,104,116,8.36,69.67,2002.44,147.73,11080

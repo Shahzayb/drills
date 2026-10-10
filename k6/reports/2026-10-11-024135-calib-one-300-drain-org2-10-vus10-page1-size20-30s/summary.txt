@@ -1,0 +1,13 @@
+
+  name=calib-one-300 org=2-10 rate=300.00/s maxvus=300 warmup=10s measured=30s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 8900
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 235.00 / 482.73 / 613.52 ms
+  min / avg / max   : 30.87 / 260.76 / 864.36 ms
+  throughput        : 296.67 req/s of 300.00 offered
+  dropped           : 101 iterations never started
+  (incl. warm-up)   : p50 212.23  p95 474.73  p99 576.13 ms
+  errors by endpoint: list 0 · search 0 · ingest 0
+  p99 by endpoint   : list 426.97 · search 566.70 · ingest 816.78 ms
+
+RESULT,calib-one-300,2-10,300,300,0,0,0,235.00,482.73,613.52,296.67,8900
