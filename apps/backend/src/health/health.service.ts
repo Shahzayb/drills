@@ -25,12 +25,12 @@ export const SHUTDOWN: ShutdownMode =
     ? process.env.SHUTDOWN
     : 'graceful';
 
-/** How long readiness says 503 while still serving, so the LB stops routing first. */
+/** Readiness 503 while still serving. ≥ 1.5 × the measured SIGTERM→LB DOWN (1.93s max at inter 1s, fall 2). */
 export const DRAIN_DELAY_MS = Number(process.env.DRAIN_DELAY_MS || 3000);
 
-/** From the signal to `process.exit(1)`, whatever is still open. Enforced in main.ts. */
+/** Signal to `process.exit(1)`. Delay 3s + 2 × the slowest request (4.67s whale stats), rounded up. Card 23. */
 export const SHUTDOWN_TIMEOUT_MS = Number(
-  process.env.SHUTDOWN_TIMEOUT_MS || 10_000,
+  process.env.SHUTDOWN_TIMEOUT_MS || 15_000,
 );
 
 /** Logs an `event_loop` line per window when > 0. The window is 1s otherwise. */

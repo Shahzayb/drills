@@ -1,0 +1,13 @@
+
+  name=deadline-4s-rerun org=2-10 rate=150.00/s maxvus=300 warmup=15s measured=75s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 11073
+  errors            : 203 (1.83%)
+  p50 / p95 / p99   : 6.44 / 75.56 / 1751.20 ms
+  min / avg / max   : 0.07 / 76.08 / 3048.31 ms
+  throughput        : 147.64 req/s of 150.00 offered
+  dropped           : 178 iterations never started
+  (incl. warm-up)   : p50 6.41  p95 65.99  p99 1685.90 ms
+  errors by endpoint: list 121 · search 40 · ingest 42
+  p99 by endpoint   : list 1518.57 · search 1948.76 · ingest 2688.07 ms
+
+RESULT,deadline-4s-rerun,2-10,300,150,121,40,42,6.44,75.56,1751.20,147.64,11073

@@ -1,0 +1,13 @@
+
+  name=nest-250 org=2-10 rate=250.00/s maxvus=300 warmup=15s measured=75s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 18727
+  errors            : 132 (0.70%)
+  p50 / p95 / p99   : 8.83 / 82.59 / 291.61 ms
+  min / avg / max   : 0.16 / 28.21 / 667.99 ms
+  throughput        : 249.69 req/s of 250.00 offered
+  dropped           : 23 iterations never started
+  (incl. warm-up)   : p50 8.84  p95 84.54  p99 259.12 ms
+  errors by endpoint: list 110 · search 3 · ingest 19
+  p99 by endpoint   : list 127.36 · search 502.25 · ingest 225.89 ms
+
+RESULT,nest-250,2-10,300,250,110,3,19,8.83,82.59,291.61,249.69,18727

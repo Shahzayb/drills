@@ -1,0 +1,13 @@
+
+  name=graceful-2 org=2-10 rate=150.00/s maxvus=300 warmup=15s measured=75s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 11250
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 6.68 / 58.61 / 68.95 ms
+  min / avg / max   : 0.88 / 16.72 / 439.29 ms
+  throughput        : 150.00 req/s of 150.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 6.69  p95 58.76  p99 69.05 ms
+  errors by endpoint: list 0 · search 0 · ingest 0
+  p99 by endpoint   : list 9.84 · search 304.08 · ingest 7.54 ms
+
+RESULT,graceful-2,2-10,300,150,0,0,0,6.68,58.61,68.95,150.00,11250

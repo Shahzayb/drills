@@ -1,0 +1,93 @@
+drain — arm=exit rate=150/s delay=3000ms deadline=10000ms rows=300000 k6 exit 0
+
+  failed requests   : 211 (211 in the measured phase)
+  by status         : 503 ×211
+  by k6 error code  : 1503 ×211
+  by endpoint       : search ×44 · list ×125 · ingest ×42
+  by replica        : lb (no server) ×211
+  per second (t=0 is the first SIGTERM): 0s:40 1s:95 12s:15 13s:61
+
+  import 01a127cd-4eb8-7043-897d-7e9ecd8937b4 on b
+  after the restart : running, resume_row 68000, updated 66s ago
+  stuck             : `running` with no worker; POST /imports/:id/retry refuses a running job
+
+  timeline (seconds from the first SIGTERM)
+    -0.052  host b stop
+     0.000  b    docker kill signal 15
+     0.494  b    docker die exit 143
+     0.506  host b exited
+     0.613  b    docker start
+     0.624  host b start
+     1.921  host b ready
+     2.649  host b UP
+    12.652  host a stop
+    12.677  a    docker kill signal 15
+    12.760  a    docker die exit 143
+    12.766  host a exited
+    12.846  a    docker start
+    12.856  host a start
+    13.896  host a ready
+    14.615  host a UP
+
+  haproxy abnormal sessions: 208
+    172.25.0.9:41726 [10/Oct/2026:21:52:05.080] public api/a 0/0/0/-1/26 400 0 - - CH-- 51/51/2/0/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:41886 [10/Oct/2026:21:52:05.085] public api/b 0/0/0/-1/21 400 0 - - CH-- 50/50/1/0/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:41614 [10/Oct/2026:21:52:14.734] public api/b 0/0/-1/-1/0 503 0 - - SC-- 51/51/2/0/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:34904 [10/Oct/2026:21:52:14.735] public api/b 0/0/-1/-1/0 503 0 - - SC-- 51/51/3/0/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:41972 [10/Oct/2026:21:52:14.746] public api/b 0/0/-1/-1/0 503 0 - - SC-- 51/51/2/0/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:41968 [10/Oct/2026:21:52:14.760] public api/b 0/0/-1/-1/1 503 0 - - SC-- 51/51/2/0/0 0/0 "POST /ingest HTTP/1.1"
+    172.25.0.9:41914 [10/Oct/2026:21:52:14.774] public api/b 0/0/-1/-1/1 503 0 - - SC-- 51/51/3/0/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:41690 [10/Oct/2026:21:52:14.786] public api/b 0/0/-1/-1/0 503 0 - - SC-- 51/51/3/0/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:41928 [10/Oct/2026:21:52:14.800] public api/b 0/0/-1/-1/2 503 0 - - SC-- 51/51/3/0/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:41646 [10/Oct/2026:21:52:14.814] public api/b 0/0/-1/-1/0 503 0 - - SC-- 51/51/4/0/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:41834 [10/Oct/2026:21:52:14.826] public api/b 0/0/-1/-1/0 503 0 - - SC-- 51/51/2/0/0 0/0 "POST /ingest HTTP/1.1"
+    172.25.0.9:41640 [10/Oct/2026:21:52:14.840] public api/b 0/0/-1/-1/0 503 0 - - SC-- 51/51/3/0/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:41952 [10/Oct/2026:21:52:15.333] public api/b 0/0/-1/-1/0 503 0 - - SC-- 51/51/38/36/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:41900 [10/Oct/2026:21:52:15.346] public api/b 0/0/-1/-1/1 503 0 - - SC-- 51/51/38/36/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:41686 [10/Oct/2026:21:52:15.359] public api/b 0/0/-1/-1/1 503 0 - - SC-- 51/51/38/36/0 0/0 "POST /ingest HTTP/1.1"
+
+  event-loop lag on b, 250ms windows from 5s before its SIGTERM to its exit
+```mermaid
+xychart-beta
+  title "Event-loop lag on api_b around SIGTERM (arm exit)"
+  x-axis "seconds from SIGTERM" ["-4.86", "-4.62", "-4.36", "-4.11", "-3.86", "-3.61", "-3.36", "-3.11", "-2.86", "-2.61", "-2.36", "-2.11", "-1.86", "-1.61", "-1.36", "-1.11", "-0.86", "-0.61", "-0.36", "-0.11"]
+  y-axis "lag (ms)"
+  line [0.19, 0.26, 0.12, 0.11, 0.34, 0.26, 0.16, 0, 0.07, 0.34, 0.17, 0.31, 0.05, 0.13, 0.18, 0.15, 0.04, 0.19, 0.07, 0.26]
+  line [4.09, 1, 2.57, 1.28, 1.3, 1.01, 1.67, 1.98, 0.92, 1.13, 1.62, 1.28, 0.73, 0.85, 0.98, 1.3, 1.03, 1.01, 1.03, 1.07]
+```
+  (first line p50, second line max; a 250ms window holds ~23 samples, so its p99 is its max)
+    -4.864  p50 0.19 p99 4.09 max 4.09 phase serving inFlight 3
+    -4.615  p50 0.26 p99 1 max 1 phase serving inFlight 2
+    -4.364  p50 0.12 p99 2.57 max 2.57 phase serving inFlight 3
+    -4.113  p50 0.11 p99 1.28 max 1.28 phase serving inFlight 1
+    -3.864  p50 0.34 p99 1.3 max 1.3 phase serving inFlight 2
+    -3.613  p50 0.26 p99 1.01 max 1.01 phase serving inFlight 2
+    -3.362  p50 0.16 p99 1.67 max 1.67 phase serving inFlight 3
+    -3.112  p50 0 p99 1.98 max 1.98 phase serving inFlight 1
+    -2.863  p50 0.07 p99 0.92 max 0.92 phase serving inFlight 1
+    -2.611  p50 0.34 p99 1.13 max 1.13 phase serving inFlight 3
+    -2.362  p50 0.17 p99 1.62 max 1.62 phase serving inFlight 2
+    -2.111  p50 0.31 p99 1.28 max 1.28 phase serving inFlight 1
+    -1.861  p50 0.05 p99 0.73 max 0.73 phase serving inFlight 1
+    -1.610  p50 0.13 p99 0.85 max 0.85 phase serving inFlight 2
+    -1.361  p50 0.18 p99 0.98 max 0.98 phase serving inFlight 2
+    -1.110  p50 0.15 p99 1.3 max 1.3 phase serving inFlight 1
+    -0.861  p50 0.04 p99 1.03 max 1.03 phase serving inFlight 1
+    -0.610  p50 0.19 p99 1.01 max 1.01 phase serving inFlight 2
+    -0.361  p50 0.07 p99 1.03 max 1.03 phase serving inFlight 2
+    -0.111  p50 0.26 p99 1.07 max 1.07 phase serving inFlight 1
+
+
+  name=exit org=2-10 rate=150.00/s maxvus=300 warmup=15s measured=75s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 11250
+  errors            : 211 (1.88%)
+  p50 / p95 / p99   : 7.58 / 68.81 / 100.65 ms
+  min / avg / max   : 0.17 / 22.15 / 1166.86 ms
+  throughput        : 150.00 req/s of 150.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 7.61  p95 71.06  p99 100.13 ms
+  errors by endpoint: list 125 · search 44 · ingest 42
+  p99 by endpoint   : list 16.94 · search 130.19 · ingest 15.54 ms
+
+RESULT,exit,2-10,300,150,125,44,42,7.58,68.81,100.65,150.00,11250
+

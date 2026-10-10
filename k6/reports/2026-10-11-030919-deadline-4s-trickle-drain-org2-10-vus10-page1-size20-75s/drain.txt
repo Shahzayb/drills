@@ -1,0 +1,111 @@
+drain — arm=graceful rate=150/s delay=3000ms deadline=4000ms rows=300000 k6 exit 0
+
+  failed requests   : 0 (0 in the measured phase)
+  by status         : none
+  by k6 error code  : none
+  by endpoint       : none
+  by replica        : none
+  per second (t=0 is the first SIGTERM): none
+
+  import 01a127dd-51cd-75a3-8fe8-4f45395fe760 on a
+  after the restart : failed (row 96001: interrupted by shutdown), resume_row 95000, updated 66s ago
+  after one retry   : succeeded, written 300000 + skipped 0 = 300000 of 300000
+
+  timeline (seconds from the first SIGTERM)
+    -0.027  host a stop
+     0.000  a    docker kill signal 15
+     0.012  a    import_failed err=interrupted by shutdown
+     0.012  a    import_drain_complete jobs=1 ms=12
+     0.012  a    shutdown_started inFlight=2
+     0.975  host a slow request (trickle) sent
+     1.480  a    lb DOWN
+     3.013  a    drain_listener_closed inFlight=1 ms=3000.82
+     3.999  a    shutdown_deadline_exceeded inFlight=1
+     4.252  a    docker die exit 1
+     4.261  host a exited
+     4.261  host a slow request: exit 137 
+     4.359  a    docker start
+     4.368  host a start
+     5.286  host a ready
+     6.489  a    lb UP
+     6.528  host a UP
+    16.529  host b stop
+    16.560  b    docker kill signal 15
+    16.560  b    import_drain_complete jobs=0 ms=0
+    16.560  b    shutdown_started inFlight=1
+    18.181  b    lb DOWN
+    19.560  b    drain_listener_closed inFlight=0 ms=2999.71
+    19.561  b    drain_complete ms=3000.49
+    19.650  b    docker die exit 143
+    19.658  host b exited
+    19.741  b    docker start
+    19.749  host b start
+    20.653  host b ready
+    22.191  b    lb UP
+    22.295  host b UP
+
+  haproxy abnormal sessions: 2
+    172.25.0.9:49912 [10/Oct/2026:22:09:34.385] public api/b 0/0/0/-1/0 400 0 - - CH-- 51/51/1/1/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:50346 [10/Oct/2026:22:09:34.359] public api/b 0/0/0/-1/26 400 0 - - CH-- 49/49/0/0/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+
+  event-loop lag on a, 250ms windows from 5s before its SIGTERM to its exit
+```mermaid
+xychart-beta
+  title "Event-loop lag on api_a around SIGTERM (arm graceful)"
+  x-axis "seconds from SIGTERM" ["-4.84", "-4.59", "-4.34", "-4.09", "-3.84", "-3.59", "-3.34", "-3.09", "-2.84", "-2.59", "-2.34", "-2.09", "-1.84", "-1.59", "-1.34", "-1.09", "-0.84", "-0.59", "-0.34", "-0.09", "0.16", "0.41", "0.67", "0.92", "1.17", "1.42", "1.67", "1.92", "2.17", "2.42", "2.67", "2.92", "3.17", "3.42", "3.67", "3.92"]
+  y-axis "lag (ms)"
+  line [0.35, 0.23, 0.34, 0.22, 0.26, 0, 0.29, 0.18, 0.17, 0.1, 0.4, 0.1, 0.1, 0.04, 0.4, 0.24, 0.17, 0.36, 0.27, 0.14, 0.26, 0.21, 0.38, 0.53, 0.22, 0.13, 0.36, 0.18, 0.18, 0.15, 0.14, 0.16, 0.17, 0.14, 0.17, 0.22]
+  line [1.35, 1.36, 1.24, 1.07, 0.91, 1.12, 1.67, 1, 1.05, 1.14, 1.17, 1.22, 1.05, 1.05, 1.15, 1.73, 1.38, 1.56, 1.5, 1.4, 1.1, 1.19, 1.56, 1, 1.43, 1.66, 1.19, 1.12, 0.94, 0.74, 1.11, 0.95, 1.27, 0.94, 0.61, 2.1]
+```
+  (first line p50, second line max; a 250ms window holds ~23 samples, so its p99 is its max)
+    -4.839  p50 0.35 p99 1.35 max 1.35 phase serving inFlight 1
+    -4.589  p50 0.23 p99 1.36 max 1.36 phase serving inFlight 2
+    -4.339  p50 0.34 p99 1.24 max 1.24 phase serving inFlight 2
+    -4.089  p50 0.22 p99 1.07 max 1.07 phase serving inFlight 1
+    -3.839  p50 0.26 p99 0.91 max 0.91 phase serving inFlight 1
+    -3.588  p50 0 p99 1.12 max 1.12 phase serving inFlight 2
+    -3.338  p50 0.29 p99 1.67 max 1.67 phase serving inFlight 2
+    -3.087  p50 0.18 p99 1 max 1 phase serving inFlight 1
+    -2.838  p50 0.17 p99 1.05 max 1.05 phase serving inFlight 0
+    -2.588  p50 0.1 p99 1.14 max 1.14 phase serving inFlight 2
+    -2.338  p50 0.4 p99 1.17 max 1.17 phase serving inFlight 2
+    -2.088  p50 0.1 p99 1.22 max 1.22 phase serving inFlight 1
+    -1.837  p50 0.1 p99 1.05 max 1.05 phase serving inFlight 0
+    -1.587  p50 0.04 p99 1.05 max 1.05 phase serving inFlight 1
+    -1.336  p50 0.4 p99 1.15 max 1.15 phase serving inFlight 2
+    -1.086  p50 0.24 p99 1.73 max 1.73 phase serving inFlight 2
+    -0.837  p50 0.17 p99 1.38 max 1.38 phase serving inFlight 0
+    -0.587  p50 0.36 p99 1.56 max 1.56 phase serving inFlight 2
+    -0.337  p50 0.27 p99 1.5 max 1.5 phase serving inFlight 2
+    -0.086  p50 0.14 p99 1.4 max 1.4 phase serving inFlight 2
+     0.164  p50 0.26 p99 1.1 max 1.1 phase draining inFlight 0
+     0.415  p50 0.21 p99 1.19 max 1.19 phase draining inFlight 1
+     0.666  p50 0.38 p99 1.56 max 1.56 phase draining inFlight 2
+     0.915  p50 0.53 p99 1 max 1 phase draining inFlight 2
+     1.166  p50 0.22 p99 1.43 max 1.43 phase draining inFlight 1
+     1.416  p50 0.13 p99 1.66 max 1.66 phase draining inFlight 2
+     1.667  p50 0.36 p99 1.19 max 1.19 phase draining inFlight 1
+     1.917  p50 0.18 p99 1.12 max 1.12 phase draining inFlight 1
+     2.167  p50 0.18 p99 0.94 max 0.94 phase draining inFlight 1
+     2.417  p50 0.15 p99 0.74 max 0.74 phase draining inFlight 1
+     2.667  p50 0.14 p99 1.11 max 1.11 phase draining inFlight 1
+     2.916  p50 0.16 p99 0.95 max 0.95 phase draining inFlight 1
+     3.167  p50 0.17 p99 1.27 max 1.27 phase closing inFlight 1
+     3.416  p50 0.14 p99 0.94 max 0.94 phase closing inFlight 1
+     3.666  p50 0.17 p99 0.61 max 0.61 phase closing inFlight 1
+     3.917  p50 0.22 p99 2.1 max 2.1 phase closing inFlight 1
+
+
+  name=deadline-4s-trickle org=2-10 rate=150.00/s maxvus=300 warmup=15s measured=75s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 11250
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 6.40 / 59.84 / 68.58 ms
+  min / avg / max   : 0.99 / 16.07 / 169.64 ms
+  throughput        : 150.00 req/s of 150.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 6.39  p95 59.75  p99 68.48 ms
+  errors by endpoint: list 0 · search 0 · ingest 0
+  p99 by endpoint   : list 9.42 · search 80.93 · ingest 6.66 ms
+
+RESULT,deadline-4s-trickle,2-10,300,150,0,0,0,6.40,59.84,68.58,150.00,11250
+

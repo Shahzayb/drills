@@ -43,7 +43,7 @@ const KNOBS = {
   },
   slow: {
     def: '',
-    help: 'set to fire one ~3s whale stats request into the first drain',
+    help: 'one slow request into the first drain: stats (a ~4.7s whale scan) | trickle (an 8s upload, no DB load)',
   },
   'api-key': {
     def: '',
@@ -138,6 +138,22 @@ async function waitUp(names: Replica[], ms = 60_000): Promise<void> {
   throw new Error(`${names.join(',')} not UP after ${ms}ms`);
 }
 
+// A restart can beat the LB's fall x inter, leaving it UP throughout, so readiness from inside is the truth.
+async function waitReady(server: Replica): Promise<void> {
+  for (let i = 0; i < 600; i++) {
+    const r = await dockerAsync(
+      'exec',
+      REPLICAS[server],
+      'wget',
+      '-qO-',
+      'http://localhost:3002/health',
+    );
+    if (r.status === 0) return;
+    await sleep(100);
+  }
+  throw new Error(`${server} never answered /health`);
+}
+
 const env: Record<string, string> = {
   ...process.env,
   SHUTDOWN: ARM,
@@ -166,6 +182,7 @@ const up = spawnSync(
   },
 );
 if (up.status !== 0) process.exit(1);
+await Promise.all([waitReady('a'), waitReady('b')]);
 await waitUp(['a', 'b']);
 
 const arms: Record<string, Record<string, string>> = {};
@@ -296,12 +313,21 @@ console.log(
 const marks: { t: number; what: string }[] = [];
 const mark = (what: string) => marks.push({ t: Date.now(), what });
 
-async function restart(server: Replica, slow: boolean): Promise<void> {
+// Sent from inside the replica, so it lands on the one draining. 16 rows, one every 500ms.
+const trickle = (
+  org: string,
+) => `const r=require('http').request({port:3002,method:'POST',path:'/imports',headers:{'x-org-id':'${org}',
+'content-type':'text/csv'}},(res)=>{console.log('status '+res.statusCode);res.resume()});
+r.on('error',(e)=>{console.log('error '+e.code);process.exitCode=1});
+r.write('external_id,status,created_at,updated_at,subject,message\\n');let i=0;const t=setInterval(()=>{
+r.write('trickle-'+Date.now()+',open,2024-03-04T09:30:00Z,2024-03-04T09:30:00Z,s,m\\n');if(++i>=16){clearInterval(t);r.end()}},500);`;
+
+async function restart(server: Replica, slow: string): Promise<void> {
   const container = REPLICAS[server];
-  const slowReq = slow
-    ? sleep(1000).then(() => {
-        mark(`${server} slow request sent`);
-        return dockerAsync(
+  const send = () =>
+    slow === 'trickle'
+      ? dockerAsync('exec', container, 'node', '-e', trickle(orgId))
+      : dockerAsync(
           'exec',
           container,
           'wget',
@@ -314,6 +340,10 @@ async function restart(server: Replica, slow: boolean): Promise<void> {
           'cache-control: no-cache',
           'http://localhost:3002/messages/stats',
         );
+  const slowReq = slow
+    ? sleep(1000).then(() => {
+        mark(`${server} slow request (${slow}) sent`);
+        return send();
       })
     : null;
   mark(`${server} stop`);
@@ -322,19 +352,21 @@ async function restart(server: Replica, slow: boolean): Promise<void> {
   if (slowReq) {
     const r = await slowReq;
     mark(
-      `${server} slow request: wget exit ${r.status} ${r.out.trim().split('\n').pop()?.slice(0, 80) ?? ''}`,
+      `${server} slow request: exit ${r.status} ${r.out.trim().split('\n').pop()?.slice(0, 80) ?? ''}`,
     );
   }
   await dockerAsync('start', container);
   mark(`${server} start`);
+  await waitReady(server);
+  mark(`${server} ready`);
   await waitUp([server]);
   mark(`${server} UP`);
 }
 
 await sleep(Math.max(0, firstKill - (Date.now() - startedAt.getTime())));
-await restart(first, Boolean(opt('slow')));
+await restart(first, opt('slow'));
 await sleep(Number(opt('gap')) * 1000);
-await restart(second, false);
+await restart(second, '');
 
 const k6Code = await k6Done;
 const reportDir = `${root}${k6Out.match(/k6\/reports\/[^/\s]+\//)?.[0] ?? ''}`;

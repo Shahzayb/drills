@@ -98,7 +98,7 @@ describe('GET /info arms (e2e)', () => {
         ? process.env.SHUTDOWN
         : 'graceful',
       drainDelayMs: process.env.DRAIN_DELAY_MS || '3000',
-      shutdownTimeoutMs: process.env.SHUTDOWN_TIMEOUT_MS || '10000',
+      shutdownTimeoutMs: process.env.SHUTDOWN_TIMEOUT_MS || '15000',
       eventLoopLogMs: process.env.EVENT_LOOP_LOG_MS || '0',
       queryCounter:
         process.env.QUERY_COUNTER === 'off' ||

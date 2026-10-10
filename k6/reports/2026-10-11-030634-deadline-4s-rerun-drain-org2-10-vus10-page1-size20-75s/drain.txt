@@ -1,0 +1,126 @@
+drain — arm=graceful rate=150/s delay=3000ms deadline=4000ms rows=300000 k6 exit 0
+
+  failed requests   : 203 (203 in the measured phase)
+  by status         : 503 ×203
+  by k6 error code  : 1503 ×203
+  by endpoint       : ingest ×42 · list ×121 · search ×40
+  by replica        : lb (no server) ×203
+  per second (t=0 is the first SIGTERM): 6s:137 7s:66
+
+  import 01a127da-ceac-71f1-aede-9cc5adfa47da on a
+  after the restart : failed (row 90001: interrupted by shutdown), resume_row 89000, updated 66s ago
+  after one retry   : succeeded, written 300000 + skipped 0 = 300000 of 300000
+
+  timeline (seconds from the first SIGTERM)
+    -0.024  host a stop
+     0.000  a    docker kill signal 15
+     0.059  a    import_failed err=interrupted by shutdown
+     0.059  a    import_drain_complete jobs=1 ms=58
+     0.059  a    shutdown_started inFlight=2
+     0.977  host a slow request sent
+     1.408  a    lb DOWN
+     3.060  a    drain_listener_closed inFlight=1 ms=3000.5
+     4.002  a    shutdown_deadline_exceeded inFlight=1
+     4.384  a    docker die exit 1
+     4.395  host a exited
+     4.395  host a slow request: wget exit 1 wget: error getting response: Invalid argument
+     4.674  a    docker start
+     4.691  host a start
+     6.091  b    lb DOWN
+     6.507  host a ready
+     7.443  a    lb UP
+     7.448  host a UP
+     8.100  b    lb UP
+    17.449  host b stop
+    17.477  b    docker kill signal 15
+    17.478  b    import_drain_complete jobs=0 ms=0
+    17.478  b    shutdown_started inFlight=1
+    19.127  b    lb DOWN
+    20.479  b    drain_listener_closed inFlight=0 ms=3001.22
+    20.481  b    drain_complete ms=3003.57
+    20.597  b    docker die exit 143
+    20.604  host b exited
+    20.687  b    docker start
+    20.695  host b start
+    21.319  host b ready
+    23.138  b    lb UP
+    23.166  host b UP
+
+  haproxy abnormal sessions: 205
+    172.25.0.9:39702 [10/Oct/2026:22:06:49.720] public api/a 0/0/0/-1/20 400 0 - - CH-- 51/51/1/0/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:39714 [10/Oct/2026:22:06:49.714] public api/b 0/0/0/-1/26 400 0 - - CH-- 51/51/0/0/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:40474 [10/Oct/2026:22:07:05.514] public api/<NOSRV> 0/-1/-1/-1/0 503 0 - - SC-- 228/228/187/0/0 0/0 "POST /ingest HTTP/1.1"
+    172.25.0.9:40480 [10/Oct/2026:22:07:05.522] public api/<NOSRV> 0/-1/-1/-1/0 503 0 - - SC-- 228/228/185/0/0 0/0 "POST /ingest HTTP/1.1"
+    172.25.0.9:39606 [10/Oct/2026:22:07:05.528] public api/<NOSRV> 0/-1/-1/-1/0 503 0 - - SC-- 228/228/184/0/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:40762 [10/Oct/2026:22:07:05.536] public api/<NOSRV> 0/-1/-1/-1/0 503 0 - - SC-- 228/228/182/0/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:39554 [10/Oct/2026:22:07:05.542] public api/<NOSRV> 0/-1/-1/-1/0 503 0 - - SC-- 228/228/179/0/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:39628 [10/Oct/2026:22:07:05.548] public api/<NOSRV> 0/-1/-1/-1/0 503 0 - - SC-- 228/228/179/0/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:39742 [10/Oct/2026:22:07:05.556] public api/<NOSRV> 0/-1/-1/-1/0 503 0 - - SC-- 228/228/179/0/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:40764 [10/Oct/2026:22:07:05.562] public api/<NOSRV> 0/-1/-1/-1/0 503 0 - - SC-- 228/228/179/0/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:40034 [10/Oct/2026:22:07:05.569] public api/<NOSRV> 0/-1/-1/-1/0 503 0 - - SC-- 228/228/179/0/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:40022 [10/Oct/2026:22:07:05.575] public api/<NOSRV> 0/-1/-1/-1/0 503 0 - - SC-- 228/228/179/0/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:39926 [10/Oct/2026:22:07:05.582] public api/<NOSRV> 0/-1/-1/-1/0 503 0 - - SC-- 228/228/179/0/0 0/0 "POST /ingest HTTP/1.1"
+    172.25.0.9:39936 [10/Oct/2026:22:07:05.588] public api/<NOSRV> 0/-1/-1/-1/0 503 0 - - SC-- 228/228/179/0/0 0/0 "POST /ingest HTTP/1.1"
+    172.25.0.9:39456 [10/Oct/2026:22:07:05.595] public api/<NOSRV> 0/-1/-1/-1/0 503 0 - - SC-- 228/228/179/0/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+
+  event-loop lag on a, 250ms windows from 5s before its SIGTERM to its exit
+```mermaid
+xychart-beta
+  title "Event-loop lag on api_a around SIGTERM (arm graceful)"
+  x-axis "seconds from SIGTERM" ["-4.99", "-4.74", "-4.49", "-4.23", "-3.98", "-3.73", "-3.48", "-3.23", "-2.98", "-2.73", "-2.48", "-2.23", "-1.98", "-1.73", "-1.48", "-1.23", "-0.98", "-0.73", "-0.48", "-0.23", "0.02", "0.27", "0.52", "0.78", "1.02", "1.27", "1.52", "1.77", "2.02", "2.27", "2.52", "2.77", "3.02", "3.27", "3.52", "3.77"]
+  y-axis "lag (ms)"
+  line [0.31, 0.22, 0.2, 0.12, 0.06, 0.13, 0.15, 0.02, 0.36, 0.13, 0.22, 0.18, 0.34, 0.15, 0.26, 0.3, 0.2, 0.48, 0.22, 0.13, 0.3, 0.34, 0.36, 0.44, 0.15, 0.22, 0.13, 0.1, 0.12, 0.12, 0.12, 0.12, 0.1, 0.1, 0.12, 0.13]
+  line [1.67, 1.53, 2.05, 1.37, 1.34, 1.4, 1.33, 1.06, 1.6, 2.19, 1.04, 1.12, 1.12, 0.99, 1.86, 1.75, 0.99, 1.88, 2.23, 1.1, 1.09, 3.06, 2.76, 0.94, 1.27, 1.11, 0.63, 1.19, 1.11, 0.39, 1.15, 0.52, 0.27, 0.51, 0.35, 0.68]
+```
+  (first line p50, second line max; a 250ms window holds ~23 samples, so its p99 is its max)
+    -4.985  p50 0.31 p99 1.67 max 1.67 phase serving inFlight 2
+    -4.735  p50 0.22 p99 1.53 max 1.53 phase serving inFlight 2
+    -4.485  p50 0.2 p99 2.05 max 2.05 phase serving inFlight 1
+    -4.234  p50 0.12 p99 1.37 max 1.37 phase serving inFlight 1
+    -3.984  p50 0.06 p99 1.34 max 1.34 phase serving inFlight 2
+    -3.734  p50 0.13 p99 1.4 max 1.4 phase serving inFlight 2
+    -3.484  p50 0.15 p99 1.33 max 1.33 phase serving inFlight 1
+    -3.233  p50 0.02 p99 1.06 max 1.06 phase serving inFlight 1
+    -2.983  p50 0.36 p99 1.6 max 1.6 phase serving inFlight 1
+    -2.732  p50 0.13 p99 2.19 max 2.19 phase serving inFlight 2
+    -2.482  p50 0.22 p99 1.04 max 1.04 phase serving inFlight 1
+    -2.231  p50 0.18 p99 1.12 max 1.12 phase serving inFlight 1
+    -1.980  p50 0.34 p99 1.12 max 1.12 phase serving inFlight 1
+    -1.730  p50 0.15 p99 0.99 max 0.99 phase serving inFlight 2
+    -1.480  p50 0.26 p99 1.86 max 1.86 phase serving inFlight 2
+    -1.229  p50 0.3 p99 1.75 max 1.75 phase serving inFlight 1
+    -0.980  p50 0.2 p99 0.99 max 0.99 phase serving inFlight 2
+    -0.729  p50 0.48 p99 1.88 max 1.88 phase serving inFlight 2
+    -0.478  p50 0.22 p99 2.23 max 2.23 phase serving inFlight 2
+    -0.228  p50 0.13 p99 1.1 max 1.1 phase serving inFlight 1
+     0.022  p50 0.3 p99 1.09 max 1.09 phase serving inFlight 1
+     0.273  p50 0.34 p99 3.06 max 3.06 phase draining inFlight 1
+     0.524  p50 0.36 p99 2.76 max 2.76 phase draining inFlight 2
+     0.775  p50 0.44 p99 0.94 max 0.94 phase draining inFlight 1
+     1.025  p50 0.15 p99 1.27 max 1.27 phase draining inFlight 2
+     1.274  p50 0.22 p99 1.11 max 1.11 phase draining inFlight 3
+     1.524  p50 0.13 p99 0.63 max 0.63 phase draining inFlight 5
+     1.774  p50 0.1 p99 1.19 max 1.19 phase draining inFlight 3
+     2.024  p50 0.12 p99 1.11 max 1.11 phase draining inFlight 1
+     2.274  p50 0.12 p99 0.39 max 0.39 phase draining inFlight 1
+     2.524  p50 0.12 p99 1.15 max 1.15 phase draining inFlight 1
+     2.774  p50 0.12 p99 0.52 max 0.52 phase draining inFlight 1
+     3.025  p50 0.1 p99 0.27 max 0.27 phase draining inFlight 1
+     3.275  p50 0.1 p99 0.51 max 0.51 phase closing inFlight 1
+     3.524  p50 0.12 p99 0.35 max 0.35 phase closing inFlight 1
+     3.774  p50 0.13 p99 0.68 max 0.68 phase closing inFlight 1
+
+
+  name=deadline-4s-rerun org=2-10 rate=150.00/s maxvus=300 warmup=15s measured=75s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 11073
+  errors            : 203 (1.83%)
+  p50 / p95 / p99   : 6.44 / 75.56 / 1751.20 ms
+  min / avg / max   : 0.07 / 76.08 / 3048.31 ms
+  throughput        : 147.64 req/s of 150.00 offered
+  dropped           : 178 iterations never started
+  (incl. warm-up)   : p50 6.41  p95 65.99  p99 1685.90 ms
+  errors by endpoint: list 121 · search 40 · ingest 42
+  p99 by endpoint   : list 1518.57 · search 1948.76 · ingest 2688.07 ms
+
+RESULT,deadline-4s-rerun,2-10,300,150,121,40,42,6.44,75.56,1751.20,147.64,11073
+
