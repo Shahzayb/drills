@@ -220,6 +220,8 @@ services:
       # Card 23: exit | nest | graceful, what SIGTERM does. Empty means 'graceful'. The two numbers are
       # the LB detection window and the hard deadline. See plans/2026-10-11_drill-23-graceful-shutdown.md.
       - SHUTDOWN=${SHUTDOWN:-}
+      # local | deps: what readiness (GET /health) asks. Empty means 'local'; 'deps' is the control arm.
+      - READINESS=${READINESS:-}
       - DRAIN_DELAY_MS=${DRAIN_DELAY_MS:-}
       - SHUTDOWN_TIMEOUT_MS=${SHUTDOWN_TIMEOUT_MS:-}
       # Logs an event_loop lag line every N ms when set. Empty means off.

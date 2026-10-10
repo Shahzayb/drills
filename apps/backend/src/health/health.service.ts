@@ -33,6 +33,15 @@ export const SHUTDOWN_TIMEOUT_MS = Number(
   process.env.SHUTDOWN_TIMEOUT_MS || 15_000,
 );
 
+/**
+ * What readiness asks. `local`: this process's own phase only, never the pool or a dependency.
+ * `deps`: the shipped check through the request pool, which took the last replica out under load.
+ */
+export type ReadinessMode = 'local' | 'deps';
+
+export const READINESS: ReadinessMode =
+  process.env.READINESS === 'deps' ? 'deps' : 'local';
+
 /** Logs an `event_loop` line per window when > 0. The window is 1s otherwise. */
 export const EVENT_LOOP_LOG_MS = Number(process.env.EVENT_LOOP_LOG_MS || 0);
 
@@ -127,9 +136,14 @@ export class HealthService
   }
 
   /** Readiness. 503 while draining, so the LB takes this replica out before it closes. */
-  async check(): Promise<HealthReport> {
+  async ready(): Promise<HealthReport> {
     if (this.phase !== 'serving') return { status: 'draining' };
+    if (READINESS === 'deps') return this.deps();
+    return { status: 'ok' };
+  }
 
+  /** Dependency report for people and alerts. Routing on it turns one slow query into an outage. */
+  async deps(): Promise<HealthReport> {
     const [postgres, redis] = await Promise.all([
       measure(() => this.postgres.query('SELECT 1')),
       measure(() => this.redis.ping()),

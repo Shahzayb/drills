@@ -97,6 +97,7 @@ describe('GET /info arms (e2e)', () => {
       shutdown: ['exit', 'nest'].includes(process.env.SHUTDOWN ?? '')
         ? process.env.SHUTDOWN
         : 'graceful',
+      readiness: process.env.READINESS === 'deps' ? 'deps' : 'local',
       drainDelayMs: process.env.DRAIN_DELAY_MS || '3000',
       shutdownTimeoutMs: process.env.SHUTDOWN_TIMEOUT_MS || '15000',
       eventLoopLogMs: process.env.EVENT_LOOP_LOG_MS || '0',

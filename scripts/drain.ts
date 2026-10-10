@@ -18,6 +18,10 @@ const KNOBS = {
     def: 'graceful',
     help: 'SHUTDOWN on both replicas: exit | nest | graceful',
   },
+  readiness: {
+    def: 'local',
+    help: 'READINESS on both replicas: local | deps',
+  },
   rate: { def: '150', help: 'requests/s offered through the LB' },
   duration: { def: '75s', help: 'measured phase' },
   warmup: { def: '15s', help: 'discarded first phase' },
@@ -157,6 +161,7 @@ async function waitReady(server: Replica): Promise<void> {
 const env: Record<string, string> = {
   ...process.env,
   SHUTDOWN: ARM,
+  READINESS: opt('readiness'),
   EVENT_LOOP_LOG_MS: '250',
 } as Record<string, string>;
 if (opt('delay-ms')) env.DRAIN_DELAY_MS = opt('delay-ms');
@@ -193,14 +198,14 @@ for (let i = 0; i < 6 && Object.keys(arms).length < 2; i++) {
   ).arms;
 }
 for (const [server, a] of Object.entries(arms)) {
-  if (a.shutdown !== ARM)
+  if (a.shutdown !== ARM || a.readiness !== opt('readiness'))
     throw new Error(
-      `replica ${server} serves shutdown=${a.shutdown}, wanted ${ARM}`,
+      `replica ${server} serves shutdown=${a.shutdown} readiness=${a.readiness}, wanted ${ARM} ${opt('readiness')}`,
     );
 }
 const served = arms.a ?? arms.b;
 console.log(
-  `drain: replicas serve shutdown=${served.shutdown} delay=${served.drainDelayMs}ms deadline=${served.shutdownTimeoutMs}ms`,
+  `drain: replicas serve shutdown=${served.shutdown} readiness=${served.readiness} delay=${served.drainDelayMs}ms deadline=${served.shutdownTimeoutMs}ms`,
 );
 
 let apiKey = opt('api-key');
@@ -569,7 +574,7 @@ const summaryTxt = existsSync(`${reportDir}summary.txt`)
   ? readFileSync(`${reportDir}summary.txt`, 'utf8')
   : '';
 const report = [
-  `drain — arm=${ARM} rate=${opt('rate')}/s delay=${served.drainDelayMs}ms deadline=${served.shutdownTimeoutMs}ms ` +
+  `drain — arm=${ARM} readiness=${served.readiness} rate=${opt('rate')}/s delay=${served.drainDelayMs}ms deadline=${served.shutdownTimeoutMs}ms ` +
     `rows=${ROWS} k6 exit ${k6Code}`,
   '',
   `  failed requests   : ${failures.length} (${failures.filter((f) => f.scenario === 'measure').length} in the measured phase)`,
