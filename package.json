@@ -74,6 +74,7 @@
     "test:ui": "pnpm --filter=frontend run test:e2e",
     "ui:paint": "pnpm --filter=frontend run measure:paint",
     "load": "node scripts/load.ts",
+    "drain": "node scripts/drain.ts",
     "load:baseline": "node scripts/load.ts list",
     "docker:up": "docker compose up -d --pull always",
     "docker:up:prod": "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d",

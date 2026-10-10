@@ -338,6 +338,47 @@ services:
     profiles: ['pgbouncer']
     mem_limit: 256m
 
+  # Drill 23: two replicas behind a load balancer, off unless `--profile drain`. Each runs the built
+  # dist/ directly under tini, so SIGTERM reaches Node. `pnpm drain` restarts them under load.
+  # See plans/2026-10-11_drill-23-graceful-shutdown.md.
+  api_a:
+    extends: nest_server
+    container_name: drills_api_a
+    init: true
+    working_dir: /app
+    command: node --enable-source-maps apps/backend/dist/main
+    ports: !reset []
+    depends_on: !reset []
+    volumes:
+      - drain_imports:/tmp/imports
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'wget -qO- http://localhost:3002/health/live >/dev/null || exit 1',
+        ]
+      start_period: 10s
+    # Above SHUTDOWN_TIMEOUT_MS, so the app's own deadline fires before Docker's SIGKILL.
+    stop_grace_period: 30s
+    profiles: ['drain']
+
+  api_b:
+    extends: api_a
+    container_name: drills_api_b
+
+  lb:
+    image: haproxy:3.4.6-alpine
+    container_name: drills_lb
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - '${LB_PORT:-8080}:8080'
+      - '${LB_STATS_PORT:-8404}:8404'
+    networks:
+      - app-network
+    profiles: ['drain']
+    mem_limit: 256m
+
   # Tracing, phase 2 of drill 06. Both services are behind `profiles: ['trace']`
   # so `docker compose up` never starts them: an always-on collector would
   # change the instrument drill 05 baselined against, and cards 08/09/10 compare
@@ -381,3 +422,5 @@ networks:
 volumes:
   drills_pgdata:
   drills_redisdata:
+  # Drill 23: the import spool shared by api_a and api_b, so either replica can resume the other's job.
+  drain_imports:

@@ -44,6 +44,8 @@ interface Script {
   file: string;
   blurb: string;
   knobs: Knob[];
+  /** Plumbing that needs the run's directory, like a log file beside the summary. */
+  env?: (run: string) => Record<string, string>;
 }
 
 // Read by lib/scenario.ts, so every script gets them whichever one runs.
@@ -148,6 +150,32 @@ const SCRIPTS: Record<string, Script> = {
       },
       { flag: 'page-size', env: 'PAGE_SIZE', def: '20', help: 'rows per page' },
     ],
+  },
+
+  drain: {
+    file: 'drain.ts',
+    blurb:
+      'an open-model mix through the LB while `pnpm drain` restarts the replicas (drill 23)',
+    knobs: [
+      {
+        flag: 'api-key',
+        env: 'API_KEY',
+        def: '',
+        help: 'from `pnpm db:storm key` — ingest 401s without it',
+      },
+      {
+        flag: 'q',
+        env: 'Q',
+        def: 'export',
+        help: 'the search term in the mix',
+      },
+      { flag: 'page-size', env: 'PAGE_SIZE', def: '20', help: 'rows per page' },
+    ],
+    // One JSON line per failed request, so the orchestrator can line failures up with the restart.
+    env: (run) => ({
+      K6_LOG_FORMAT: 'raw',
+      K6_LOG_OUTPUT: `file=/scripts/reports/${run}/failures.ndjson`,
+    }),
   },
 
   ingest: {
@@ -309,6 +337,7 @@ const containerEnv: Record<string, string> = {
   K6_WEB_DASHBOARD: 'true',
   K6_WEB_DASHBOARD_PERIOD: '2s',
   K6_WEB_DASHBOARD_EXPORT: `/scripts/reports/${RUN}/dashboard.html`,
+  ...script.env?.(RUN),
 };
 
 /** The `arms` block of GET /info — which A/B arm the API resolved at load. */
@@ -324,7 +353,10 @@ interface Info {
 // Timed out rather than left open: a server that accepts the connection and
 // never answers — nest_server mid-recompile, a stale process on the port — has
 // no timeout of its own worth waiting for, and this sits in front of the run.
-const infoUrl = `http://localhost:${process.env.BACKEND_PORT || 3002}/info`;
+// INFO_URL when the API under test is not nest_server, e.g. drill 23's replicas behind the LB.
+const infoUrl =
+  process.env.INFO_URL ||
+  `http://localhost:${process.env.BACKEND_PORT || 3002}/info`;
 const arms = await fetch(infoUrl, { signal: AbortSignal.timeout(2000) })
   .then((response) => (response.ok ? (response.json() as Promise<Info>) : null))
   .then((body) => body?.arms ?? null)
