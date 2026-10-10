@@ -94,6 +94,12 @@ describe('GET /info arms (e2e)', () => {
       statsTtlS: process.env.STATS_TTL_S || '30',
       statsTtlJitter: String(Number(process.env.STATS_TTL_JITTER || '0.2')),
       poolMax: process.env.PG_POOL_MAX || '10',
+      shutdown: ['exit', 'nest'].includes(process.env.SHUTDOWN ?? '')
+        ? process.env.SHUTDOWN
+        : 'graceful',
+      drainDelayMs: process.env.DRAIN_DELAY_MS || '3000',
+      shutdownTimeoutMs: process.env.SHUTDOWN_TIMEOUT_MS || '10000',
+      eventLoopLogMs: process.env.EVENT_LOOP_LOG_MS || '0',
       queryCounter:
         process.env.QUERY_COUNTER === 'off' ||
         process.env.QUERY_COUNTER === 'header'

@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BeforeApplicationShutdown,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,6 +11,7 @@ import { Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { parse } from 'csv-parse';
 import { parse as parseAll } from 'csv-parse/sync';
+import { SHUTDOWN } from '../health/health.service';
 import { errorMessage, logger } from '../observability/logger';
 import { runWithRequestContext } from '../observability/request-context';
 import { TenantDb, TenantQuery } from '../tenancy/tenant-db.service';
@@ -187,8 +192,10 @@ interface Counters {
 }
 
 @Injectable()
-export class ImportsService {
+export class ImportsService implements BeforeApplicationShutdown {
   private readonly logger = logger;
+  private stopping = false;
+  private readonly running = new Set<Promise<unknown>>();
 
   constructor(private readonly tenants: TenantDb) {}
 
@@ -246,7 +253,7 @@ export class ImportsService {
    * matters because it is interpolated into a SQL comment.
    */
   private detach(orgId: string, jobId: string): void {
-    void runWithRequestContext(
+    const job = runWithRequestContext(
       {
         requestId: `import-${jobId}`,
         queries: 0,
@@ -264,6 +271,24 @@ export class ImportsService {
             'import_failed',
           );
         }),
+    );
+    this.running.add(job);
+    void job.finally(() => this.running.delete(job));
+  }
+
+  /**
+   * Card 23. Stops every running job at its next batch boundary and waits for the failed status to
+   * land. The pool closes only after every beforeApplicationShutdown hook returns.
+   */
+  async beforeApplicationShutdown(signal?: string): Promise<void> {
+    if (!signal || SHUTDOWN !== 'graceful') return;
+    this.stopping = true;
+    const jobs = this.running.size;
+    const startedAt = performance.now();
+    await Promise.allSettled(this.running);
+    this.logger.info(
+      { jobs, ms: Math.round(performance.now() - startedAt) },
+      'import_drain_complete',
     );
   }
 
@@ -424,6 +449,8 @@ export class ImportsService {
     rows: CsvRow[],
     counters: Counters,
   ): Promise<void> {
+    // Before the transaction opens, so the batch in flight commits and resume_row stays exact.
+    if (this.stopping) throw new Error('interrupted by shutdown');
     await this.tenants.withOrg(orgId, async (tx) => {
       const inserted = await this.insertConversations(tx, orgId, rows);
 

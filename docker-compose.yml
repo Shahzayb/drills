@@ -217,6 +217,13 @@ services:
       # Card 22: connections in the API's pg pool. Empty means 10. The sweep and the knee are in
       # plans/2026-10-06_drill-22-connection-pool-knee.md.
       - PG_POOL_MAX=${PG_POOL_MAX:-}
+      # Card 23: exit | nest | graceful, what SIGTERM does. Empty means 'graceful'. The two numbers are
+      # the LB detection window and the hard deadline. See plans/2026-10-11_drill-23-graceful-shutdown.md.
+      - SHUTDOWN=${SHUTDOWN:-}
+      - DRAIN_DELAY_MS=${DRAIN_DELAY_MS:-}
+      - SHUTDOWN_TIMEOUT_MS=${SHUTDOWN_TIMEOUT_MS:-}
+      # Logs an event_loop lag line every N ms when set. Empty means off.
+      - EVENT_LOOP_LOG_MS=${EVENT_LOOP_LOG_MS:-}
       # off | on | header — see apps/backend/src/observability/query-counter.ts.
       # Empty forwards through to that module's own default ('on').
       - QUERY_COUNTER=${QUERY_COUNTER:-}
