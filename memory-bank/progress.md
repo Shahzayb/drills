@@ -8,9 +8,10 @@ None.
 
 ## Next step
 
-Card 22 shipped. Card 24 re-runs `pnpm db:ratelimit` and drill 22's sweep across replicas. Card 29
-is card 20's stretch in full. Card 26 (the outbox) replaces drill 19's `NOTIFY`. Card 30 starts from
-drill 15's worker.
+Card 23 shipped. Card 24 re-runs `pnpm db:ratelimit` and drill 22's sweep across replicas; drill 23's
+`--profile drain` already runs two. Card 26 (the outbox) replaces drill 19's `NOTIFY`. Card 29 is card
+20's stretch in full. Card 30 starts from drill 15's worker and owes it a lease (issue 21). Open: whether
+readiness keeps its dependency checks (issue 57).
 
 ## Active plan
 
@@ -18,14 +19,14 @@ None open. Every plan in `plans/` is shipped.
 
 ## Live validation
 
-`pnpm docker:up`, then `pnpm db:reset`. `pnpm db:test` runs the backend e2e suite (157 tests). The
-first run after a container recreate had the dev server SIGKILLed at the 1GB limit; rerun.
+`pnpm docker:up`, then `pnpm db:reset`. `pnpm db:test` runs the backend e2e suite (161 tests) on 6 jest
+workers; at jest's default 13 the 1GB dev container OOMs.
 
 Each red run MUST fail exactly this many tests (arms in `package.json`); a green red run means the
 switch stopped switching. `db:test:naive` 2 (query budget) · `:notiebreak` 1 · `:like` 1 ·
-`:noidem` 3 · `:redis` 1 · `:rmw` 2 · `:lww` 4 · `:buffer` 4 · `:skiplast` 15 (two suites) ·
+`:noidem` 3 · `:redis` 1 · `:rmw` 2 · `:lww` 4 · `:buffer` 6 · `:skiplast` 15 (two suites) ·
 `:nocache` 1 · `:ttlonly` 2 · `:stampede` 2 · `:nojitter` 1 · `:fixed` 1 · `:fixedrmw` 2 ·
-`:bucketrmw` 1. Green: `:constraint`, `:donothing`, `:locking`, `:serializable`, `:pessimistic`,
+`:bucketrmw` 1 · `:nodrain` 4. Green: `:constraint`, `:donothing`, `:locking`, `:serializable`, `:pessimistic`,
 `:restart`, `:invalidate`, `:statswait`, `:pool2`.
 
 `pnpm test:ui` runs Playwright (6 tests) on the host (`pnpm exec playwright install chromium`
@@ -52,6 +53,10 @@ Before measuring:
   calls.
 - `pnpm db:stampede` needs `PG_PRELOAD=pg_stat_statements`. Run `run` at `STATS_TTL_S=300` so the
   forced expiry is the only one in the window.
+- `pnpm drain` mints an API key when `--api-key` is empty; its `db/reports/*storm-key*` output holds
+  the plaintext key, so delete it. Each run imports 300k rows into org `drill-23-drain`: delete them
+  by `conversation_id` as the owner under `SET session_replication_role = replica` (issue 58). Then
+  `docker compose --profile drain rm -sfv api_a api_b lb` and `docker volume rm drills_drain_imports`.
 - `pnpm load ingest` leaves rows behind (k6 has no database connection). Before a drill 05/09/10
   baseline, as the owner:
 
@@ -71,10 +76,8 @@ Numbered for reference from plans; gaps are retired numbers.
 
 **Coverage**
 
-1. Frontend tests cover the assign conflict, the stale read and streaming only: the Route
-   Handlers, load-more, `/search`, `/imports` and the filters have none.
-2. No backend unit tests; `pnpm test` passes on `--passWithNoTests`. `HealthService`,
-   `InfoController` and `RedisService` failure branches are untested.
+1. Frontend tests cover only the assign conflict, the stale read and streaming.
+2. No backend unit tests; `RedisService` and `InfoController` failure branches are untested.
 
 **Tenancy and auth (stubbed on purpose; see `projectbrief.md`)**
 
@@ -86,13 +89,12 @@ Numbered for reference from plans; gaps are retired numbers.
 **Query paths**
 
 5. The offset arm has no depth cap; the cap is a product decision.
-6. Nothing guards migration 007's LEAKPROOF flag; losing it silently returns search to a 3.6s scan.
-   `check:tenancy` is the natural home for a `proleakproof` assertion.
+6. Nothing guards migration 007's LEAKPROOF flag; losing it returns search to a 3.6s scan.
 7. Search results have no paging (limit only).
 8. Interior-substring search is rejected by decision (trigram index priced at 2,159MB).
 33. Nothing reads `last_message_at`; its index was priced at 118.6MB and rejected.
-36. The stats aggregate is still a 5GB scan on the whale, once per TTL per org (drill 20's
-    single-flight). The Postgres container's 64MB `/dev/shm` fails ~10 concurrent parallel scans.
+36. The whale's stats aggregate is a 5GB scan once per TTL; the 64MB `/dev/shm` fails ~10
+    concurrent parallel scans.
 37. The sentiment split is two word lists (`method: 'lexicon'`).
 56. Search and list reads share one pool, so a saturated search queue delays cheap reads (FIFO).
 
@@ -110,14 +112,14 @@ Numbered for reference from plans; gaps are retired numbers.
 **Assign and the UI**
 
 17. Load-more pages do not converge after `refresh()`; a claim on page 3 stays optimistic.
-18. Nobody but the clicker learns about a claim; needs a subscription. Another agent's write is
-    also invisible on Back (`stale-status.spec.ts` asserts it).
+18. Nobody but the clicker learns about a claim, and Back hides another agent's write.
 19. `version` is a raw integer on the wire; `ETag`/`If-Match`/412 is the standard shape.
 20. The `lww`, `?stats=blocking` and `?cache=cached` arms are reachable on purpose.
 
 **Imports and schema changes**
 
-21. The import worker has no lease, heartbeat or reaper; a crash leaves a job `running` forever.
+21. The import worker has no lease or heartbeat. A graceful shutdown leaves a job `failed` and
+    resumable; a crash, SIGKILL or the shutdown deadline leaves it `running`, and `retry` refuses it.
 22. The upload spool is ephemeral; object storage is the answer.
 23. Nothing limits import concurrency; it shares the pool with every request (card 30).
 24. One bad row kills an import; no quarantine or `rows_failed`.
@@ -141,15 +143,23 @@ Numbered for reference from plans; gaps are retired numbers.
 48. The cache-aside fill race beats the `DEL` for a full TTL on every cache arm (versioned fill or
     lease is the fix).
 49. `plan_limits` edits invalidate nothing; they wait out every key's TTL.
-50. Redis sits on every org-scoped request with a 2s command timeout and no circuit breaker. Redis
-    stopped under load: p50 0.8–3.4s, stats 503, entitlements to Postgres (drill 20).
+50. Redis is on every org-scoped request with a 2s timeout and no circuit breaker; stopped under
+    load, p50 rose to 0.8–3.4s.
 51. The ingest limiter fails open, and a 400 costs a token.
-53. `notify` loses messages while its listener is disconnected and does not flush on reconnect;
-    a listener stuck in a transaction can fill the NOTIFY queue and fail plan-changing commits.
+53. `notify` drops messages while its listener is down; a listener stuck in a transaction can fill
+    the NOTIFY queue and fail plan-changing commits.
 54. Entitlement misses are not coalesced; a cold key under 2,000 concurrent ingests cost 40–209
     Postgres reads (drill 21).
-55. Stats waiters poll every 25ms (the wait floor); no in-process single-flight; a quiet org can
-    serve a value 10 TTLs old; a flushed cache refills every key at once (pool timeouts).
+55. Stats waiters poll every 25ms; no in-process single-flight; a flushed cache refills every key
+    at once.
+
+**Shutdown and health (drill 23)**
+
+57. Readiness checks Postgres and Redis through the request pool. Under overload the check times
+    out and the LB can mark every replica DOWN: one slow scan during a restart cost 203–535 × 503.
+58. `usage_events.conversation_id` (`ON DELETE SET NULL`) has no index, so each deleted
+    conversation scans the ledger; a 2.96M-row delete ran 8 minutes before it was cancelled.
+59. In-flight requests are counted but unbounded; no 503 + `Retry-After` backpressure.
 
 **Instruments and observability**
 
@@ -160,25 +170,10 @@ Numbered for reference from plans; gaps are retired numbers.
 
 ## Releases
 
-Since `drill/14`, releases are tagged on the branch before the merge. No milestones since
-`drill/11` (no open issues).
-
-| Tag | Version | Notes |
-|---|---|---|
-| [drill/09](https://github.com/Shahzayb/drills/releases/tag/drill/09) | 0.9.0 | First release cut; milestone `drill/09` (closed). `drill/01`/`drill/02` exist locally only. |
-| [drill/10](https://github.com/Shahzayb/drills/releases/tag/drill/10) | 0.10.0 | Milestone `drill/10`. |
-| [drill/11](https://github.com/Shahzayb/drills/releases/tag/drill/11) | 0.11.0 | Milestone `drill/11`. |
-| [drill/12](https://github.com/Shahzayb/drills/releases/tag/drill/12) | 0.12.0 | — |
-| [drill/13](https://github.com/Shahzayb/drills/releases/tag/drill/13) | 0.13.0 | — |
-| [drill/14](https://github.com/Shahzayb/drills/releases/tag/drill/14) | 0.14.0 | Pre-merge `--generate-notes` is a changelog link only; add `--notes`. |
-| [drill/15](https://github.com/Shahzayb/drills/releases/tag/drill/15) | 0.15.0 | — |
-| [drill/16](https://github.com/Shahzayb/drills/releases/tag/drill/16) | 0.16.0 | — |
-| [drill/17](https://github.com/Shahzayb/drills/releases/tag/drill/17) | 0.17.0 | — |
-| [drill/18](https://github.com/Shahzayb/drills/releases/tag/drill/18) | 0.18.0 | — |
-| [drill/19](https://github.com/Shahzayb/drills/releases/tag/drill/19) | 0.19.0 | — |
-| [drill/20](https://github.com/Shahzayb/drills/releases/tag/drill/20) | 0.20.0 | — |
-| [drill/21](https://github.com/Shahzayb/drills/releases/tag/drill/21) | 0.21.0 | — |
-| [drill/22](https://github.com/Shahzayb/drills/releases/tag/drill/22) | 0.22.0 | — |
+Tag `drill/NN` = version `0.NN.0`, from `drill/09` (`drill/01`/`drill/02` exist locally only).
+Since `drill/14`, tagged on the branch before the merge with `--notes`; a pre-merge
+`--generate-notes` is a changelog link only. Milestones exist for `drill/09`–`drill/11` only (no
+open issues since). Latest: [drill/22](https://github.com/Shahzayb/drills/releases/tag/drill/22).
 
 ## Preferences
 
