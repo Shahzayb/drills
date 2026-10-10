@@ -380,6 +380,7 @@ before the first SIGTERM (a run counts only at 0) and the LB's own "no server" 5
 
 | Run | Readiness | Failed | LB had no server | Survivor marked DOWN mid-drain |
 |---|---|---|---|---|
+| `cascade-deps-1` | deps | 0 | 0 | no |
 | `cascade-deps-2` | deps | 322 | 303 × 503 | yes, `Layer7 timeout, 1000ms` |
 | `cascade-local-2` | local | 12 (500) | 0 | no |
 | `cascade-deps-3` | deps | 5 (500) | 0 | no |
@@ -388,8 +389,9 @@ before the first SIGTERM (a run counts only at 0) and the LB's own "no server" 5
 | `cascade-local-4` | local | 52 (500) | 0 | no |
 | `graceful-local` (no slow request) | local | 0 | 0 | no; the import resumed to 300,000 |
 
-With the two earlier `deps` runs (535 and 203 failed), `deps` lost its last server in 4 of 5 runs.
-`local` lost it in 0 of 3. The 12–52 failures left on `local` are `b`'s 2s pool-acquire timeouts
+`cascade-deps-1` ran before the warm-up, beside the excluded `cascade-local-1`; it was steady
+before SIGTERM, so it counts. With the two earlier runs (535 and 203 failed), `deps` lost its last
+server in 4 of 6 runs. `local` lost it in 0 of 3. The 12–52 failures left on `local` are `b`'s 2s pool-acquire timeouts
 while it carried 150 req/s alone during the scan: overload, which readiness should not hide and
 backpressure would shed. `cascade-local-1` is excluded: it failed 3,016 requests on both replicas
 from 22s before any SIGTERM (a cold cache right after a 3M-row cleanup), so it measured something
