@@ -1,0 +1,107 @@
+drain — arm=graceful readiness=local rate=150/s delay=3000ms deadline=15000ms rows=300000 k6 exit 0
+
+  failed requests   : 0 (0 in the measured phase)
+  before SIGTERM    : 0 (must be 0 for the run to count)
+  LB had no server : 0 × 503
+  by status         : none
+  by k6 error code  : none
+  by endpoint       : none
+  by replica        : none
+  per second (t=0 is the first SIGTERM): none
+
+  import 01a1280b-b757-7e65-b8db-8a7ab54a3ed5 on b
+  after the restart : failed (row 94001: interrupted by shutdown), resume_row 93000, updated 66s ago
+  after one retry   : succeeded, written 300000 + skipped 0 = 300000 of 300000
+
+  timeline (seconds from the first SIGTERM)
+    -0.029  host b stop
+     0.000  b    docker kill signal 15
+     0.044  b    import_failed err=interrupted by shutdown
+     0.044  b    import_drain_complete jobs=1 ms=44
+     0.045  b    shutdown_started inFlight=1
+     1.681  b    lb DOWN
+     3.045  b    drain_listener_closed inFlight=0 ms=3000.22
+     3.046  b    drain_complete ms=3000.83
+     3.180  b    docker die exit 143
+     3.187  host b exited
+     3.269  b    docker start
+     3.277  host b start
+     4.041  host b ready
+     5.692  b    lb UP
+     5.694  host b UP
+    15.694  host a stop
+    15.719  a    docker kill signal 15
+    15.719  a    import_drain_complete jobs=0 ms=0
+    15.719  a    shutdown_started inFlight=2
+    17.662  a    lb DOWN
+    18.720  a    drain_listener_closed inFlight=0 ms=3000.96
+    18.721  a    drain_complete ms=3001.51
+    18.859  a    docker die exit 143
+    18.865  host a exited
+    18.956  a    docker start
+    18.964  host a start
+    19.577  host a ready
+    20.668  a    lb UP
+    20.713  host a UP
+
+  haproxy abnormal sessions: 2
+    172.25.0.9:48842 [10/Oct/2026:23:00:15.057] public api/a 0/0/0/-1/0 400 0 - - CH-- 51/51/1/0/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:48422 [10/Oct/2026:23:00:15.031] public api/a 0/0/0/-1/27 400 0 - - CH-- 49/49/0/0/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+
+  event-loop lag on b, 250ms windows from 5s before its SIGTERM to its exit
+```mermaid
+xychart-beta
+  title "Event-loop lag on api_b around SIGTERM (arm graceful)"
+  x-axis "seconds from SIGTERM" ["-4.79", "-4.54", "-4.29", "-4.04", "-3.79", "-3.54", "-3.29", "-3.04", "-2.79", "-2.54", "-2.29", "-2.04", "-1.79", "-1.54", "-1.29", "-1.04", "-0.79", "-0.54", "-0.28", "-0.04", "0.21", "0.47", "0.71", "0.97", "1.22", "1.47", "1.72", "1.97", "2.22", "2.47", "2.72", "2.97"]
+  y-axis "lag (ms)"
+  line [0.46, 0.37, 0.3, 0.37, 0.07, 0.43, 0.19, 0.31, 0.17, 0.12, 0.23, 0.13, 0.53, 0.22, 0.33, 0.24, 0.36, 0.32, 0.22, 0.32, 0.29, 0.29, 0.32, 0.54, 0.82, 0.3, 0.28, 0.29, 0.25, 0.32, 0.18, 0.25]
+  line [1.04, 1.27, 1.62, 1.65, 1.03, 3.33, 1, 1.94, 1.25, 1.72, 2.56, 1.35, 2.46, 2.09, 2.92, 1.89, 1.19, 1.17, 1.4, 1.9, 1.63, 1.38, 1.76, 1.68, 1.62, 4.5, 1.97, 1.64, 0.87, 1.38, 0.74, 1.64]
+```
+  (first line p50, second line max; a 250ms window holds ~23 samples, so its p99 is its max)
+    -4.795  p50 0.46 p99 1.04 max 1.04 phase serving inFlight 1
+    -4.545  p50 0.37 p99 1.27 max 1.27 phase serving inFlight 1
+    -4.295  p50 0.3 p99 1.62 max 1.62 phase serving inFlight 2
+    -4.045  p50 0.37 p99 1.65 max 1.65 phase serving inFlight 1
+    -3.794  p50 0.07 p99 1.03 max 1.03 phase serving inFlight 1
+    -3.544  p50 0.43 p99 3.33 max 3.33 phase serving inFlight 1
+    -3.294  p50 0.19 p99 1 max 1 phase serving inFlight 2
+    -3.044  p50 0.31 p99 1.94 max 1.94 phase serving inFlight 2
+    -2.793  p50 0.17 p99 1.25 max 1.25 phase serving inFlight 1
+    -2.543  p50 0.12 p99 1.72 max 1.72 phase serving inFlight 1
+    -2.293  p50 0.23 p99 2.56 max 2.56 phase serving inFlight 1
+    -2.043  p50 0.13 p99 1.35 max 1.35 phase serving inFlight 2
+    -1.792  p50 0.53 p99 2.46 max 2.46 phase serving inFlight 1
+    -1.541  p50 0.22 p99 2.09 max 2.09 phase serving inFlight 1
+    -1.288  p50 0.33 p99 2.92 max 2.92 phase serving inFlight 7
+    -1.038  p50 0.24 p99 1.89 max 1.89 phase serving inFlight 2
+    -0.787  p50 0.36 p99 1.19 max 1.19 phase serving inFlight 2
+    -0.536  p50 0.32 p99 1.17 max 1.17 phase serving inFlight 2
+    -0.285  p50 0.22 p99 1.4 max 1.4 phase serving inFlight 0
+    -0.035  p50 0.32 p99 1.9 max 1.9 phase serving inFlight 1
+     0.215  p50 0.29 p99 1.63 max 1.63 phase draining inFlight 2
+     0.465  p50 0.29 p99 1.38 max 1.38 phase draining inFlight 1
+     0.715  p50 0.32 p99 1.76 max 1.76 phase draining inFlight 0
+     0.967  p50 0.54 p99 1.68 max 1.68 phase draining inFlight 1
+     1.217  p50 0.82 p99 1.62 max 1.62 phase draining inFlight 1
+     1.468  p50 0.3 p99 4.5 max 4.5 phase draining inFlight 1
+     1.718  p50 0.28 p99 1.97 max 1.97 phase draining inFlight 0
+     1.968  p50 0.29 p99 1.64 max 1.64 phase draining inFlight 0
+     2.219  p50 0.25 p99 0.87 max 0.87 phase draining inFlight 0
+     2.470  p50 0.32 p99 1.38 max 1.38 phase draining inFlight 0
+     2.722  p50 0.18 p99 0.74 max 0.74 phase draining inFlight 0
+     2.973  p50 0.25 p99 1.64 max 1.64 phase draining inFlight 0
+
+
+  name=graceful-local org=2-10 rate=150.00/s maxvus=300 warmup=15s measured=75s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 11250
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 6.66 / 58.97 / 105.60 ms
+  min / avg / max   : 0.99 / 18.34 / 458.32 ms
+  throughput        : 150.00 req/s of 150.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 6.78  p95 59.39  p99 85.63 ms
+  errors by endpoint: list 0 · search 0 · ingest 0
+  p99 by endpoint   : list 10.36 · search 388.13 · ingest 8.96 ms
+
+RESULT,graceful-local,2-10,300,150,0,0,0,6.66,58.97,105.60,150.00,11250
+

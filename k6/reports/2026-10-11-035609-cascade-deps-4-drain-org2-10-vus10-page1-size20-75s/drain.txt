@@ -1,0 +1,128 @@
+drain — arm=graceful readiness=deps rate=150/s delay=3000ms deadline=4000ms rows=300000 k6 exit 0
+
+  failed requests   : 412 (412 in the measured phase)
+  before SIGTERM    : 0 (must be 0 for the run to count)
+  LB had no server : 344 × 503
+  by status         : 500 ×68 · 503 ×344
+  by k6 error code  : 1500 ×68 · 1503 ×344
+  by endpoint       : ingest ×91 · list ×245 · search ×76
+  by replica        : b ×68 · lb (no server) ×344
+  per second (t=0 is the first SIGTERM): 5s:28 6s:172 7s:150 8s:62
+
+  import 01a12808-333b-755f-8375-4df343dbc255 on a
+  after the restart : failed (row 98001: interrupted by shutdown), resume_row 97000, updated 66s ago
+  after one retry   : succeeded, written 300000 + skipped 0 = 300000 of 300000
+
+  timeline (seconds from the first SIGTERM)
+    -0.025  host a stop
+     0.000  a    docker kill signal 15
+     0.026  a    import_failed err=interrupted by shutdown
+     0.026  a    import_drain_complete jobs=1 ms=26
+     0.027  a    shutdown_started inFlight=2
+     0.976  host a slow request (stats) sent
+     1.416  a    lb DOWN
+     3.027  a    drain_listener_closed inFlight=1 ms=3000.61
+     4.001  a    shutdown_deadline_exceeded inFlight=1
+     4.438  a    docker die exit 1
+     4.453  host a exited
+     4.453  host a slow request: exit 1 wget: error getting response: Invalid argument
+     4.828  a    docker start
+     4.845  host a start
+     6.124  b    lb DOWN
+     7.546  host a ready
+     8.412  b    lb UP
+     9.435  a    lb UP
+     9.520  host a UP
+    19.522  host b stop
+    19.546  b    docker kill signal 15
+    19.546  b    import_drain_complete jobs=0 ms=0
+    19.546  b    shutdown_started inFlight=2
+    21.440  b    lb DOWN
+    22.546  b    drain_listener_closed inFlight=0 ms=3000.16
+    22.549  b    drain_complete ms=3002.44
+    22.815  b    docker die exit 143
+    22.824  host b exited
+    22.947  b    docker start
+    22.958  host b start
+    24.011  host b ready
+    25.449  b    lb UP
+    25.463  host b UP
+
+  haproxy abnormal sessions: 414
+    172.25.0.9:52696 [10/Oct/2026:22:56:24.606] public api/a 0/0/0/-1/20 400 0 - - CH-- 51/51/1/0/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:52724 [10/Oct/2026:22:56:24.599] public api/b 0/0/0/-1/27 400 0 - - CH-- 50/50/0/0/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:37488 [10/Oct/2026:22:56:37.752] public api/b 0/0/0/2007/2007 500 356 - - ---- 225/225/224/224/0 0/0 "POST /ingest HTTP/1.1"
+    172.25.0.9:37496 [10/Oct/2026:22:56:37.767] public api/b 0/0/0/2001/2001 500 356 - - ---- 226/226/224/224/0 0/0 "POST /ingest HTTP/1.1"
+    172.25.0.9:37510 [10/Oct/2026:22:56:37.779] public api/b 0/0/0/2001/2001 500 372 - - ---- 226/226/225/225/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:37520 [10/Oct/2026:22:56:37.792] public api/b 0/0/0/2001/2001 500 372 - - ---- 226/226/225/225/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:37528 [10/Oct/2026:22:56:37.805] public api/b 0/0/0/2001/2001 500 372 - - ---- 227/227/226/226/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:37028 [10/Oct/2026:22:56:36.758] public api/b 0/0/0/3057/3057 500 372 - - ---- 227/227/226/226/0 0/0 "POST /ingest HTTP/1.1"
+    172.25.0.9:37030 [10/Oct/2026:22:56:36.772] public api/b 0/0/0/3045/3045 500 372 - - ---- 227/227/225/225/0 0/0 "POST /ingest HTTP/1.1"
+    172.25.0.9:37542 [10/Oct/2026:22:56:37.819] public api/b 0/0/0/2001/2001 500 372 - - ---- 227/227/225/225/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+    172.25.0.9:37032 [10/Oct/2026:22:56:37.837] public api/b 0/0/0/2002/2002 500 372 - - ---- 227/227/225/225/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:37042 [10/Oct/2026:22:56:37.844] public api/b 0/0/0/2001/2001 500 372 - - ---- 227/227/225/225/0 0/0 "GET /messages/search?q=export&limit=20 HTTP/1.1"
+    172.25.0.9:37058 [10/Oct/2026:22:56:37.851] public api/b 0/0/0/2001/2001 500 356 - - ---- 227/227/225/225/0 0/0 "POST /ingest HTTP/1.1"
+    172.25.0.9:37050 [10/Oct/2026:22:56:37.857] public api/b 0/0/0/2001/2001 500 356 - - ---- 227/227/225/225/0 0/0 "POST /ingest HTTP/1.1"
+    172.25.0.9:37084 [10/Oct/2026:22:56:37.865] public api/b 0/0/0/2001/2001 500 372 - - ---- 227/227/225/225/0 0/0 "GET /conversations?pageSize=20 HTTP/1.1"
+
+  event-loop lag on a, 250ms windows from 5s before its SIGTERM to its exit
+```mermaid
+xychart-beta
+  title "Event-loop lag on api_a around SIGTERM (arm graceful)"
+  x-axis "seconds from SIGTERM" ["-4.84", "-4.59", "-4.34", "-4.08", "-3.83", "-3.58", "-3.33", "-3.08", "-2.83", "-2.58", "-2.33", "-2.08", "-1.83", "-1.58", "-1.33", "-1.08", "-0.83", "-0.58", "-0.33", "-0.08", "0.17", "0.42", "0.67", "0.92", "1.17", "1.42", "1.67", "1.92", "2.17", "2.42", "2.67", "2.92", "3.17", "3.43", "3.68", "3.93"]
+  y-axis "lag (ms)"
+  line [0.23, 0.33, 0.48, 0.19, 0.27, 0, 0.35, 0.06, 0.29, 0.31, 0.38, 0.17, 0.43, 0.26, 0.14, 0.45, 0.26, 0.3, 0.22, 0.21, 0.19, 0.3, 0.45, 0.37, 0.39, 0.08, 0.11, 0.13, 0.11, 0.1, 0.09, 0.1, 0.12, 0.12, 0.12, 0.17]
+  line [1.09, 1.53, 2.07, 1.02, 1.84, 2.9, 2.24, 1.48, 1.93, 2.13, 1.83, 1.72, 1.47, 0.88, 1.46, 2.53, 1.33, 1.21, 1.2, 0.83, 1.36, 3.16, 4.27, 3.34, 0.98, 1.43, 0.85, 2.42, 1.89, 1.21, 0.7, 0.78, 1.64, 0.66, 0.65, 1.7]
+```
+  (first line p50, second line max; a 250ms window holds ~23 samples, so its p99 is its max)
+    -4.837  p50 0.23 p99 1.09 max 1.09 phase serving inFlight 1
+    -4.586  p50 0.33 p99 1.53 max 1.53 phase serving inFlight 2
+    -4.336  p50 0.48 p99 2.07 max 2.07 phase serving inFlight 2
+    -4.082  p50 0.19 p99 1.02 max 1.02 phase serving inFlight 2
+    -3.831  p50 0.27 p99 1.84 max 1.84 phase serving inFlight 1
+    -3.581  p50 0 p99 2.9 max 2.9 phase serving inFlight 2
+    -3.329  p50 0.35 p99 2.24 max 2.24 phase serving inFlight 1
+    -3.078  p50 0.06 p99 1.48 max 1.48 phase serving inFlight 1
+    -2.829  p50 0.29 p99 1.93 max 1.93 phase serving inFlight 1
+    -2.579  p50 0.31 p99 2.13 max 2.13 phase serving inFlight 2
+    -2.328  p50 0.38 p99 1.83 max 1.83 phase serving inFlight 1
+    -2.076  p50 0.17 p99 1.72 max 1.72 phase serving inFlight 2
+    -1.827  p50 0.43 p99 1.47 max 1.47 phase serving inFlight 2
+    -1.576  p50 0.26 p99 0.88 max 0.88 phase serving inFlight 1
+    -1.326  p50 0.14 p99 1.46 max 1.46 phase serving inFlight 1
+    -1.077  p50 0.45 p99 2.53 max 2.53 phase serving inFlight 1
+    -0.827  p50 0.26 p99 1.33 max 1.33 phase serving inFlight 2
+    -0.577  p50 0.3 p99 1.21 max 1.21 phase serving inFlight 3
+    -0.326  p50 0.22 p99 1.2 max 1.2 phase serving inFlight 1
+    -0.077  p50 0.21 p99 0.83 max 0.83 phase serving inFlight 2
+     0.173  p50 0.19 p99 1.36 max 1.36 phase draining inFlight 2
+     0.423  p50 0.3 p99 3.16 max 3.16 phase draining inFlight 1
+     0.673  p50 0.45 p99 4.27 max 4.27 phase draining inFlight 1
+     0.923  p50 0.37 p99 3.34 max 3.34 phase draining inFlight 2
+     1.174  p50 0.39 p99 0.98 max 0.98 phase draining inFlight 10
+     1.424  p50 0.08 p99 1.43 max 1.43 phase draining inFlight 6
+     1.674  p50 0.11 p99 0.85 max 0.85 phase draining inFlight 4
+     1.924  p50 0.13 p99 2.42 max 2.42 phase draining inFlight 4
+     2.174  p50 0.11 p99 1.89 max 1.89 phase draining inFlight 1
+     2.424  p50 0.1 p99 1.21 max 1.21 phase draining inFlight 1
+     2.674  p50 0.09 p99 0.7 max 0.7 phase draining inFlight 1
+     2.925  p50 0.1 p99 0.78 max 0.78 phase draining inFlight 1
+     3.175  p50 0.12 p99 1.64 max 1.64 phase closing inFlight 1
+     3.426  p50 0.12 p99 0.66 max 0.66 phase closing inFlight 1
+     3.677  p50 0.12 p99 0.65 max 0.65 phase closing inFlight 1
+     3.928  p50 0.17 p99 1.7 max 1.7 phase closing inFlight 1
+
+
+  name=cascade-deps-4 org=2-10 rate=150.00/s maxvus=300 warmup=15s measured=75s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 11065
+  errors            : 412 (3.72%)
+  p50 / p95 / p99   : 7.43 / 120.78 / 2002.18 ms
+  min / avg / max   : 0.07 / 90.69 / 3533.25 ms
+  throughput        : 147.53 req/s of 150.00 offered
+  dropped           : 186 iterations never started
+  (incl. warm-up)   : p50 7.61  p95 76.00  p99 2001.49 ms
+  errors by endpoint: list 245 · search 76 · ingest 91
+  p99 by endpoint   : list 1952.03 · search 2281.54 · ingest 2891.66 ms
+
+RESULT,cascade-deps-4,2-10,300,150,245,76,91,7.43,120.78,2002.18,147.53,11065
+

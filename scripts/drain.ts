@@ -578,6 +578,9 @@ const report = [
     `rows=${ROWS} k6 exit ${k6Code}`,
   '',
   `  failed requests   : ${failures.length} (${failures.filter((f) => f.scenario === 'measure').length} in the measured phase)`,
+  // A run that fails before any SIGTERM was not at steady state, so it measures something else.
+  `  before SIGTERM    : ${failures.filter((f) => f.t < t0).length} (must be 0 for the run to count)`,
+  `  LB had no server : ${failures.filter((f) => f.status === 503 && !f.by).length} × 503`,
   `  by status         : ${tally((f) => String(f.status))}`,
   `  by k6 error code  : ${tally((f) => String(f.code))}`,
   `  by endpoint       : ${tally((f) => f.ep)}`,
