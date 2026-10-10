@@ -347,3 +347,26 @@ does here. There is no pool to close (Hyperdrive pools connections at the edge),
 `stop_grace_period`, and no load balancer health check to tune. Nothing boots beside the traffic either: an isolate starts
 inside the request that needs it. What it did not do is drain long background work: a Worker's CPU and
 duration limits mean a 40-minute import was always a queue's job there.
+
+## Follow-up: readiness from local state (approved after the write-up)
+
+Finding 6 showed readiness doing harm. `GET /health` ran `SELECT 1` through the request pool, so an
+overloaded replica failed its check, and the LB removed the last server.
+
+**Decision.** Readiness answers from this process's own state only: 200 while `serving`, 503 while
+draining. It never touches the pool, Postgres or Redis, and answers synchronously. Pool saturation
+stays out too, because every replica saturates together under global overload. Overload is the
+backpressure stretch's job (503 + `Retry-After` per request), not routing's.
+
+- `READINESS=local|deps` (default `local`). `deps` is the shipped behaviour, kept as the control arm.
+  It appears on `/info`, in compose, and in `check:arms`.
+- `GET /health/deps` keeps the dependency report (503 if one is down) for people and alerts. Nothing
+  routes on it.
+- New `test/health.e2e-spec.ts`: with every pool connection held, `GET /health` answers 200 in
+  under 500ms, and `GET /health/deps` answers 503 with Postgres down. Red run `db:test:readydeps`
+  (`READINESS=deps`) MUST fail exactly the readiness test.
+- `pnpm drain --readiness deps|local` passes the arm through.
+
+**Prediction.** `--slow stats --deadline-ms 4000`, interleaved `local, deps, local, deps`: `deps`
+reproduces the cascade (hundreds of LB 503s). `local` keeps `b` UP: zero LB 503s, and only the
+500s from `b`'s pool timeouts remain (0–130). One plain `graceful` run on `local` stays at 0.
