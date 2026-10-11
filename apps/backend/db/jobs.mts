@@ -38,23 +38,23 @@ const from = to - Math.ceil((SINCE * 60_000) / slotMs) * slotMs;
 const interval = `${SLOT_S} seconds`;
 const window = [new Date(from), new Date(to)];
 
-const [ledger, rollups, claims] = await Promise.all([
-  db.query<{ slot: Date; quantity: number }>(
-    `SELECT date_bin($1::interval, occurred_at, 'epoch'::timestamptz) AS slot,
+// One client runs one statement at a time, so these run in turn.
+const ledger = await db.query<{ slot: Date; quantity: number }>(
+  `SELECT date_bin($1::interval, occurred_at, 'epoch'::timestamptz) AS slot,
             sum(quantity)::int AS quantity
        FROM usage_events
       WHERE occurred_at >= $2 AND occurred_at < $3
       GROUP BY 1`,
-    [interval, ...window],
-  ),
-  db.query<{
-    slot: Date;
-    quantity: number;
-    copies: number;
-    holders: string[];
-    terms: string[];
-  }>(
-    `SELECT slot_start AS slot, sum(quantity)::int AS quantity,
+  [interval, ...window],
+);
+const rollups = await db.query<{
+  slot: Date;
+  quantity: number;
+  copies: number;
+  holders: string[];
+  terms: string[];
+}>(
+  `SELECT slot_start AS slot, sum(quantity)::int AS quantity,
             (SELECT max(n) FROM (SELECT count(*) AS n FROM usage_rollups c
                                   WHERE c.slot_start = r.slot_start
                                   GROUP BY org_id, metric) per_org)::int AS copies,
@@ -62,14 +62,13 @@ const [ledger, rollups, claims] = await Promise.all([
        FROM usage_rollups r
       WHERE slot_start >= $1 AND slot_start < $2
       GROUP BY slot_start`,
-    window,
-  ),
-  db.query<{ slot: Date; holder: string; term: string }>(
-    `SELECT slot_start AS slot, holder, term::text FROM job_runs
+  window,
+);
+const claims = await db.query<{ slot: Date; holder: string; term: string }>(
+  `SELECT slot_start AS slot, holder, term::text FROM job_runs
       WHERE job = 'usage-rollup' AND slot_start >= $1 AND slot_start < $2`,
-    window,
-  ),
-]);
+  window,
+);
 await db.end();
 
 const bySlot = <T extends { slot: Date }>(rows: T[]) =>
