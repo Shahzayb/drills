@@ -1,6 +1,6 @@
 # Drill 24 — Run three replicas and find what silently breaks
 
-**Status:** planned
+**Status:** shipped (the stretch is not run)
 
 Card 24. Prereqs 21, 23. Branch `drill-24` (from `main` at `8677d6e`). Saved as
 `plans/2026-10-12_drill-24-three-replicas.md`.
@@ -285,3 +285,192 @@ checkout. It contains:
 - `pnpm replicas chaos --do kill` on `fenced`: the killed slot ends `once` with a new term.
 - `pnpm db:test` green; `db:test:jobsall` red 3, `db:test:lease` red 2, `db:test:ratememory` red 1.
 - `pnpm arms` shows `scheduler`; `pnpm check:tenancy` passes with `usage_rollups`.
+
+## Revised while shipping
+
+- `PostgresService.acquire()` listens for `error` on a checked-out client and logs `pool_client_error`
+  (your call). Test 4 found the crash before any load ran. pg-pool listens on idle clients only, so
+  a server-side kill of a checked-out connection was an uncaught exception.
+- `runSlot` sets a transaction-local `application_name = job:<holder>`. Test 4 and `pnpm replicas
+  chaos` find the job's backend by it.
+- `pnpm replicas chaos` waits until `pg_stat_activity` shows the holder's job, so the kill or pause
+  always lands mid-job.
+- `db:jobs` runs its three reads in turn: one `pg` client, and pg 8 warns on concurrent queries.
+- The fourth-runner run recreated `nest_server` with `JOB_SLOT_S=10`. Every later run used
+  `SCHEDULER=off` on it. Its defaults were restored afterwards.
+- Chaos runs used 100 req/s. Steady-state runs used 150.
+
+## Results
+
+Docker Desktop, 14 CPUs. Three `api` replicas (pool 10, `node dist/main`) behind `nginx:1.30.5`.
+k6 open model through `http://nginx:8080`, `list:search:ingest 6:2:2`, orgs 2–10, ingest on org 1
+(pro, unlimited). Job runs use `JOB_SLOT_S=10`. Reports are in `k6/reports/2026-10-12-03*` and
+`apps/backend/db/reports/2026-10-11-22*`.
+
+**Spread.** `pnpm replicas spread --n 300`: 100 / 100 / 100. Scaled to four live: 100 each.
+
+**The job, steady state** (`pnpm db:jobs report --since 2` after 90s at 150 req/s; each slot's
+ledger sum against its rollup sum):
+
+| Arm | Writers per slot | Slots | Ledger | Rollups | Ratio | k6 errors |
+|---|---|---|---|---|---|---|
+| `all` (+ dev server on `fenced`) | 4 | 10 × `x4` | 2,688 | 10,752 | 4.00 | 0 |
+| `lease` | 1 | 10 × `once` | 2,742 | 2,742 | 1.00 | 0 |
+| `fenced` | 1 | 11 × `once` | 3,090 | 3,090 | 1.00 | 0 |
+
+**The job under failure** (`JOB_WORK_MS=4000`, lease TTL 10s, `pnpm replicas chaos`):
+
+| Run | Arm | Failover | The slot in flight | Other slots | k6 (100 req/s, 80s) |
+|---|---|---|---|---|---|
+| kill 1 | lease | 9.43s | **lost** (`missing`, 188 events never rolled up) | once | 0 errors |
+| kill 2 | lease | 8.15s | rolled back, re-run once | once | 1 × 502 (ingest) |
+| pause 15s, 1 | lease | 8.24s | **x2** (terms 13, 14) | once | 3 × 502, p99 13.25s, 606 dropped |
+| pause 15s, 2 | lease | 8.22s | **x2** (terms 15, 16) | once | 2 × 502 |
+| kill 1 | fenced | 8.21s | rolled back, re-run once | once* | 0 |
+| kill 2 | fenced | 8.19s | rolled back, re-run once | once | 0 |
+| pause 15s, 1 | fenced | 6.96s | once: claim blocked twice, then `job_slot_taken` | once | 4 × 502 |
+| pause 15s, 2 | fenced | 7.48s | once: claim blocked once, then `job_slot_taken` | once | 2 × 502 |
+| pause 40s | fenced | 7.51s | once: Postgres ended the paused session, the new leader ran it at 36.4s | once | 3 × 502, 4,893 of 8,000 requests |
+
+\* One `x2` in that window was the fenced catch-up re-running a slot the claim-less `lease` arm had
+just rolled up (finding 7). It is not a failure of the kill.
+
+**Limiter** (`pnpm db:ratelimit concurrent --api http://nginx:8080 --replicas api`, basic = 600,
+2,000 at once, 3 rounds each, interleaved):
+
+| Replicas | Arm | Admitted per round | Error vs B + r·T | Other |
+|---|---|---|---|---|
+| 1 | `memory` | 612, 607, 611 | −0.16 to −0.92% | 580–1,315 × 504 per round (finding 4) |
+| 3 | `memory` | 1,821, 1,822, 1,819 | +195.05 to +197.49% | |
+| 3 | `bucket` | 609, 606, 606 | −0.21 to −0.34% | |
+| 3 | `memory` | 1,818, 1,816, 1,818 | +195.38 to +197.28% | |
+| 3 | `bucket` | 609, 606, 605 | −0.26 to −0.36% | |
+| 3 | `bucket`, boundary | 600 + 20 | −0.30% | drill 21 measured −0.25% on one |
+
+`/metrics` read once through nginx instead of summed per replica: the delta said allowed 208, 223
+and 185 for rounds that admitted 607, 605 and 605. Six scrapes in a row read 1,407 → 1,048 →
+1,182 → 1,407 → 1,048 → 1,182.
+
+**Connection budget** (`pnpm load drain` at 900 req/s offered, 30s, saturating both):
+
+| Pool × replicas | Peak client backends | Failed | Served |
+|---|---|---|---|
+| 32 × 3 | 99 (+ dev server) | 885 (5.86%), all 53300 | 503.8 req/s |
+| 10 × 3 | 36 | 0 | 376.9 req/s |
+
+**Audit:**
+
+- `pg_stat_activity`: one pool connection and one `listen:entitlements` per process, dev server
+  included.
+- `pnpm logs:trace <rid>` found 0 lines for a request served by `api-1`. `docker compose --profile
+  replicas logs api` found it.
+- A plan change: `entitlement_invalidations_total{source="notify"}` +1 on each of four processes.
+- 300 concurrent `GET /messages/stats` on a cold org 5: `stats_recomputes_total` +1 across the
+  fleet. 149 waiters got `wait`'s 5s 503, because the aggregate took 5–10s.
+- 300 concurrent duplicate ingests: 1 × 201, 299 × 200, 1 row.
+- An import uploaded through nginx (landed on `.9`), then retried three times: each retry landed on
+  another replica (`.7`, `.9`, `.6`) and succeeded.
+- A second nginx without `resolve`, started before `--scale api=4`: 0 of 400 requests reached
+  `api-4`. Ours: 100.
+
+### Predictions, scored
+
+| # | Prediction | Measured | Score |
+|---|---|---|---|
+| 1 | `memory` admits ≈ 1,800; ≈ 600 on one; single-app tests pass | 1,816–1,822; 607–612; the drill 21 suite passed on `memory` | hit |
+| 2 | `all` runs 3×, 4× with the dev server | 4 writers, ratio 4.00, 0 errors | hit |
+| 3 | `lease` re-runs a slot after failover and double-runs on a pause | pause: `x2` twice. Kill: one slot **lost**, one fine. The e2e test shows the re-run | partial: the failover failure was a loss, not a duplicate |
+| 4 | `/metrics` through the LB lies | deltas ≈ ⅓; the counter "went down" between scrapes | hit (no negative delta seen) |
+| 5 | pool 32 × 3 fails with 53300 | peak 99 backends, 885 × 53300 | hit |
+| 6 | nginx never reads readiness | no active check in OSS; a paused replica kept its ⅓ | hit, and worse than predicted (finding 2) |
+| 7 | `logs:trace` misses replica lines | 0 lines | hit |
+| 8 | `bucket` correct in aggregate | −0.21 to −0.36%, boundary −0.30% | hit |
+| 9 | three DELs per plan change | four: the dev server listens too | hit, with the count off by the process I forgot |
+| 10 | stats single-flight holds fleet-wide | 1 recompute for 300 requests | hit |
+| 11 | duplicates land once | 1 row | hit |
+| 12 | imports retry on any replica via the shared volume | 3 of 3 retries succeeded on other replicas | hit (the no-volume half not run) |
+| 13 | kill: failover ≈ 10s + ≤ 3.3s; slot once, late | 8.19–9.43s; once | hit. The formula was loose: failover is TTL minus time since the last renew, plus up to one poll |
+| 14 | pause: blocked claim, `slot_taken`, once; > 30s → session ended, new leader runs it | exactly that; 40s pause ended at ~32s, ran at 36.4s | hit |
+| 15 | lag, in-flight, phase per process, correct | nothing contradicted it | not exercised |
+| 16 | `/info` describes one replica per call | rotating `x-served-by` | hit |
+| 17 | no `resolve` → new replica unseen; with it, joins | 0 of 400 vs 100 of 400 | hit |
+| 18 | ≈ ⅓ each | 100 / 100 / 100 | hit |
+| 19 | clock skew, Next.js | — | not exercised |
+
+### What the list missed
+
+1. **A checked-out pg client crashes the process when Postgres kills its connection.** pg emits
+   `error` with no listener (pg-pool only listens on idle clients). Found by e2e test 4 before any
+   load. Fixed in `PostgresService.acquire()`. The 40s pause proves the fix: the resumed holder
+   logged `pool_client_error` and stayed up.
+2. **A hung replica is worse than a dead one behind nginx OSS.** `docker pause` on one replica
+   kept ⅓ of traffic flowing into it for the whole pause. Nothing failed, so passive checks saw
+   nothing, and `proxy_read_timeout` is 60s. 15s pause: p99 13.25s and 606 dropped iterations at
+   100 req/s. 40s pause: 4,893 of 8,000 requests served.
+3. **Resuming a paused Node resets the sockets nginx wrote to.** On unpause, Node's overdue
+   keep-alive timers closed 13 upstream sockets that already held requests. nginx retried the 10
+   GETs on another peer, and the 3 POSTs became 502 (a sent POST is never retried).
+4. **The LB turns a client burst into an upstream connection storm.** 2,000 concurrent requests
+   through nginx to one replica: 2,755 upstream connects timed out at the 1s `proxy_connect_timeout`
+   (580–1,315 × 504 per round). Behind three replicas: 0.
+5. **`process.pid` is 7 on every replica.** Found by reading the lease holders (`<host>:7:…`). The
+   import staging file is `upload-<ms>-<pid>.csv` on a volume all replicas share, so two uploads in
+   the same millisecond on two replicas write one file. Not reproduced; a one-line fix (a UUID) is
+   proposed below.
+6. **`docker kill` does not trigger `restart: always`.** Docker treats it as a manual stop. A killed
+   replica stayed down; a crash on its own would have restarted.
+7. **Turning the fence on over a claim-less job re-runs its recent past.** `fenced`'s catch-up
+   trusts `job_runs` alone. The first `fenced` leader after a `lease` run rolled up again every slot
+   in its 10-slot window that `lease` had done. Deploying a fence needs `job_runs` backfilled first.
+8. Not replica-specific, recorded for honesty: the first warm-up after a restart had 106 × 500 in
+   2s. Cold search scans (3.4–4.2s) held every pool past its 2s acquire timeout. It was outside the
+   measured window.
+
+## Write-up
+
+**What did you predict correctly and what did you miss?** 16 of 17 exercised predictions hit. Two
+of those needed corrections: four NOTIFY DELs, not three, and a looser failover formula. One was
+partial: a lease alone failed by losing a slot on a slow failover, not only by duplicating one. The
+list was about state: counters, caches, locks, timers, connections. Everything it missed was
+about failure *between* processes:
+- a hung peer that still accepts work;
+- sockets that die on resume;
+- a proxy that multiplies connections;
+- a pg error event nobody listened for;
+- an id (`pid`) that is unique per host but not per fleet.
+
+The pattern: a single process never has a neighbour that is half alive.
+
+**How does the run-once mechanism behave if the holder dies mid-job?** The slot's claim and its
+rollup are one transaction.
+- **Killed:** Postgres sees the socket close and rolls both back. The lease outlives the holder
+  by up to its TTL. Failover measured 8.19–9.43s. The next leader's catch-up finds no claim for
+  that slot and runs it once, late. Nothing is lost and nothing is doubled.
+- **Paused past its lease:** two processes believe they lead. The new leader's claim blocks on
+  the old one's uncommitted claim (`lock_timeout` 5s, retried each tick). On resume the old
+  leader commits, and the new one gets `ON CONFLICT DO NOTHING`. Two terms appear in the logs and
+  one row per slot.
+- **Paused for good:** `idle_in_transaction_session_timeout` (30s) ends the old session. The
+  claim rolls back, and the new leader runs the slot. Measured: 36.4s after the pause.
+
+The lease alone (`lease`) doubled the slot on both pauses and lost one on a slow kill. It decides
+who should run; only the claim in the same transaction as the effect decides what ran.
+
+**What's a single point of failure now that wasn't before?**
+- **nginx.** Every request crosses one container, as it once crossed `nest_server`. The difference
+  is that it fails for everyone at once, and it cannot see a hung replica.
+- **Redis for leadership.** Redis down: every renewal fails, every process steps down, and no
+  rollup runs until Redis returns (fail closed). Meanwhile the limiter on the same Redis fails
+  open. One dependency, two opposite failure policies.
+- **Postgres's 97 connection slots.** They are now a budget N replicas split. Raising one
+  replica's pool to its single-instance knee takes the fleet past it.
+- **The shared import volume.** It is now a dependency of every replica.
+
+## Proposed follow-ups
+
+- The staging filename: `upload-${randomUUID()}.csv` instead of `${Date.now()}-${process.pid}`.
+- nginx: `proxy_read_timeout` well under 60s per route and `max_fails` on timeouts, so a hung
+  replica is benched (the passive answer to finding 2). Or HAProxy's active checks, already in the
+  drain rig.
+- Node's `keepAliveTimeout` above nginx's upstream idle timeout, so the app never closes a socket
+  the proxy may still write to (finding 3).
