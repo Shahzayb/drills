@@ -132,14 +132,14 @@ report is `GET /health/deps`, which nothing routes on. `deps` is the control arm
 check times out in the saturated pool and the LB can lose its last server.
 
 **Jobs (drill 24).** `JobsService` rolls `usage_events` into `usage_rollups` per wall-clock slot
-(`JOB_SLOT_S` 60, due `JOB_GRACE_S` 5 after it ends) under `SCHEDULER=off|all|lease|fenced` (default
+(`JOB_SLOT_S` 60, due `JOB_GRACE_S` 5 later) under `SCHEDULER=off|all|lease|fenced` (default
 `fenced`). A Redis lease (`lease:v1:job:usage-rollup`: `SET NX PX` + `INCR` term in one Lua script,
 compare-and-renew every TTL/3, released on shutdown) picks the runner. Correctness is the
-`job_runs (job, slot_start)` claim, inserted `ON CONFLICT DO NOTHING` in the rollup's own
-transaction with `lock_timeout` 5s and `idle_in_transaction_session_timeout` 30s; catch-up re-runs
-unclaimed slots in the last 10. `app_rollup_usage()` is SECURITY DEFINER (cross-tenant).
-`usage_rollups` has no unique key on purpose. Every process with the code joins the election,
-the dev server included; `test:e2e` sets `SCHEDULER_TICK_MS=0` and tests drive `tick(now)`.
+`job_runs (job, slot_start)` claim, inserted `ON CONFLICT DO NOTHING` in the rollup's
+transaction (`lock_timeout` 5s, `idle_in_transaction_session_timeout` 30s); catch-up runs unclaimed
+slots in the last 10. `app_rollup_usage()` is SECURITY DEFINER (cross-tenant).
+`usage_rollups` has no unique key on purpose. Every process joins the election, dev server
+included; `test:e2e` sets `SCHEDULER_TICK_MS=0`.
 
 ## Instruments and commands
 
@@ -162,7 +162,7 @@ the dev server included; `test:e2e` sets `SCHEDULER_TICK_MS=0` and tests drive `
   under `init: true`, the dev server's `dist/`, a shared `/tmp/imports` volume) and HAProxy `lb`
   (`:8080`, stats `:8404`, check `GET /health` at `inter 1s fall 2 rise 2`, `retries 0`).
 - **Replica rig.** `--profile replicas`: `api` (`extends: api_a`, `deploy.replicas: 3`) behind
-  `nginx:1.30.5` (`:8088`, `server api:3002 resolve`, passive checks only).
+  `nginx:1.30.5` (`:8088`, `server api:3002 resolve`, passive checks, read timeout 10s).
 - **Observability.** `db:stats:on|stats|stats:reset` (`pg_stat_statements`), `db:log:on|off|status`,
   `db:activity`, `logs:trace <rid>`, `trace:on|off` (collector + Jaeger under the `trace` profile).
 - **Stack.** `pnpm docker:up`; `docker:rebuild` after a dependency change (`/app/node_modules` is an
@@ -318,13 +318,15 @@ the dev server included; `test:e2e` sets `SCHEDULER_TICK_MS=0` and tests drive `
 - `monitorEventLoopDelay` values include the timer resolution (~10ms idle). This API's overload is
   I/O queueing; in-flight count and pool wait show it, and lag does not.
 - `docker events` keeps a short history that health-check execs overflow in ~90s; stream it.
-- nginx OSS never reads readiness and a hung replica fails nothing, so it keeps its share. A sent
-  POST is never retried (`proxy_next_upstream`). Without `resolve`, an upstream name is resolved
+- nginx OSS never reads readiness and a hung replica fails nothing; only `proxy_read_timeout`
+  benches it. A sent POST is never retried (`proxy_next_upstream`).
+- The proxy MUST close idle upstream sockets first: `KEEP_ALIVE_TIMEOUT_MS` (65s) outlasts nginx's
+  60s upstream `keepalive_timeout`; otherwise Node resets requests already written. Without `resolve`, an upstream name is resolved
   once at startup.
-- `/metrics` is per process; through an LB it reads one replica per scrape. Sum per replica
-  (`db:ratelimit --replicas api` resolves the DNS name).
-- Every container's Node is PID 7: `process.pid` is not a fleet-unique id. `docker kill` is a manual
-  stop, so `restart: always` leaves the replica down.
+- `/metrics` is per process; through an LB each scrape is one replica. Sum per replica
+  (`db:ratelimit --replicas api`).
+- Every container's Node is PID 7: never a fleet-unique id. `docker kill` is a manual stop;
+  `restart: always` leaves it down.
 
 **Nest, Next and logging**
 

@@ -8,8 +8,7 @@ None.
 
 ## Next step
 
-Card 24 shipped; its stretch (kill one replica under load, time nginx's detection) is not run, and
-three fixes are proposed in its plan (issues 60–62). Card 26 (the outbox) replaces drill 19's `NOTIFY`.
+Card 24 shipped with its stretch and three fixes. Card 26 (the outbox) replaces drill 19's `NOTIFY`.
 Card 29 is card 20's stretch in full. Card 30 starts from drill 15's worker and owes it a lease
 (issue 21).
 
@@ -26,7 +25,8 @@ Each red run MUST fail exactly this many tests (arms in `package.json`); a green
 switch stopped switching. `db:test:naive` 2 (query budget) · `:notiebreak` 1 · `:like` 1 ·
 `:noidem` 3 · `:redis` 1 · `:rmw` 2 · `:lww` 4 · `:buffer` 6 · `:skiplast` 15 (two suites) ·
 `:nocache` 1 · `:ttlonly` 2 · `:stampede` 2 · `:nojitter` 1 · `:fixed` 1 · `:fixedrmw` 3 ·
-`:bucketrmw` 2 · `:nodrain` 4 · `:readydeps` 1 · `:jobsall` 3 · `:lease` 2 · `:ratememory` 1.
+`:bucketrmw` 2 · `:nodrain` 4 · `:readydeps` 1 · `:jobsall` 3 · `:lease` 2 · `:ratememory` 1 ·
+`:keepalive5` 1.
 Green: `:constraint`, `:donothing`, `:locking`, `:serializable`, `:pessimistic`, `:restart`,
 `:invalidate`, `:statswait`, `:pool2`.
 
@@ -155,10 +155,8 @@ Numbered for reference from plans; gaps are retired numbers.
 
 **Replicas (drill 24)**
 
-60. nginx OSS checks passively and `proxy_read_timeout` is 60s: a hung replica keeps its share.
-61. Node's 5s `keepAliveTimeout` closes upstream sockets nginx may still write to; a sent POST then 502s.
-62. The import staging file is named `upload-<ms>-<process.pid>` on the shared volume; the PID is 7 in
-    every replica.
+60. nginx OSS checks passively: a hung replica holds ⅓ of requests until the first 10s read timeout
+    benches it, and every POST stuck on it gets 504.
 63. Turning `fenced` on over claim-less runs re-runs the last 10 slots. `JOB_GRACE_S` is a guess, not
     a watermark.
 
