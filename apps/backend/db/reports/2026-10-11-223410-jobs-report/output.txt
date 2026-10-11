@@ -1,0 +1,22 @@
+jobs report  last 2 min  slot 10s  api http://nginx:8080
+  API                  http://nginx:8080            (env)
+  SINCE                2                            (env)
+  SLOT_S               10                           (default)
+
+  server arm  scheduler=fenced
+
+  slot (UTC)   ledger  rollups  copies  verdict   writers               terms  claim
+  22:32:00        0        0       0  empty                                  7777be066c6c t24
+  22:32:10        0        0       0  empty                                  07c4cac11aa0 t25
+  22:32:20       58       58       1  once      07c4cac11aa0             25  07c4cac11aa0 t25
+  22:32:30      187      187       1  once      20ab9ff5c793             26  20ab9ff5c793 t26
+  22:32:40      175      175       1  once      20ab9ff5c793             26  20ab9ff5c793 t26
+  22:32:50       87       87       1  once      20ab9ff5c793             26  20ab9ff5c793 t26
+  22:33:00        0        0       0  empty                                  20ab9ff5c793 t26
+  22:33:10        0        0       0  empty                                  20ab9ff5c793 t26
+  22:33:20      113      113       1  once      20ab9ff5c793             26  20ab9ff5c793 t26
+  22:33:30      200      200       1  once      20ab9ff5c793             26  20ab9ff5c793 t26
+  22:33:40      200      200       1  once      20ab9ff5c793             26  20ab9ff5c793 t26
+  22:33:50       42       42       1  once      20ab9ff5c793             26  20ab9ff5c793 t26
+
+  slots 12  empty 4  once 8  ledger 1062  rollups 1062  ratio 1.00

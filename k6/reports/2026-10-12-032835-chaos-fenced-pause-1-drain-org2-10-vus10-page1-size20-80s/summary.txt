@@ -1,0 +1,13 @@
+
+  name=chaos-fenced-pause-1 org=2-10 rate=100.00/s maxvus=300 warmup=5s measured=80s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 7396
+  errors            : 4 (0.05%)
+  p50 / p95 / p99   : 6.27 / 65.95 / 13138.19 ms
+  min / avg / max   : 1.64 / 435.59 / 15254.92 ms
+  throughput        : 92.45 req/s of 100.00 offered
+  dropped           : 605 iterations never started
+  (incl. warm-up)   : p50 6.28  p95 63.93  p99 13010.23 ms
+  errors by endpoint: list 0 · search 0 · ingest 4
+  p99 by endpoint   : list 12908.98 · search 13113.21 · ingest 13735.12 ms
+
+RESULT,chaos-fenced-pause-1,2-10,300,100,0,0,4,6.27,65.95,13138.19,92.45,7396

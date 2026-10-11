@@ -1,0 +1,22 @@
+jobs report  last 2 min  slot 10s  api http://nginx:8080
+  API                  http://nginx:8080            (env)
+  SINCE                2                            (env)
+  SLOT_S               10                           (default)
+
+  server arm  scheduler=all
+
+  slot (UTC)   ledger  rollups  copies  verdict   writers               terms  claim
+  22:09:20        0        0       0  empty                                  ef4a73b4fb6c t6
+  22:09:30        0        0       0  empty                                  ef4a73b4fb6c t6
+  22:09:40       27      108       4  x4        702dddbcd766,ab2748cb428d,d45fbf13d774,ef4a73b4fb6c    0,6  ef4a73b4fb6c t6
+  22:09:50      263     1052       4  x4        702dddbcd766,ab2748cb428d,d45fbf13d774,ef4a73b4fb6c    0,6  ef4a73b4fb6c t6
+  22:10:00      298     1192       4  x4        702dddbcd766,ab2748cb428d,d45fbf13d774,ef4a73b4fb6c    0,6  ef4a73b4fb6c t6
+  22:10:10      300     1200       4  x4        702dddbcd766,ab2748cb428d,d45fbf13d774,ef4a73b4fb6c    0,6  ef4a73b4fb6c t6
+  22:10:20      300     1200       4  x4        702dddbcd766,ab2748cb428d,d45fbf13d774,ef4a73b4fb6c    0,6  ef4a73b4fb6c t6
+  22:10:30      300     1200       4  x4        702dddbcd766,ab2748cb428d,d45fbf13d774,ef4a73b4fb6c    0,6  ef4a73b4fb6c t6
+  22:10:40      300     1200       4  x4        702dddbcd766,ab2748cb428d,d45fbf13d774,ef4a73b4fb6c    0,6  ef4a73b4fb6c t6
+  22:10:50      300     1200       4  x4        702dddbcd766,ab2748cb428d,d45fbf13d774,ef4a73b4fb6c    0,6  ef4a73b4fb6c t6
+  22:11:00      300     1200       4  x4        702dddbcd766,ab2748cb428d,d45fbf13d774,ef4a73b4fb6c    0,6  ef4a73b4fb6c t6
+  22:11:10      300     1200       4  x4        702dddbcd766,ab2748cb428d,d45fbf13d774,ef4a73b4fb6c    0,6  ef4a73b4fb6c t6
+
+  slots 12  empty 2  x4 10  ledger 2688  rollups 10752  ratio 4.00

@@ -1,0 +1,13 @@
+
+  name=pool32-x3 org=2-10 rate=900.00/s maxvus=300 warmup=5s measured=30s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 15115
+  errors            : 885 (5.86%)
+  p50 / p95 / p99   : 558.86 / 1458.54 / 1619.24 ms
+  min / avg / max   : 1.82 / 593.49 / 1845.26 ms
+  throughput        : 503.83 req/s of 900.00 offered
+  dropped           : 11886 iterations never started
+  (incl. warm-up)   : p50 547.93  p95 1448.48  p99 1610.20 ms
+  errors by endpoint: list 492 · search 172 · ingest 221
+  p99 by endpoint   : list 788.05 · search 1718.45 · ingest 1495.59 ms
+
+RESULT,pool32-x3,2-10,300,900,492,172,221,558.86,1458.54,1619.24,503.83,15115

@@ -1,0 +1,13 @@
+
+  name=chaos-fenced-kill-1 org=2-10 rate=100.00/s maxvus=300 warmup=5s measured=80s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 7998
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 6.26 / 60.07 / 146.25 ms
+  min / avg / max   : 1.61 / 19.94 / 1097.83 ms
+  throughput        : 99.97 req/s of 100.00 offered
+  dropped           : 3 iterations never started
+  (incl. warm-up)   : p50 6.31  p95 60.05  p99 132.25 ms
+  errors by endpoint: list 0 · search 0 · ingest 0
+  p99 by endpoint   : list 88.40 · search 559.96 · ingest 145.42 ms
+
+RESULT,chaos-fenced-kill-1,2-10,300,100,0,0,0,6.26,60.07,146.25,99.97,7998
