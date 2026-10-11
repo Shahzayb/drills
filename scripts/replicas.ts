@@ -4,8 +4,8 @@
 // Runs on the HOST because it drives Docker. Every docker command is printed before it runs, so each
 // step can be repeated by hand. See plans/2026-10-12_drill-24-three-replicas.md.
 
-import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -19,6 +19,7 @@ const SUBCOMMANDS = {
   holder: 'print which replica holds the job lease',
   chaos:
     'wait until the lease holder is mid-job, then kill or pause it; report the failover',
+  blip: 'run k6 through nginx, kill or stop one replica mid-load, report the errors and when nginx noticed',
   down: 'remove the replicas and nginx',
 } as const;
 
@@ -35,8 +36,19 @@ const ARMS = {
 const KNOBS = {
   scale: { def: '3', help: 'up: how many replicas' },
   n: { def: '300', help: 'spread: requests' },
-  do: { def: 'kill', help: 'chaos: kill (SIGKILL) | pause (docker pause)' },
+  do: {
+    def: 'kill',
+    help: 'chaos: kill | pause. blip: kill (SIGKILL) | stop (SIGTERM, then SIGKILL after the grace period)',
+  },
   hold: { def: '15', help: 'chaos: seconds a pause lasts' },
+  target: { def: 'drills-api-2', help: 'blip: the replica to kill or stop' },
+  at: { def: '30', help: 'blip: seconds after k6 starts (warm-up included)' },
+  rate: { def: '150', help: 'blip: requests/s offered' },
+  duration: { def: '60s', help: 'blip: measured phase (after a 10s warm-up)' },
+  'api-key': {
+    def: '',
+    help: 'blip: org 1 key for the ingest share; minted (and its report deleted) when empty',
+  },
 } as const;
 
 const { values, positionals } = parseArgs({
@@ -305,6 +317,126 @@ async function chaos(): Promise<void> {
   }
 }
 
+/** A key for org 1. `db:storm key` writes the plaintext into a report directory, which is deleted here. */
+function mintKey(): string {
+  const reports = `${root}apps/backend/db/reports`;
+  const before = new Set(readdirSync(reports));
+  const out = spawnSync('pnpm', ['-s', 'db:storm', 'key', '--org', '1'], {
+    encoding: 'utf8',
+  }).stdout;
+  for (const dir of readdirSync(reports)) {
+    if (!before.has(dir) && dir.includes('storm-key'))
+      rmSync(`${reports}/${dir}`, { recursive: true });
+  }
+  const key = /dk_[a-f0-9]+/.exec(out)?.[0];
+  if (!key) throw new Error('could not mint an api key');
+  return key;
+}
+
+interface Failure {
+  t: number;
+  ep: string;
+  status: number;
+}
+
+async function blip(): Promise<void> {
+  const action = opt('do');
+  if (action !== 'kill' && action !== 'stop')
+    throw new Error(`--do ${action}?`);
+  const target = opt('target');
+  const ip = replicas().find((r) => r.name === target)?.ip;
+  if (!ip) throw new Error(`${target} is not running`);
+  const key = opt('api-key') || mintKey();
+
+  const startedAt = new Date();
+  const load = spawn(
+    'node',
+    [
+      'scripts/load.ts',
+      'drain',
+      '--base-url',
+      'http://nginx:8080',
+      '--rate',
+      opt('rate'),
+      '--warmup',
+      '10s',
+      '--duration',
+      opt('duration'),
+      '--org',
+      '2-10',
+      '--api-key',
+      key,
+      '--name',
+      `blip-${action}`,
+    ],
+    { cwd: root, stdio: ['ignore', 'pipe', 'inherit'] },
+  );
+  let out = '';
+  load.stdout.on('data', (d: Buffer) => (out += d.toString()));
+  const finished = new Promise((resolve) => load.on('exit', resolve));
+
+  await sleep(Number(opt('at')) * 1000);
+  const t0 = Date.now();
+  docker([action, target]);
+  const exited = Date.now();
+  await finished;
+
+  const dir = [...out.matchAll(/k6\/reports\/[^\s/]+/g)].at(-1)?.[0];
+  if (!dir) throw new Error('no k6 report directory in its output');
+  const summary = readFileSync(`${root}${dir}/summary.txt`, 'utf8');
+  const failures = readFileSync(`${root}${dir}/failures.ndjson`, 'utf8')
+    .split('\n')
+    .filter((line) => line.startsWith('{'))
+    .map((line) => JSON.parse(line) as Failure);
+
+  const logs = spawnSync(
+    'docker',
+    ['logs', '--since', startedAt.toISOString(), 'drills_nginx'],
+    { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
+  );
+  const access = logs.stdout
+    .split('\n')
+    .map((line) => line.split(' '))
+    .filter((f) => /^\d+\.\d+$/.test(f[0]))
+    .map((f) => ({
+      ms: Math.round(Number(f[0]) * 1000) - t0,
+      status: f[1],
+      upstream: f[4].replace('upstream=', ''),
+    }))
+    .filter((r) => r.ms >= 0);
+  const toDead = access.filter((r) => r.upstream.includes(`${ip}:3002`));
+  const retried = toDead.filter((r) => r.upstream.includes(','));
+  const errors = logs.stderr
+    .split('\n')
+    .filter((line) => /\[(error|warn)\]/.test(line));
+
+  const s = (ms: number) => `${(ms / 1000).toFixed(2)}s`;
+  console.log(
+    `\n  blip: docker ${action} ${target} (${ip}) at ${new Date(t0).toISOString()}, returned after ${s(exited - t0)}`,
+  );
+  console.log(summary.split('\n').slice(1, 10).join('\n'));
+  const by = (pick: (f: Failure) => string) =>
+    failures.reduce<Record<string, number>>((acc, f) => {
+      acc[pick(f)] = (acc[pick(f)] ?? 0) + 1;
+      return acc;
+    }, {});
+  console.log(
+    `\n  failures ${failures.length}  by status ${JSON.stringify(by((f) => String(f.status)))}  by endpoint ${JSON.stringify(by((f) => f.ep))}`,
+  );
+  if (failures.length) {
+    const rel = failures.map((f) => f.t - t0);
+    console.log(
+      `  failures from ${s(Math.min(...rel))} to ${s(Math.max(...rel))} after the ${action}`,
+    );
+  }
+  console.log(
+    `  requests sent to ${ip} after the ${action}: ${toDead.length}, the last at ${toDead.length ? s(Math.max(...toDead.map((r) => r.ms))) : '-'} (${retried.length} retried on another peer)`,
+  );
+  console.log(`  nginx warn/error lines: ${errors.length}`);
+  for (const line of errors.slice(0, 6))
+    console.log(`    ${line.slice(0, 170)}`);
+}
+
 function down(): void {
   docker(['compose', '--profile', 'replicas', 'rm', '-sfv', 'api', 'nginx']);
 }
@@ -315,4 +447,5 @@ else if (sub === 'holder') {
   const h = holder();
   console.log(h ? `  ${h} → ${byHost(h)}` : '  no holder');
 } else if (sub === 'chaos') await chaos();
+else if (sub === 'blip') await blip();
 else down();

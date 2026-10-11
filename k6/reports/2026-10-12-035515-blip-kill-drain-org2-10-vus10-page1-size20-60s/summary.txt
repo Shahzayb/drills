@@ -1,0 +1,13 @@
+
+  name=blip-kill org=2-10 rate=150.00/s maxvus=300 warmup=10s measured=60s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 9001
+  errors            : 1 (0.01%)
+  p50 / p95 / p99   : 6.36 / 56.08 / 61.37 ms
+  min / avg / max   : 1.28 / 15.08 / 95.04 ms
+  throughput        : 150.02 req/s of 150.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 6.44  p95 58.54  p99 1348.99 ms
+  errors by endpoint: list 0 · search 0 · ingest 1
+  p99 by endpoint   : list 8.74 · search 71.50 · ingest 4.95 ms
+
+RESULT,blip-kill,2-10,300,150,0,0,1,6.36,56.08,61.37,150.02,9001
