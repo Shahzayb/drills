@@ -390,6 +390,28 @@ services:
     profiles: ['drain']
     mem_limit: 256m
 
+  # Drill 24: N replicas of api_a behind nginx, off unless `--profile replicas`. One service scaled, so
+  # Docker DNS answers `api` with every replica and nginx re-resolves it. `pnpm replicas up` starts it.
+  # See plans/2026-10-12_drill-24-three-replicas.md.
+  api:
+    extends: api_a
+    container_name: !reset null
+    profiles: !override ['replicas']
+    deploy:
+      replicas: 3
+
+  nginx:
+    image: nginx:1.30.5-alpine
+    container_name: drills_nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - '${NGINX_PORT:-8088}:8080'
+    networks:
+      - app-network
+    profiles: ['replicas']
+    mem_limit: 256m
+
   # Tracing, phase 2 of drill 06. Both services are behind `profiles: ['trace']`
   # so `docker compose up` never starts them: an always-on collector would
   # change the instrument drill 05 baselined against, and cards 08/09/10 compare
