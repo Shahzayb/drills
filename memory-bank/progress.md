@@ -8,9 +8,10 @@ None.
 
 ## Next step
 
-Card 23 shipped. Card 24 re-runs `pnpm db:ratelimit` and drill 22's sweep across replicas; drill 23's
-`--profile drain` already runs two. Card 26 (the outbox) replaces drill 19's `NOTIFY`. Card 29 is card
-20's stretch in full. Card 30 starts from drill 15's worker and owes it a lease (issue 21).
+Card 24 shipped; its stretch (kill one replica under load, time nginx's detection) is not run, and
+three fixes are proposed in its plan (issues 60–62). Card 26 (the outbox) replaces drill 19's `NOTIFY`.
+Card 29 is card 20's stretch in full. Card 30 starts from drill 15's worker and owes it a lease
+(issue 21).
 
 ## Active plan
 
@@ -18,15 +19,16 @@ None open. Every plan in `plans/` is shipped.
 
 ## Live validation
 
-`pnpm docker:up`, then `pnpm db:reset`. `pnpm db:test` runs the backend e2e suite (163 tests) on 6 jest
-workers; at jest's default 13 the 1GB dev container OOMs.
+`pnpm docker:up`, then `pnpm db:reset`. `pnpm db:test` runs the backend e2e suite on 6 jest workers; at
+jest's default 13 the 1GB dev container OOMs.
 
 Each red run MUST fail exactly this many tests (arms in `package.json`); a green red run means the
 switch stopped switching. `db:test:naive` 2 (query budget) · `:notiebreak` 1 · `:like` 1 ·
 `:noidem` 3 · `:redis` 1 · `:rmw` 2 · `:lww` 4 · `:buffer` 6 · `:skiplast` 15 (two suites) ·
-`:nocache` 1 · `:ttlonly` 2 · `:stampede` 2 · `:nojitter` 1 · `:fixed` 1 · `:fixedrmw` 2 ·
-`:bucketrmw` 1 · `:nodrain` 4 · `:readydeps` 1. Green: `:constraint`, `:donothing`, `:locking`, `:serializable`, `:pessimistic`,
-`:restart`, `:invalidate`, `:statswait`, `:pool2`.
+`:nocache` 1 · `:ttlonly` 2 · `:stampede` 2 · `:nojitter` 1 · `:fixed` 1 · `:fixedrmw` 3 ·
+`:bucketrmw` 2 · `:nodrain` 4 · `:readydeps` 1 · `:jobsall` 3 · `:lease` 2 · `:ratememory` 1.
+Green: `:constraint`, `:donothing`, `:locking`, `:serializable`, `:pessimistic`, `:restart`,
+`:invalidate`, `:statswait`, `:pool2`.
 
 `pnpm test:ui` runs Playwright (6 tests) on the host (`pnpm exec playwright install chromium`
 once). Red runs: `ASSIGN=lww docker compose up -d nest_server` fails the conflict test;
@@ -47,27 +49,20 @@ Before measuring:
 - `IMPORT=buffer` kills the API process; `docker compose restart nest_server` after each run.
 - `pnpm db:quota bench`, and `pnpm load pool` past pool 96, need `PG_MAX_CONNECTIONS=200` on
   `postgres_db`, repeated on every compose call.
-- `db:search writes` leaves dead tuples; take size numbers after a `VACUUM`.
-- `pnpm db:entitle metrics` keeps its snapshot in container `/tmp`; bracket a k6 run with two
-  calls.
+- `db:search writes` leaves dead tuples; measure size after a `VACUUM`.
+- `pnpm db:entitle metrics` keeps its snapshot in container `/tmp`; bracket a k6 run with it.
 - `pnpm db:stampede` needs `PG_PRELOAD=pg_stat_statements`. Run `run` at `STATS_TTL_S=300` so the
   forced expiry is the only one in the window.
-- `pnpm drain` mints an API key when `--api-key` is empty; its `db/reports/*storm-key*` output holds
-  the plaintext key, so delete it. Each run imports 300k rows into org `drill-23-drain`: delete them
-  by `conversation_id` as the owner under `SET session_replication_role = replica` (issue 58). Then
-  `docker compose --profile drain rm -sfv api_a api_b lb` and `docker volume rm drills_drain_imports`.
-- `pnpm load ingest` leaves rows behind (k6 has no database connection). Before a drill 05/09/10
-  baseline, as the owner:
-
-```sql
-CREATE TEMP TABLE doomed AS
-  SELECT id FROM conversations
-   WHERE org_id = 1 AND provider_event_id IS NOT NULL
-     AND (provider_event_id LIKE 'k6-%' OR provider_event_id LIKE 'probe-%');
-DELETE FROM usage_events  WHERE conversation_id IN (SELECT id FROM doomed);
-DELETE FROM messages      WHERE conversation_id IN (SELECT id FROM doomed);
-DELETE FROM conversations WHERE id IN (SELECT id FROM doomed);
-```
+- `pnpm drain` and `pnpm db:storm key` write the plaintext API key into `db/reports/*storm-key*`;
+  delete it. After `pnpm drain`: `docker compose --profile drain rm -sfv api_a api_b lb` and
+  `docker volume rm drills_drain_imports`.
+- `pnpm replicas` needs `COMPOSE_PROJECT_NAME=drills` exported; `pnpm replicas down` after. The dev
+  `nest_server` joins the job's election: `SCHEDULER=off docker compose up -d --no-deps nest_server`
+  before measuring the job.
+- k6 ingest rows (`k6-*`/`probe-*` in org 1, from `pnpm load ingest|drain`) and drain's org
+  `drill-23-drain` stay behind. Before a drill 05/09/10 baseline, delete them by `conversation_id`
+  (usage_events, messages, conversation_tags, conversations) as the owner, in one transaction under
+  `SET LOCAL session_replication_role = replica` (issue 58).
 
 ## Known issues
 
@@ -158,6 +153,15 @@ Numbered for reference from plans; gaps are retired numbers.
     conversation scans the ledger; a 2.96M-row delete ran 8 minutes before it was cancelled.
 59. In-flight requests are counted but unbounded; no 503 + `Retry-After` backpressure.
 
+**Replicas (drill 24)**
+
+60. nginx OSS checks passively and `proxy_read_timeout` is 60s: a hung replica keeps its share.
+61. Node's 5s `keepAliveTimeout` closes upstream sockets nginx may still write to; a sent POST then 502s.
+62. The import staging file is named `upload-<ms>-<process.pid>` on the shared volume; the PID is 7 in
+    every replica.
+63. Turning `fenced` on over claim-less runs re-runs the last 10 slots. `JOB_GRACE_S` is a guess, not
+    a watermark.
+
 **Instruments and observability**
 
 16. `url` is logged with its full query string; `LOG_LEVEL=debug` would be expensive.
@@ -167,14 +171,13 @@ Numbered for reference from plans; gaps are retired numbers.
 
 ## Releases
 
-Tag `drill/NN` = version `0.NN.0`, from `drill/09` (`drill/01`/`drill/02` exist locally only).
-Since `drill/14`, tagged on the branch before the merge with `--notes`; a pre-merge
-`--generate-notes` is a changelog link only. Milestones exist for `drill/09`–`drill/11` only (no
-open issues since). Latest: [drill/23](https://github.com/Shahzayb/drills/releases/tag/drill/23).
+Tag `drill/NN` = version `0.NN.0`, from `drill/09`. Since `drill/14`, tagged on the branch before
+the merge with `--notes` (a pre-merge `--generate-notes` is a changelog link only). Milestones exist
+for `drill/09`–`drill/11` only. Latest: [drill/23](https://github.com/Shahzayb/drills/releases/tag/drill/23).
 
 ## Preferences
 
 - Structure is added when there is content for it, not in anticipation.
 - Memory bank updates are made with the user: verified facts written directly, judgments proposed
   first.
-- Keep these files short. Bloat is what stops them being read.
+- Keep these files short; bloat stops them being read.
