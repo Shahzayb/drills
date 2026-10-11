@@ -171,7 +171,7 @@ Numbered for reference from plans; gaps are retired numbers.
 
 Tag `drill/NN` = version `0.NN.0`, from `drill/09`. Since `drill/14`, tagged on the branch before
 the merge with `--notes` (a pre-merge `--generate-notes` is a changelog link only). Milestones exist
-for `drill/09`–`drill/11` only. Latest: [drill/23](https://github.com/Shahzayb/drills/releases/tag/drill/23).
+for `drill/09`–`drill/11` only. Latest: [drill/24](https://github.com/Shahzayb/drills/releases/tag/drill/24).
 
 ## Preferences
 
