@@ -31,6 +31,7 @@ const ARMS = {
   'slot-s': 'JOB_SLOT_S',
   'work-ms': 'JOB_WORK_MS',
   'lease-ms': 'LEASE_TTL_MS',
+  'keep-alive-ms': 'KEEP_ALIVE_TIMEOUT_MS',
 } as const;
 
 const KNOBS = {
@@ -210,7 +211,7 @@ async function up(): Promise<void> {
       arms: Record<string, string>;
     };
     console.log(
-      `  ${r.name.padEnd(18)} ${r.id}  ${r.ip.padEnd(12)}  scheduler=${arms.scheduler} rateLimit=${arms.rateLimit} pool=${arms.poolMax} slot=${arms.jobSlotS}s lease=${arms.leaseTtlMs}ms`,
+      `  ${r.name.padEnd(18)} ${r.id}  ${r.ip.padEnd(12)}  scheduler=${arms.scheduler} rateLimit=${arms.rateLimit} pool=${arms.poolMax} slot=${arms.jobSlotS}s lease=${arms.leaseTtlMs}ms keepAlive=${arms.keepAliveTimeoutMs}ms`,
     );
   }
   console.log(`\n  nginx on ${NGINX}`);

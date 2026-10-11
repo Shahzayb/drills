@@ -67,6 +67,7 @@
     "db:test:jobsall": "docker compose exec -T -e SCHEDULER=all nest_server pnpm --filter=backend run test:e2e",
     "db:test:lease": "docker compose exec -T -e SCHEDULER=lease nest_server pnpm --filter=backend run test:e2e",
     "db:test:ratememory": "docker compose exec -T -e RATE_LIMIT=memory nest_server pnpm --filter=backend run test:e2e",
+    "db:test:keepalive5": "docker compose exec -T -e KEEP_ALIVE_TIMEOUT_MS=5000 nest_server pnpm --filter=backend run test:e2e",
     "check:tenancy": "docker compose exec -T nest_server pnpm --filter=backend run check:tenancy",
     "check:arms": "node scripts/check-arms.ts",
     "arms": "node scripts/check-arms.ts live",

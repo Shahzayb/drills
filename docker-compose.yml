@@ -223,6 +223,8 @@ services:
       # local | deps: what readiness (GET /health) asks. Empty means 'local'; 'deps' is the control arm.
       - READINESS=${READINESS:-}
       - DRAIN_DELAY_MS=${DRAIN_DELAY_MS:-}
+      # Card 24: Node's idle keep-alive, above nginx's 60s upstream keepalive_timeout. Empty means 65000.
+      - KEEP_ALIVE_TIMEOUT_MS=${KEEP_ALIVE_TIMEOUT_MS:-}
       - SHUTDOWN_TIMEOUT_MS=${SHUTDOWN_TIMEOUT_MS:-}
       # Logs an event_loop lag line every N ms when set. Empty means off.
       - EVENT_LOOP_LOG_MS=${EVENT_LOOP_LOG_MS:-}

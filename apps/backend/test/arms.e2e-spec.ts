@@ -105,6 +105,7 @@ describe('GET /info arms (e2e)', () => {
       drainDelayMs: process.env.DRAIN_DELAY_MS || '3000',
       shutdownTimeoutMs: process.env.SHUTDOWN_TIMEOUT_MS || '15000',
       eventLoopLogMs: process.env.EVENT_LOOP_LOG_MS || '0',
+      keepAliveTimeoutMs: process.env.KEEP_ALIVE_TIMEOUT_MS || '65000',
       scheduler: ['off', 'all', 'lease', 'fenced'].includes(
         process.env.SCHEDULER ?? '',
       )

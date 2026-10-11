@@ -32,6 +32,7 @@ import {
 import {
   DRAIN_DELAY_MS,
   EVENT_LOOP_LOG_MS,
+  KEEP_ALIVE_TIMEOUT_MS,
   READINESS,
   SHUTDOWN,
   SHUTDOWN_TIMEOUT_MS,
@@ -78,6 +79,7 @@ export interface InfoResponse {
     drainDelayMs: string;
     shutdownTimeoutMs: string;
     eventLoopLogMs: string;
+    keepAliveTimeoutMs: string;
     scheduler: string;
     jobSlotS: string;
     leaseTtlMs: string;
@@ -140,6 +142,7 @@ export class InfoController {
         drainDelayMs: String(DRAIN_DELAY_MS),
         shutdownTimeoutMs: String(SHUTDOWN_TIMEOUT_MS),
         eventLoopLogMs: String(EVENT_LOOP_LOG_MS),
+        keepAliveTimeoutMs: String(KEEP_ALIVE_TIMEOUT_MS),
         scheduler: SCHEDULER,
         jobSlotS: String(JOB_SLOT_S),
         leaseTtlMs: String(LEASE_TTL_MS),

@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import type { Server } from 'node:http';
 import request, { Response } from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
@@ -51,6 +52,13 @@ describe('GET /health under a saturated pool (e2e)', () => {
     expect(ready.status).toBe(200);
     expect(ready.body).toEqual({ status: 'ok' });
     expect(readyMs).toBeLessThan(500);
+  });
+
+  // nginx keeps idle upstream sockets 60s. Node closing first resets requests nginx already wrote. Drill 24.
+  it('keeps idle keep-alive sockets open longer than nginx does', () => {
+    const server = app.getHttpServer() as Server;
+    expect(server.keepAliveTimeout).toBeGreaterThan(60_000);
+    expect(server.headersTimeout).toBeGreaterThan(server.keepAliveTimeout);
   });
 
   it('reports the saturated pool on /health/deps', () => {
