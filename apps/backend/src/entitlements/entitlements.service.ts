@@ -36,16 +36,19 @@ export type Plan = (typeof PLANS)[number];
  * - `fixed-rmw`   GET, compare, SET. The naive window: the boundary bug plus a race.
  * - `bucket-rmw`  a token bucket computed in Node between a GET and a SET. The race alone.
  * - `bucket`      the same bucket in one Lua script. Shipped.
+ * - `memory`      the same bucket in this process's memory. Exact on one replica, N× on N (drill 24).
  *
  * See plans/2026-10-06_drill-21-rate-limit-burst-boundary.md.
  */
-export type RateLimitMode = 'fixed' | 'fixed-rmw' | 'bucket-rmw' | 'bucket';
+export type RateLimitMode =
+  'fixed' | 'fixed-rmw' | 'bucket-rmw' | 'bucket' | 'memory';
 
 const RATE_LIMIT_MODES: RateLimitMode[] = [
   'fixed',
   'fixed-rmw',
   'bucket-rmw',
   'bucket',
+  'memory',
 ];
 
 export const RATE_LIMIT: RateLimitMode = RATE_LIMIT_MODES.includes(
@@ -112,6 +115,9 @@ const counters = {
 
 @Injectable()
 export class EntitlementsService implements OnModuleInit {
+  /** `memory` only. On the instance, so three apps in one test process are three replicas' limiters. */
+  private readonly buckets = new Map<string, { tokens: number; ts: number }>();
+
   constructor(
     private readonly postgres: PostgresService,
     private readonly redis: RedisService,
@@ -252,8 +258,9 @@ export class EntitlementsService implements OnModuleInit {
     }
 
     // The rmw arms: anything that runs between this GET and the SET below reads the same state.
+    // `memory` never awaits, so on one process nothing can run between its read and its write.
     const now = Date.now();
-    const raw = await this.redis.get(key);
+    const raw = RATE_LIMIT === 'memory' ? null : await this.redis.get(key);
 
     if (RATE_LIMIT === 'fixed-rmw') {
       const window = raw
@@ -275,9 +282,11 @@ export class EntitlementsService implements OnModuleInit {
     }
 
     const perMs = limit / INGEST_WINDOW_S / 1000;
-    const state = raw
-      ? (JSON.parse(raw) as { tokens: number; ts: number })
-      : { tokens: limit, ts: now };
+    const state = (RATE_LIMIT === 'memory'
+      ? this.buckets.get(key)
+      : raw
+        ? (JSON.parse(raw) as { tokens: number; ts: number })
+        : undefined) ?? { tokens: limit, ts: now };
     let tokens = Math.min(
       limit,
       state.tokens + Math.max(0, now - state.ts) * perMs,
@@ -285,11 +294,15 @@ export class EntitlementsService implements OnModuleInit {
     const allowed = tokens >= 1;
     if (allowed) tokens -= 1;
     const fullMs = Math.ceil((limit - tokens) / perMs);
-    await this.redis.set(
-      key,
-      JSON.stringify({ tokens, ts: now }),
-      Math.max(fullMs, 1) / 1000,
-    );
+    if (RATE_LIMIT === 'memory') {
+      this.buckets.set(key, { tokens, ts: now });
+    } else {
+      await this.redis.set(
+        key,
+        JSON.stringify({ tokens, ts: now }),
+        Math.max(fullMs, 1) / 1000,
+      );
+    }
     return {
       limit,
       allowed,

@@ -629,15 +629,16 @@ async function main() {
     // which tags and conversation_tags now must be too.
     //
     // And api_keys since drill 12, usage_events and usage_counters since 13,
-    // import_jobs since 15. This list is not optional bookkeeping: a table
-    // referencing organizations that is missing from it fails the whole seed
+    // import_jobs since 15, usage_rollups and job_runs since 24 (the seed
+    // wipes the ledger they summarise). This list is not optional bookkeeping:
+    // a table referencing organizations that is missing from it fails the whole seed
     // with 0A000 `cannot truncate a table referenced in a foreign key
     // constraint`, naming the new table rather than this line. Adding an FK to
     // organizations means adding it here.
     await client.query(
       'TRUNCATE messages, conversations, memberships, users, organizations, ' +
         'tags, conversation_tags, api_keys, usage_events, usage_counters, ' +
-        'import_jobs RESTART IDENTITY',
+        'import_jobs, usage_rollups, job_runs RESTART IDENTITY',
     );
   });
 

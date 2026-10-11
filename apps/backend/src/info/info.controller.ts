@@ -36,6 +36,7 @@ import {
   SHUTDOWN,
   SHUTDOWN_TIMEOUT_MS,
 } from '../health/health.service';
+import { JOB_SLOT_S, LEASE_TTL_MS, SCHEDULER } from '../jobs/jobs.service';
 import { QUERY_COUNTER_MODE } from '../observability/query-counter';
 import { TRACING_ENABLED } from '../observability/trace';
 import { logger } from '../observability/logger';
@@ -77,6 +78,9 @@ export interface InfoResponse {
     drainDelayMs: string;
     shutdownTimeoutMs: string;
     eventLoopLogMs: string;
+    scheduler: string;
+    jobSlotS: string;
+    leaseTtlMs: string;
     queryCounter: string;
     logLevel: string;
     tracing: string;
@@ -136,6 +140,9 @@ export class InfoController {
         drainDelayMs: String(DRAIN_DELAY_MS),
         shutdownTimeoutMs: String(SHUTDOWN_TIMEOUT_MS),
         eventLoopLogMs: String(EVENT_LOOP_LOG_MS),
+        scheduler: SCHEDULER,
+        jobSlotS: String(JOB_SLOT_S),
+        leaseTtlMs: String(LEASE_TTL_MS),
         queryCounter: QUERY_COUNTER_MODE,
         logLevel: logger.level,
         tracing: TRACING_ENABLED ? 'on' : 'off',

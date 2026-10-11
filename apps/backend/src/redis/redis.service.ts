@@ -34,6 +34,22 @@ if allowed == 0 then retryMs = math.ceil((1 - tokens) / perMs) end
 return { allowed, math.floor(tokens), fullMs, retryMs }
 `;
 
+// KEYS[1] the lease, KEYS[2] its term counter. ARGV holder, ttl ms. Returns the new term, or 0 if held.
+const ACQUIRE_LEASE = `
+if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', ARGV[2]) then
+  return redis.call('INCR', KEYS[2])
+end
+return 0
+`;
+
+// KEYS[1] the lease. ARGV holder, ttl ms. Extends it only for the holder that still owns it.
+const RENEW_LEASE = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('PEXPIRE', KEYS[1], ARGV[2])
+end
+return 0
+`;
+
 /**
  * Owns the Redis client. The client stays private on purpose — when a drill
  * needs a new command, it gets a method here rather than a handle to the raw
@@ -270,6 +286,58 @@ export class RedisService implements OnApplicationShutdown {
       if (this.logger.isLevelEnabled('debug')) {
         this.logger.debug(
           { rid, cmd: 'EVAL TAKE-TOKEN', key, durMs: since(startedAt) },
+          'redis_command',
+        );
+      }
+    }
+  }
+
+  /**
+   * Takes a free lease for `ttlMs` and returns its term, a number that only grows, or 0 when another
+   * holder has it. The term is the fencing token. See plans/2026-10-12_drill-24-three-replicas.md.
+   */
+  async acquireLease(
+    key: string,
+    holder: string,
+    ttlMs: number,
+  ): Promise<number> {
+    const rid = getRequestId();
+    const startedAt = performance.now();
+    try {
+      return Number(
+        await this.client.eval(
+          ACQUIRE_LEASE,
+          2,
+          key,
+          `${key}:term`,
+          holder,
+          ttlMs,
+        ),
+      );
+    } finally {
+      if (this.logger.isLevelEnabled('debug')) {
+        this.logger.debug(
+          { rid, cmd: 'EVAL ACQUIRE-LEASE', key, durMs: since(startedAt) },
+          'redis_command',
+        );
+      }
+    }
+  }
+
+  /** Extends a lease this holder still owns. False means it expired and someone else may hold it. */
+  async renewLease(
+    key: string,
+    holder: string,
+    ttlMs: number,
+  ): Promise<boolean> {
+    const rid = getRequestId();
+    const startedAt = performance.now();
+    try {
+      return (await this.client.eval(RENEW_LEASE, 1, key, holder, ttlMs)) === 1;
+    } finally {
+      if (this.logger.isLevelEnabled('debug')) {
+        this.logger.debug(
+          { rid, cmd: 'EVAL RENEW-LEASE', key, durMs: since(startedAt) },
           'redis_command',
         );
       }

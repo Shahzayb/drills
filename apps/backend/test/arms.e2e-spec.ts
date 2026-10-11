@@ -81,9 +81,13 @@ describe('GET /info arms (e2e)', () => {
         ? process.env.ENTITLEMENT_CACHE
         : 'notify',
       entitlementTtlS: process.env.ENTITLEMENT_TTL_S || '30',
-      rateLimit: ['fixed', 'fixed-rmw', 'bucket-rmw', 'bucket'].includes(
-        process.env.RATE_LIMIT ?? '',
-      )
+      rateLimit: [
+        'fixed',
+        'fixed-rmw',
+        'bucket-rmw',
+        'bucket',
+        'memory',
+      ].includes(process.env.RATE_LIMIT ?? '')
         ? process.env.RATE_LIMIT
         : 'bucket',
       statsCache: ['off', 'naive', 'wait', 'stale'].includes(
@@ -101,6 +105,13 @@ describe('GET /info arms (e2e)', () => {
       drainDelayMs: process.env.DRAIN_DELAY_MS || '3000',
       shutdownTimeoutMs: process.env.SHUTDOWN_TIMEOUT_MS || '15000',
       eventLoopLogMs: process.env.EVENT_LOOP_LOG_MS || '0',
+      scheduler: ['off', 'all', 'lease', 'fenced'].includes(
+        process.env.SCHEDULER ?? '',
+      )
+        ? process.env.SCHEDULER
+        : 'fenced',
+      jobSlotS: process.env.JOB_SLOT_S || '60',
+      leaseTtlMs: process.env.LEASE_TTL_MS || '10000',
       queryCounter:
         process.env.QUERY_COUNTER === 'off' ||
         process.env.QUERY_COUNTER === 'header'
