@@ -1,6 +1,6 @@
 # Drill 24 — Run three replicas and find what silently breaks
 
-**Status:** shipped (the stretch is not run)
+**Status:** shipped
 
 Card 24. Prereqs 21, 23. Branch `drill-24` (from `main` at `8677d6e`). Saved as
 `plans/2026-10-12_drill-24-three-replicas.md`.
@@ -406,17 +406,19 @@ and 185 for rounds that admitted 607, 605 and 605. Six scrapes in a row read 1,4
 2. **A hung replica is worse than a dead one behind nginx OSS.** `docker pause` on one replica
    kept ⅓ of traffic flowing into it for the whole pause. Nothing failed, so passive checks saw
    nothing, and `proxy_read_timeout` is 60s. 15s pause: p99 13.25s and 606 dropped iterations at
-   100 req/s. 40s pause: 4,893 of 8,000 requests served.
+   100 req/s. 40s pause: 4,893 of 8,000 requests served. The follow-up's 10s read timeout cuts the
+   window and turns the stuck POSTs into 504s.
 3. **Resuming a paused Node resets the sockets nginx wrote to.** On unpause, Node's overdue
    keep-alive timers closed 13 upstream sockets that already held requests. nginx retried the 10
-   GETs on another peer, and the 3 POSTs became 502 (a sent POST is never retried).
+   GETs on another peer, and the 3 POSTs became 502 (a sent POST is never retried). Fixed in the
+   follow-up: keep-alive 65s, 0 resets.
 4. **The LB turns a client burst into an upstream connection storm.** 2,000 concurrent requests
    through nginx to one replica: 2,755 upstream connects timed out at the 1s `proxy_connect_timeout`
    (580–1,315 × 504 per round). Behind three replicas: 0.
 5. **`process.pid` is 7 on every replica.** Found by reading the lease holders (`<host>:7:…`). The
    import staging file is `upload-<ms>-<pid>.csv` on a volume all replicas share, so two uploads in
-   the same millisecond on two replicas write one file. Not reproduced; a one-line fix (a UUID) is
-   proposed below.
+   the same millisecond on two replicas write one file. Not reproduced; fixed with a UUID in the
+   follow-up.
 6. **`docker kill` does not trigger `restart: always`.** Docker treats it as a manual stop. A killed
    replica stayed down; a crash on its own would have restarted.
 7. **Turning the fence on over a claim-less job re-runs its recent past.** `fenced`'s catch-up
@@ -466,11 +468,77 @@ who should run; only the claim in the same transaction as the effect decides wha
   replica's pool to its single-instance knee takes the fleet past it.
 - **The shared import volume.** It is now a dependency of every replica.
 
-## Proposed follow-ups
+## Follow-up: the stretch and three fixes (approved after the write-up)
 
-- The staging filename: `upload-${randomUUID()}.csv` instead of `${Date.now()}-${process.pid}`.
-- nginx: `proxy_read_timeout` well under 60s per route and `max_fails` on timeouts, so a hung
-  replica is benched (the passive answer to finding 2). Or HAProxy's active checks, already in the
-  drain rig.
-- Node's `keepAliveTimeout` above nginx's upstream idle timeout, so the app never closes a socket
-  the proxy may still write to (finding 3).
+### Stretch: kill one replica mid-load
+
+`pnpm replicas blip --do kill|stop`: k6 at 150 req/s through nginx (60s measured after a 10s
+warm-up); `drills-api-2` is killed or stopped 30s in. The nginx access log now leads with `$msec`,
+so each request lines up with the kill to the millisecond.
+
+| Run | Failed | Last request nginx sent to that replica | Retried on another peer | Notes |
+|---|---|---|---|---|
+| kill 1 | 1 (POST 502 at +0.03s) | +0.08s | 1 GET | |
+| kill 2 | 0 | +0.10s | 1 GET | |
+| stop 1 | 0 | +3.08s (154 requests, served while draining) | 1 | `docker stop` returned after 3.17s |
+| stop 2 | 0 | +3.08s (153) | 1 | 3.16s |
+
+The prediction held:
+- SIGKILL failed only a POST in flight. A GET that was mid-flight was retried.
+- nginx stopped sending to the dead peer within 0.10s: the first failed request benched it
+  (`max_fails=1`).
+- `docker stop` failed nothing. nginx never read readiness, but drill 23's drain kept serving for
+  `DRAIN_DELAY_MS`. The first refused connect after the listener closed was retried for every
+  method, because nothing had been sent.
+- The miss: `restart: always` did not bring a killed replica back (finding 6).
+
+### The three fixes
+
+1. `ImportsService.receive()` names the staging file `upload-<uuid>.csv` (finding 5).
+2. `KEEP_ALIVE_TIMEOUT_MS` (default 65000; `headersTimeout` = it + 1s), set in
+   `HealthService.onApplicationBootstrap()`.
+   - nginx's upstream `keepalive_timeout 60s` is now written out, so nginx always closes an idle
+     socket first (finding 3).
+   - On `/info`, in compose and in `check:arms`.
+   - `test/health.e2e-spec.ts` asserts it outlasts 60s. Red run `db:test:keepalive5`
+     (`KEEP_ALIVE_TIMEOUT_MS=5000`) MUST fail exactly that test.
+3. nginx `proxy_read_timeout 10s` (default 60s), from drill 23's rule: 2 × the slowest measured
+   request, 4.67s (finding 2).
+
+### Fixes measured
+
+Same chaos as before: `fenced`, `JOB_WORK_MS=4000`, the lease holder paused mid-job, k6 at 100
+req/s. Each line is one run. "Before" is the original config, from the results above.
+
+| Config | Pause | Failed | p99 | Dropped | nginx at resume |
+|---|---|---|---|---|---|
+| before: read 60s, keep-alive 5s | 15s | 2–4 × 502 | 13.25s | 606 | 13 × reset |
+| read 10s, keep-alive 65s | 15s | 35 × 504 | 10.01s | 214 | 165 × read timeout, 0 resets |
+| read 10s, keep-alive 5s | 15s | 34 × 504 | 10.01s | 214 | 160 × read timeout, 0 resets |
+| read 10s, keep-alive 65s | 15s | 35 × 504 | 10.01s | 215 | 164 × read timeout |
+| read 10s, keep-alive 5s | 15s | 34 × 504 | 10.01s | 214 | 161 × read timeout |
+| read 10s, keep-alive 5s | 8s | 3 × 502 | 5.87s | 164 | 13 × reset |
+| read 10s, keep-alive 65s | 8s | **0** | 5.85s | 164 | 0 |
+| read 10s, keep-alive 5s | 8s | 5 × 502 | 5.97s | 165 | 13 × reset |
+| read 10s, keep-alive 65s | 8s | **0** | 5.90s | 165 | 0 |
+
+Every slot still ran once (`pnpm db:jobs report`, ratio 0.99–1.00; the last slot is in flight at
+report time).
+
+What the fixes bought, and what they cost:
+
+- **The keep-alive fix is a clean win.** On a pause shorter than the read timeout, 5s gave 13
+  resets and 3–5 × 502 per run; 65s gave none. On a 15s pause it makes no difference, because
+  nginx has already timed out those sockets.
+- **The read timeout is a trade.** A hung replica now holds requests 10s instead of the whole pause:
+  p99 13.25s → 10.01s, dropped 606 → 214. Every POST caught on it now fails with 504 at 10s instead
+  of succeeding late, because nginx never resends a sent POST (2–4 → 34–35 failures). GETs are
+  resent to another peer. Fail fast is right for an idempotent read and a judgment for an ingest
+  whose client retries (`eventId` makes that retry safe, drill 12).
+- **Still open:** 214 requests went unanswered for the first 10s, before the first timeout benched
+  the replica. Only an active latency check, or ejection on slow responses, catches a hang sooner.
+
+**Revised while shipping.** On resume, the paused holder's catch-up loop kept going after
+`leader_lost` and attempted its next slot with term 0. The claim refused it
+(`job_slot_taken term 0`). The loop does not re-check leadership between slots; the fence is
+what made that harmless.
