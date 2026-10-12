@@ -22,8 +22,9 @@ Facts from probing the running stack (dev `nest_server`, pool 10, warm caches):
 1. **Fast and medium reads.** `GET /conversations?page=1&pageSize=20`: org 150 (tail) 3.4–4.1ms,
    orgs 2–10 7–9ms, org 1 (whale) 25–37ms. Drill 05's whale p50 of 175ms is gone: drill 09's index
    serves it now.
-2. **Whale deep pages are the slow slice.** Org 1 at `page=10000` and deeper: 260–300ms alone. Twelve
-   at once: 500–840ms, all 200. No parallel workers.
+2. **Whale deep pages are the slow slice.** Org 1 at `page=10000` and deeper: 260–400ms alone. Page
+   5,000, twelve at once: 500–840ms, all 200. The page walks 200,000 index entries. Its `count(*)`
+   runs two parallel workers on an index-only aggregate, which `/dev/shm` holds at this concurrency.
 3. **Whale search cannot be the slow slice.** `q=export` on org 1 takes 1.5–3.8s (a Parallel Bitmap
    Heap Scan reading 146k blocks). Three concurrent searches all fail in ~80ms with `could not
    resize shared memory segment` (64MB `/dev/shm`); two succeed. Its failures would be fast 500s, not
