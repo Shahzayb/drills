@@ -1,0 +1,11 @@
+
+  name=s05-org150-open140 org=150 rate=140.00/s maxvus=2000 warmup=20s measured=60s page=1 pageSize=20
+  measured requests : 8401
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 2.21 / 2.92 / 3.59 ms
+  min / avg / max   : 1.53 / 2.30 / 16.93 ms
+  throughput        : 140.02 req/s of 140.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 2.21  p95 2.92  p99 3.62 ms
+
+RESULT,s05-org150-open140,150,2000,1,20,2.21,2.92,3.59,140.02,8401

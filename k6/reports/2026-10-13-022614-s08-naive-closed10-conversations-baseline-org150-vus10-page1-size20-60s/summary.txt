@@ -1,0 +1,10 @@
+
+  name=s08-naive-closed10 org=150 vus=10 warmup=20s measured=60s page=1 pageSize=20
+  measured requests : 42429
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 13.90 / 16.71 / 19.38 ms
+  min / avg / max   : 10.12 / 14.11 / 34.60 ms
+  throughput        : 707.15 req/s
+  (incl. warm-up)   : p50 13.98  p95 17.15  p99 19.95 ms
+
+RESULT,s08-naive-closed10,150,10,1,20,13.90,16.71,19.38,707.15,42429

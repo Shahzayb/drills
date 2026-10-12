@@ -1,0 +1,14 @@
+
+  name=s22-pool32-open150 org=2-10 rate=150.00/s maxvus=1500 warmup=20s measured=60s mix=list:keyset:search 2:1:1 q=export pageSize=20
+  measured requests : 9001
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 7.03 / 184.93 / 192.25 ms
+  min / avg / max   : 2.03 / 49.66 / 271.92 ms
+  throughput        : 150.02 req/s of 150.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 7.07  p95 186.61  p99 194.51 ms
+  pool wait         : p50 0.01 / p99 0.03 / mean 0.02 ms (9001 samples)
+  pool hold         : p50 6.03 / p99 191.08 / mean 48.66 ms
+  p99 by endpoint   : list 9.37 · keyset 4.44 · search 226.46 ms
+
+RESULT,s22-pool32-open150,2-10,1500,export,0.02,0.03,48.66,191.08,7.03,184.93,192.25,150.02,9001

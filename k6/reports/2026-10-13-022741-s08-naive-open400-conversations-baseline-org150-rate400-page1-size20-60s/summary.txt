@@ -1,0 +1,11 @@
+
+  name=s08-naive-open400 org=150 rate=400.00/s maxvus=2000 warmup=20s measured=60s page=1 pageSize=20
+  measured requests : 24001
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 7.85 / 9.43 / 11.83 ms
+  min / avg / max   : 5.69 / 8.08 / 48.71 ms
+  throughput        : 400.02 req/s of 400.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 7.87  p95 9.52  p99 11.93 ms
+
+RESULT,s08-naive-open400,150,2000,1,20,7.85,9.43,11.83,400.02,24001
