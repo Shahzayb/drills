@@ -1,0 +1,14 @@
+
+  name=s22-pool10-open250 org=2-10 rate=250.00/s maxvus=1500 warmup=20s measured=60s mix=list:keyset:search 2:1:1 q=export pageSize=20
+  measured requests : 14611
+  errors            : 6655 (45.55%)
+  p50 / p95 / p99   : 2001.48 / 2221.49 / 2628.13 ms
+  min / avg / max   : 143.65 / 2053.81 / 2950.54 ms
+  throughput        : 243.52 req/s of 250.00 offered
+  dropped           : 390 iterations never started
+  (incl. warm-up)   : p50 2001.28  p95 2218.54  p99 2597.83 ms
+  pool wait         : p50 1999.28 / p99 2590.11 / mean 2011.90 ms (14611 samples)
+  pool hold         : p50 1.93 / p99 222.89 / mean 40.78 ms
+  p99 by endpoint   : list 2596.34 · keyset 2589.80 · search 2748.03 ms
+
+RESULT,s22-pool10-open250,2-10,1500,export,2011.90,2590.11,40.78,222.89,2001.48,2221.49,2628.13,243.52,14611

@@ -1,0 +1,11 @@
+
+  name=s05-org1-open400 org=1 rate=400.00/s maxvus=2000 warmup=20s measured=60s page=1 pageSize=20
+  measured requests : 23187
+  errors            : 6595 (28.44%)
+  p50 / p95 / p99   : 2030.85 / 2268.05 / 2610.55 ms
+  min / avg / max   : 111.28 / 2038.77 / 2763.49 ms
+  throughput        : 386.45 req/s of 400.00 offered
+  dropped           : 814 iterations never started
+  (incl. warm-up)   : p50 2028.64  p95 2135.59  p99 2586.84 ms
+
+RESULT,s05-org1-open400,1,2000,1,20,2030.85,2268.05,2610.55,386.45,23187

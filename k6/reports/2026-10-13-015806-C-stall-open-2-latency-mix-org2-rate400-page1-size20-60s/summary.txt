@@ -1,0 +1,17 @@
+
+  name=C-stall-open-2 org=2 rate=400.00/s maxvus=3000 warmup=20s measured=60s model=open fast=org2:page1 slow=org1:page10000 every=0 timeout=60s
+  measured requests : 24001
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 4.96 / 22.79 / 1827.15 ms
+  min / avg / max   : 4.19 / 62.46 / 2246.10 ms
+  throughput        : 400.02 req/s of 400.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 5.01  p95 7.01  p99 1686.74 ms
+  slices            : fast 100.0% p50 4.96 p99 1827.15 ms
+  mean vs p99       : mean 62.46 · p99 1827.15 ms (p99 = 29.3× the mean)
+  p99 by population : successes only 1827.15 · every answer 1827.15 · time to success 1827.15 ms
+  never answered    : 0 failed + 0 dropped of 24001 offered (0.00%)
+  p99 per 10s       : 7.84 · 6.54 · 6.45 · 2179.06 · 6.39 · 6.34 ms
+  requests per 10s  : 4000 · 4000 · 4000 · 4000 · 4000 · 4000
+
+RESULT,C-stall-open-2,2,3000,open,1,0,60s,62.46,1827.15,1827.15,0,0,4.96,22.79,1827.15,400.02,24001

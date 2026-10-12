@@ -58,6 +58,18 @@ const COMMON: Knob[] = [
     def: '50',
     help: 'requests/s offered, arrival-rate scripts only',
   },
+  {
+    flag: 'model',
+    env: 'MODEL',
+    def: 'closed',
+    help: 'closed (constant-vus) | open (constant-arrival-rate at --rate)',
+  },
+  {
+    flag: 'max-vus',
+    env: 'MAX_VUS',
+    def: '1000',
+    help: 'open model: VU cap; past it k6 drops iterations',
+  },
   { flag: 'warmup', env: 'WARMUP', def: '20s', help: 'discarded first phase' },
   { flag: 'duration', env: 'DURATION', def: '60s', help: 'measured phase' },
   { flag: 'name', env: 'NAME', def: '', help: 'labels the run and its report' },
@@ -176,6 +188,45 @@ const SCRIPTS: Record<string, Script> = {
       K6_LOG_FORMAT: 'raw',
       K6_LOG_OUTPUT: `file=/scripts/reports/${run}/failures.ndjson`,
     }),
+  },
+
+  mix: {
+    file: 'latency-mix.ts',
+    blurb:
+      'a list page with a slow slice of whale deep pages; p99 three ways (drill 25)',
+    knobs: [
+      {
+        flag: 'page',
+        env: 'PAGE',
+        def: '1',
+        help: 'the fast slice: --org at this page',
+      },
+      { flag: 'page-size', env: 'PAGE_SIZE', def: '20', help: 'rows per page' },
+      {
+        flag: 'slow-org',
+        env: 'SLOW_ORG',
+        def: '1',
+        help: 'the slow slice: this org',
+      },
+      {
+        flag: 'slow-path',
+        env: 'SLOW_PATH',
+        def: '/conversations?page=10000&pageSize=20',
+        help: '...at this path',
+      },
+      {
+        flag: 'slow-every',
+        env: 'SLOW_EVERY',
+        def: '50',
+        help: 'every Nth request is slow (50 = 2%); 0 = none',
+      },
+      {
+        flag: 'req-timeout',
+        env: 'REQ_TIMEOUT',
+        def: '60s',
+        help: "the client's patience per request",
+      },
+    ],
   },
 
   ingest: {
@@ -315,7 +366,8 @@ const stamp =
 const RUN =
   `${stamp}${NAME ? `-${NAME}` : ''}` +
   `-${script.file.replace(/\.ts$/, '')}` +
-  `-org${env.ORG_ID}-vus${env.VUS}-page${env.PAGE ?? '1'}` +
+  `-org${env.ORG_ID}-${env.MODEL === 'open' ? `rate${env.RATE}` : `vus${env.VUS}`}` +
+  `-page${env.PAGE ?? '1'}` +
   `-size${env.PAGE_SIZE ?? '20'}-${env.DURATION}`;
 
 // k6 writes the dashboard at the *end* of the run and fails the output if the

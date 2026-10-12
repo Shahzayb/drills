@@ -1,0 +1,16 @@
+
+  name=B-closed-1 org=150 vus=10 warmup=20s measured=60s model=closed fast=org150:page1 slow=org1:page10000 every=50 timeout=60s
+  measured requests : 63558
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 3.98 / 7.09 / 239.74 ms
+  min / avg / max   : 1.48 / 9.35 / 380.79 ms
+  throughput        : 1059.30 req/s
+  (incl. warm-up)   : p50 3.96  p95 7.14  p99 239.65 ms
+  slices            : fast 98.0% p50 3.96 p99 8.79 · slow 2.0% p50 239.74 p99 349.44 ms
+  mean vs p99       : mean 9.35 · p99 239.74 ms (p99 = 25.6× the mean)
+  p99 by population : successes only 239.74 · every answer 239.74 · time to success 239.74 ms
+  never answered    : 0 failed + 0 dropped of 63558 offered (0.00%)
+  p99 per 10s       : 245.80 · 244.97 · 234.53 · 243.28 · 235.80 · 236.49 ms
+  requests per 10s  : 10468 · 10548 · 10705 · 10155 · 10890 · 10791
+
+RESULT,B-closed-1,150,10,closed,1,50,60s,9.35,239.74,239.74,0,0,3.98,7.09,239.74,1059.30,63558

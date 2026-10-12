@@ -1,0 +1,11 @@
+
+  name=s08-batched-open400 org=150 rate=400.00/s maxvus=2000 warmup=20s measured=60s page=1 pageSize=20
+  measured requests : 24001
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 1.45 / 2.11 / 2.74 ms
+  min / avg / max   : 1.20 / 1.56 / 11.05 ms
+  throughput        : 400.02 req/s of 400.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 1.45  p95 2.12  p99 2.79 ms
+
+RESULT,s08-batched-open400,150,2000,1,20,1.45,2.11,2.74,400.02,24001

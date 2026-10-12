@@ -1,0 +1,17 @@
+
+  name=D-fastfail-2 org=150 rate=400.00/s maxvus=1000 warmup=20s measured=60s model=open fast=org150:page1 slow=org1:/messages/search?q=export&limit=20 every=50 timeout=60s
+  measured requests : 24001
+  errors            : 241 (1.00%)
+  p50 / p95 / p99   : 2.27 / 3.34 / 40.30 ms
+  min / avg / max   : 1.31 / 6.79 / 458.86 ms
+  throughput        : 400.02 req/s of 400.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 2.29  p95 3.44  p99 40.51 ms
+  slices            : fast 98.0% p50 2.26 p99 4.06 · slow 2.0% p50 40.30 p99 445.29 ms
+  mean vs p99       : mean 6.79 · p99 40.30 ms (p99 = 5.9× the mean)
+  p99 by population : successes only 408.17 · every answer 40.30 · time to success never ms
+  never answered    : 241 failed + 0 dropped of 24001 offered (1.00%)
+  p99 per 10s       : 34.40 · 44.03 · 32.64 · 34.04 · 32.97 · 32.79 ms
+  requests per 10s  : 4000 · 4000 · 4000 · 4000 · 4000 · 4000
+
+RESULT,D-fastfail-2,150,1000,open,1,50,60s,6.79,408.17,never,241,0,2.27,3.34,40.30,400.02,24001

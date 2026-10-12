@@ -8,7 +8,7 @@ None.
 
 ## Next step
 
-Card 24 shipped with its stretch and three fixes. Card 26 (the outbox) replaces drill 19's `NOTIFY`.
+Card 25 shipped with its stretch. Card 26 (the outbox) replaces drill 19's `NOTIFY`.
 Card 29 is card 20's stretch in full. Card 30 starts from drill 15's worker and owes it a lease
 (issue 21).
 
@@ -21,7 +21,7 @@ None open. Every plan in `plans/` is shipped.
 `pnpm docker:up`, then `pnpm db:reset`. `pnpm db:test` runs the backend e2e suite on 6 jest workers; at
 jest's default 13 the 1GB dev container OOMs.
 
-Each red run MUST fail exactly this many tests (arms in `package.json`); a green red run means the
+Each red run MUST fail exactly this many tests; a green red run means the
 switch stopped switching. `db:test:naive` 2 (query budget) · `:notiebreak` 1 · `:like` 1 ·
 `:noidem` 3 · `:redis` 1 · `:rmw` 2 · `:lww` 4 · `:buffer` 6 · `:skiplast` 15 (two suites) ·
 `:nocache` 1 · `:ttlonly` 2 · `:stampede` 2 · `:nojitter` 1 · `:fixed` 1 · `:fixedrmw` 3 ·
@@ -30,7 +30,7 @@ switch stopped switching. `db:test:naive` 2 (query budget) · `:notiebreak` 1 ·
 Green: `:constraint`, `:donothing`, `:locking`, `:serializable`, `:pessimistic`, `:restart`,
 `:invalidate`, `:statswait`, `:pool2`.
 
-`pnpm test:ui` runs Playwright (6 tests) on the host (`pnpm exec playwright install chromium`
+`pnpm test:ui` runs Playwright on the host (`pnpm exec playwright install chromium`
 once). Red runs: `ASSIGN=lww docker compose up -d nest_server` fails the conflict test;
 `E2E_STATS=blocking` fails the streaming test; `E2E_CACHE=cached` fails three.
 `E2E_CACHE=nostore|blanket` are green. Every fixture that writes through the API calls
@@ -38,7 +38,7 @@ once). Red runs: `ASSIGN=lww docker compose up -d nest_server` fails the conflic
 
 Before measuring:
 
-- `pnpm ui:paint` and `pnpm load page` need `COMPOSE_PROJECT_NAME=drills pnpm docker:up:prod`
+- `pnpm ui:paint` and `pnpm load page` need `pnpm docker:up:prod`
   (`--allow-dev` overrides). `?stats=off` drops the widget; `?cache=nostore` forces the API and the
   database on every load.
 - A write made by hand (curl, a `db:*` instrument, a seed) leaves Next's data cache stale until
@@ -56,7 +56,7 @@ Before measuring:
 - `pnpm drain` and `pnpm db:storm key` write the plaintext API key into `db/reports/*storm-key*`;
   delete it. After `pnpm drain`: `docker compose --profile drain rm -sfv api_a api_b lb` and
   `docker volume rm drills_drain_imports`.
-- `pnpm replicas` needs `COMPOSE_PROJECT_NAME=drills` exported; `pnpm replicas down` after. The dev
+- `pnpm replicas down` after `pnpm replicas`. The dev
   `nest_server` joins the job's election: `SCHEDULER=off docker compose up -d --no-deps nest_server`
   before measuring the job.
 - k6 ingest rows (`k6-*`/`probe-*` in org 1, from `pnpm load ingest|drain`) and drain's org
@@ -87,9 +87,8 @@ Numbered for reference from plans; gaps are retired numbers.
 7. Search results have no paging (limit only).
 8. Interior-substring search is rejected by decision (trigram index priced at 2,159MB).
 33. Nothing reads `last_message_at`; its index was priced at 118.6MB and rejected.
-36. The whale's stats aggregate is a 5GB scan once per TTL; the 64MB `/dev/shm` fails ~10
-    concurrent parallel scans.
-37. The sentiment split is two word lists (`method: 'lexicon'`).
+36. The whale's stats aggregate is a 5GB scan once per TTL. The 64MB `/dev/shm` fails 3 concurrent
+    whale searches and ~10 concurrent parallel scans.
 56. Search and list reads share one pool, so a saturated search queue delays cheap reads (FIFO).
 
 **Ingest, quota and billing**
@@ -151,7 +150,8 @@ Numbered for reference from plans; gaps are retired numbers.
 
 58. `usage_events.conversation_id` (`ON DELETE SET NULL`) has no index, so each deleted
     conversation scans the ledger; a 2.96M-row delete ran 8 minutes before it was cancelled.
-59. In-flight requests are counted but unbounded; no 503 + `Retry-After` backpressure.
+59. In-flight requests are counted but unbounded; no 503 + `Retry-After` backpressure; past
+    capacity, goodput falls (drill 25).
 
 **Replicas (drill 24)**
 
@@ -163,15 +163,18 @@ Numbered for reference from plans; gaps are retired numbers.
 **Instruments and observability**
 
 16. `url` is logged with its full query string; `LOG_LEVEL=debug` would be expensive.
-35. k6 report directories say `vus10` for arrival-rate runs.
+35. `drain` and `write` report directories say `vus10`; `--model open` runs say `rate<R>`.
 40. `ui:paint` draws the last round, not the median one.
 47. A cached page's request id never reaches the API log; `traceparent` still joins in Jaeger.
+64. k6 results before drill 25 are closed-model. Drill 22's headline is wrong as stated (its guide
+    says so); 05 and 08 hold. Re-run others open first. Open arrivals are evenly spaced, so an open
+    capacity is a ceiling: bursty traffic queues sooner.
 
 ## Releases
 
 Tag `drill/NN` = version `0.NN.0`, from `drill/09`. Since `drill/14`, tagged on the branch before
 the merge with `--notes` (a pre-merge `--generate-notes` is a changelog link only). Milestones exist
-for `drill/09`–`drill/11` only. Latest: [drill/24](https://github.com/Shahzayb/drills/releases/tag/drill/24).
+for `drill/09`–`drill/11` only. Latest: [drill/25](https://github.com/Shahzayb/drills/releases/tag/drill/25).
 
 ## Preferences
 

@@ -23,8 +23,9 @@ timeout, which also fails a queued acquire); every statement goes through `query
 `acquire()` listens for `error` while a client is checked out (pg-pool covers idle clients only).
 Acquire wait and hold are always on `/metrics` (`pg_pool_acquire_wait_seconds`,
 `pg_pool_hold_seconds`, `pg_pool_acquire_errors_total`) and, in `QUERY_COUNTER=header` mode, on
-every response (`x-pool-wait-ms`, `x-pool-hold-ms`). Drill 22 measured the knee at 32–48 for one
-replica; the default stays 10 so earlier baselines stay comparable.
+every response (`x-pool-wait-ms`, `x-pool-hold-ms`). Pool size moves where the API falls over,
+not latency below it: on drill 22's mix, open load, pool 10 waits ~0 to 150 req/s and fails before
+250, and 32 holds 250 (drill 25). The default stays 10 so baselines stay comparable.
 `src/redis` owns the ioredis client (2s command timeout, one retry, `lazyConnect`) and grows one
 method per command. Both are `@Global()`. ESLint forbids importing `PostgresService` outside
 `tenancy/`, `postgres/`, `health/`, `info/`, `ingest/api-key.guard.ts` and
@@ -43,7 +44,7 @@ key and calls SECURITY DEFINER `app_org_for_api_key()`, and `X-Org-Id` is ignore
 never `main.ts`, which e2e tests never run. Global interceptors run in registration order:
 `LoggingInterceptor`, then `EntitlementsInterceptor`.
 
-**Observability (drills 06, 08).** One `x-request-id` (allowlisted `^[A-Za-z0-9_-]{8,64}$`) threads
+**Observability (drills 06, 08).** One `x-request-id` threads
 browser → Next → Nest via `AsyncLocalStorage`, and rides into Postgres as a trailing
 `/* rid=… */` comment. All logs are pino JSON with `rid`. The request context counts `queries`
 (checked by `@QueryBudget`, default 5, declared on controller handlers) and `roundTrips`;
@@ -53,8 +54,7 @@ with it on, `trace_id` joins the logs and the rid comment stands down for sqlcom
 **Conversations (drills 03, 08–10, 14, 16).** `GET /conversations` sorts `<sort> DESC, id DESC`
 (the `id` tiebreak is correctness), filters on `status`/`updatedFrom`/`updatedTo` through one
 `filtersFor` shared by page and count, and pages by `paging=offset` (default, with `count(*)`) or
-`keyset` (opaque base64url cursor with a query-shape fingerprint; replay under another shape is a
-400; no count). `LIST_STRATEGY=batched|naive`. Index `(org_id, updated_at DESC, id DESC)` leaves
+`keyset` (base64url cursor with a query-shape fingerprint; no count). `LIST_STRATEGY=batched|naive`. Index `(org_id, updated_at DESC, id DESC)` leaves
 `status` out on purpose. The `/conversations/:id*` endpoints have no org filter; RLS alone scopes
 them. `conversations.version` is bumped by every write; `POST /conversations/:id/assign`
 (`ASSIGN=optimistic|pessimistic|lww`, `@HttpCode(200)`) answers 409 with the current row.
@@ -74,11 +74,11 @@ incremented atomically (`QUOTA=rmw|atomic|locking|serializable`); `usage_events`
 append-only ledger it can be checked against. Retry-on-40001 is safe only because the write is
 idempotent. `usage_counters.quota_limit` is stored and never enforced.
 
-**Import (drill 15).** `POST /imports` takes raw `text/csv` (Nest parses only json/urlencoded), spools
+**Import (drill 15).** `POST /imports` takes raw `text/csv`, spools
 to `/tmp/imports/<jobId>.csv` and answers 202. The worker is `pipeline(createReadStream, csv-parse,
 batching Writable)`; backpressure is the awaited `flush()` in `_write`. Each batch is one
 transaction whose third statement writes progress. `resume_row` (committed) is trusted; `rows_read`
-(parsed) is not. Imported rows reuse `provider_event_id` as `import:<external_id>`.
+(parsed) is not.
 `IMPORT=stream|buffer`, `IMPORT_BATCH_ROWS`, `IMPORT_ON_FAIL=resume|restart`.
 
 **Frontend (drills 03, 10, 14, 17, 18).** Server Components reach the API at `BACKEND_INTERNAL_URL`
@@ -90,7 +90,7 @@ streams the widget in one `<Suspense>` (`?stats=stream|blocking|off`). Fetches c
 and `tagsAfterWrite()` is its one home; Server Actions call `updateTag`, and
 `POST /api/revalidate` expires tags for writes outside them. Cache-eligible fetches send no
 `x-request-id`; `no-store` fetches send `cache-control: no-cache`, which bypasses the API's stats
-cache. Stats revalidate every 60s. `served` is computed from the API's `x-served-at`.
+cache.
 `/imports` is zero-JS with a meta refresh only while a job runs; uploads go through a Route
 Handler because a Server Action body is buffered and capped at 1MB.
 
@@ -104,10 +104,8 @@ reconnect) deletes the key. `PUT /entitlements/plan` commits, then deletes. Only
 is rate-limited (`plan_limits.ingest_per_minute` = L; pro is NULL = unlimited).
 `RATE_LIMIT=fixed|fixed-rmw|bucket-rmw|bucket|memory` (drill 21; `memory`, drill 24's red arm, is
 a per-instance Map: exact on one replica, N× on N; default `bucket`): a token bucket with
-burst L and refill L/60 per second in one Lua script (`RedisService.takeToken`) on Redis `TIME`.
-Keys `rl:v2:ingest:<arm>:org:<id>`. Headers: IETF draft-11 `RateLimit-Policy`/`RateLimit`, and
-`Retry-After` on a 429. The read runs with `{ counted: false }`, so `@QueryBudget` does
-not see it; `x-entitlement: hit|miss|db|error` and `GET /metrics` (Prometheus counters) do.
+burst L and refill L/60 per second in one Lua script (`RedisService.takeToken`) on Redis `TIME`. `@QueryBudget` does not count the
+read; `x-entitlement` and `/metrics` do.
 
 **Stats cache (drill 20).** `SearchService.stats()` caches the aggregate as `stats:v1:org:<id>`, an
 envelope `{stats, computedAt, freshUntil}`; freshness is `freshUntil`, the Redis TTL only collects.
@@ -116,7 +114,7 @@ shortens only: `ttl × (1 − j·random)`). Single-flight: `SET lock:stats:v1:or
 re-read after winning, release via `RedisService.delIfEquals` (Lua). `wait` polls every 25ms and
 503s after 5s; `stale` refreshes in the background and keeps the value 10 TTLs. A Redis error is a
 503 (fail closed). `Cache-Control: no-cache` → `bypass`. Answers carry `x-stats-cache` and
-`x-served-at = computedAt`; `/metrics` adds `stats_cache_lookups_total` and `stats_recomputes_total`.
+`x-served-at = computedAt`.
 
 **Shutdown (drill 23).** `SHUTDOWN=exit|nest|graceful` (default `graceful`). On a signal,
 `HealthService.beforeApplicationShutdown` turns readiness (`GET /health`) to 503 `draining`, keeps
@@ -125,7 +123,7 @@ response. `ImportsService` stops each job before its next batch: `failed`, `inte
 shutdown`, exact `resume_row`. Nest then closes the pool and Redis. `main.ts` arms
 `SHUTDOWN_TIMEOUT_MS` (15000), then logs and calls `process.exit(1)`; an orchestrator's grace period
 MUST exceed it. `GET /health/live` is liveness: 200 while the process runs, with phase, in-flight
-count and event-loop lag (`EVENT_LOOP_LOG_MS` logs each window). Both hooks need a signal, so
+count and event-loop lag. Both hooks need a signal, so
 `app.close()` in tests skips them. Readiness answers from the process's phase alone
 (`READINESS=local|deps`, default `local`) and never touches the pool or a dependency; the dependency
 report is `GET /health/deps`, which nothing routes on. `deps` is the control arm: under overload its
@@ -147,20 +145,21 @@ included; `test:e2e` sets `SCHEDULER_TICK_MS=0`.
   host (root is `type: module`); `apps/backend/db/*.mts` run in the container (that package has
   no `type`, so a `.ts` there would be CommonJS); `k6/*.ts`. Imports carry the real extension;
   erasable syntax only. `pnpm typecheck` runs two configs, and the backend tsconfigs exclude `db`.
-- **Runners.** `scripts/measure.ts` runs `db/*.mts` in the container from one knob catalog that
-  generates the `-e` flags; `db/lib/run.mts` prints each knob as `(env)` or `(default)` and writes
-  `apps/backend/db/reports/<run>/`. `scripts/load.ts` runs k6 (`grafana/k6:2.1.0`, pinned) on the
-  Compose network; the method lives once in `k6/lib/scenario.ts`, and a k6 script's basename never
-  changes because ~60 report directories embed it. `pnpm check:arms` fails when a knob or arm
-  switch cannot reach its reader; `pnpm arms` asks the running API what it resolved.
+- **Runners.** `scripts/measure.ts` runs `db/*.mts` in the container from one knob catalog; reports
+  go to `apps/backend/db/reports/<run>/` with each knob's provenance. `scripts/load.ts` runs k6
+  (`grafana/k6:2.1.0`, pinned) on the Compose network; the method lives once in `k6/lib/scenario.ts`,
+  and a k6 script's basename never changes because report directories embed it. The default shape
+  is `MODEL=closed` (`constant-vus`); `--model open --rate R` makes it `constant-arrival-rate`
+  (`--vus` pre-allocated, `--max-vus` cap, directory `rate<R>`). `pnpm check:arms` fails when a
+  knob cannot reach its reader; `pnpm arms` asks the running API what it resolved.
 - **Instruments.** `db:explain`, `db:paging`, `db:search`, `db:storm`, `db:quota`, `db:claim`,
   `db:import`, `db:schema` (its `backfill` is a real operation between migrations 015 and 016),
   `db:entitle`, `db:stampede`, `db:ratelimit`, `db:pool`, `db:bench`, `db:jobs`; `pnpm replicas`;
-  `pnpm load list|search|write|ingest|page|pool|drain`; `pnpm ui:paint`; `pnpm drain` (a rolling
+  `pnpm load list|search|write|ingest|page|pool|drain|mix`; `pnpm ui:paint`; `pnpm drain` (a rolling
   restart under k6 load). Each has `--help`; each plan documents its own.
 - **Drain rig.** `--profile drain` adds `api_a`/`api_b` (`extends: nest_server`, `node dist/main`
   under `init: true`, the dev server's `dist/`, a shared `/tmp/imports` volume) and HAProxy `lb`
-  (`:8080`, stats `:8404`, check `GET /health` at `inter 1s fall 2 rise 2`, `retries 0`).
+  (`:8080`, checks `GET /health` every 1s, `retries 0`).
 - **Replica rig.** `--profile replicas`: `api` (`extends: api_a`, `deploy.replicas: 3`) behind
   `nginx:1.30.5` (`:8088`, `server api:3002 resolve`, passive checks, read timeout 10s).
 - **Observability.** `db:stats:on|stats|stats:reset` (`pg_stat_statements`), `db:log:on|off|status`,
@@ -181,7 +180,8 @@ included; `test:e2e` sets `SCHEDULER_TICK_MS=0`.
 - `docker compose up` reconciles the whole project: repeat every non-default var (`PG_PRELOAD`,
   `PG_MAX_CONNECTIONS`) on every call or Postgres is recreated back to defaults.
 - A worktree is its own Compose project; `COMPOSE_PROJECT_NAME=drills` reuses the seeded volume
-  with the worktree's bind mounts. Two stacks cannot run at once.
+  with the worktree's bind mounts, and puts `pnpm load`'s k6 on that network. Two stacks cannot run
+  at once.
 - `up --force-recreate` wipes the container's `/tmp`; `restart` does not.
 - `nest start --watch` does not restart a process the V8 heap limit killed.
 - V8's default heap is half the cgroup limit; `os.totalmem()` reports the host. A V8 crash writes
@@ -193,15 +193,14 @@ included; `test:e2e` sets `SCHEDULER_TICK_MS=0`.
 
 **Postgres configuration**
 
-- `postgres_db` has Docker's 64MB `/dev/shm`. About ten concurrent parallel scans exhaust it
-  (`could not resize shared memory segment`); one never does.
+- `postgres_db` has Docker's 64MB `/dev/shm`. About ten concurrent parallel aggregates, or three
+  whale searches, exhaust it (`could not resize shared memory segment`); one never does.
 - Settings live in `command:` on `postgres_db`, never `POSTGRES_INITDB_ARGS`. `shared_buffers=128MB`
   is small on purpose; `wal_level=minimal` rules out replicas and logical decoding.
 - `shared_preload_libraries` needs a recreate (`PG_PRELOAD=pg_stat_statements`); `ALTER SYSTEM`
   persists in the volume across `down`.
-- PG 18's `io_method = worker` sends every read that misses `shared_buffers` through 3 `io_workers`
-  (`IO:AioIoCompletion`, `LWLock:AioWorkerSubmissionQueue`). The mid-org search is read-bound at
-  ~1.5M blocks/s.
+- PG 18's `io_method = worker` sends every `shared_buffers` miss through 3 `io_workers`; the mid-org
+  search is read-bound at ~1.5M blocks/s.
 - `max_connections` (100) minus 3 superuser slots leaves the app role 97, shared by every replica's
   pool and LISTEN client. Past it each new connection fails (53300) and so does its request.
 - `pnpm db:reset` keeps roles (cluster objects); migration 003 guards `CREATE ROLE`.
@@ -231,7 +230,6 @@ included; `test:e2e` sets `SCHEDULER_TICK_MS=0`.
 - `ON CONFLICT` on a partial index repeats its predicate (else 42P10). `DO NOTHING` and
   `DO UPDATE` both wait on a concurrent inserter; at READ COMMITTED the follow-up SELECT finds the
   row. At RR/SERIALIZABLE they raise 40001, and so does `used = used + 1`.
-- `xmax = 0` separates an insert from `DO UPDATE` (an implementation detail a test asserts).
 - A duplicate storm must keep duplicates adjacent; shuffled, it passes on every arm.
 - A lock is released at COMMIT, and node-pg-migrate wraps a migration in one transaction. Mixing
   ACCESS EXCLUSIVE with a long scan needs `pgm.noTransaction()`.
@@ -303,10 +301,12 @@ included; `test:e2e` sets `SCHEDULER_TICK_MS=0`.
 - `Promise.all` of two pool queries takes two connections per request.
 - Under a closed model, instant failures inflate req/s; count commits. Behind a pooler the app's
   acquire wait reads ~0 and the queue hides in hold time; read pgbouncer's `SHOW POOLS`.
-- k6: `http_req_failed.passes` counts failures; `handleSummary` replaces k6's summary; a closed
-  model cannot show an outage (`dropped_iterations` exists only for arrival-rate executors); a
-  tagged sub-metric needs a threshold; a counter's `rate` includes warm-up; p99 needs
-  `summaryTrendStats`.
+- k6: `http_req_failed.passes` counts failures; `handleSummary` replaces k6's summary; a tagged
+  sub-metric needs a threshold; a counter's `rate` includes warm-up; p99 needs `summaryTrendStats`.
+  `http_req_duration` counts a timeout at the timeout; `{expected_response:true}` is successes only.
+- A closed model measures a concurrency, not a load: mean = VUs ÷ throughput, no queue past VUs,
+  one sample per VU for a stall. Every k6 number before drill 25 is closed. Arrival-rate drops (never
+  delays) when out of VUs; size `maxVUs` ≥ rate × worst latency. Near capacity, open runs differ 5×.
 
 **Shutdown and load balancing**
 
@@ -342,5 +342,4 @@ included; `test:e2e` sets `SCHEDULER_TICK_MS=0`.
   middleware; `params`/`searchParams` are Promises; everything awaited in a page body is in the
   shell; a streaming test needs `waitUntil: 'commit'`; bytes are measured on the production build.
 - `[data-status]` collides with Next's dev overlay.
-- A new folder can stale the editor's ESLint server. pnpm 11 needs
-  `allowBuilds: { protobufjs: false }` for `install --frozen-lockfile`.
+- pnpm 11 needs `allowBuilds: { protobufjs: false }` for `install --frozen-lockfile`.

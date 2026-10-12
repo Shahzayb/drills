@@ -1,0 +1,17 @@
+
+  name=A-uniform-2 org=2 rate=100.00/s maxvus=1000 warmup=20s measured=60s model=open fast=org2:page1 slow=org1:page10000 every=0 timeout=60s
+  measured requests : 6000
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 4.88 / 6.03 / 7.14 ms
+  min / avg / max   : 4.22 / 5.07 / 14.31 ms
+  throughput        : 100.00 req/s of 100.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 4.87  p95 6.06  p99 7.14 ms
+  slices            : fast 100.0% p50 4.88 p99 7.14 ms
+  mean vs p99       : mean 5.07 · p99 7.14 ms (p99 = 1.4× the mean)
+  p99 by population : successes only 7.14 · every answer 7.14 · time to success 7.14 ms
+  never answered    : 0 failed + 0 dropped of 6000 offered (0.00%)
+  p99 per 10s       : 6.56 · 7.36 · 6.30 · 7.62 · 7.19 · 7.00 ms
+  requests per 10s  : 1000 · 1000 · 1000 · 1000 · 1000 · 1000
+
+RESULT,A-uniform-2,2,1000,open,1,0,60s,5.07,7.14,7.14,0,0,4.88,6.03,7.14,100.00,6000

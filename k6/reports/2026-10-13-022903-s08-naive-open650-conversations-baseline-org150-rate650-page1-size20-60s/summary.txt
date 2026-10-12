@@ -1,0 +1,11 @@
+
+  name=s08-naive-open650 org=150 rate=650.00/s maxvus=2000 warmup=20s measured=60s page=1 pageSize=20
+  measured requests : 38961
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 23.89 / 344.97 / 363.92 ms
+  min / avg / max   : 8.57 / 126.13 / 381.93 ms
+  throughput        : 649.35 req/s of 650.00 offered
+  dropped           : 40 iterations never started
+  (incl. warm-up)   : p50 13.47  p95 342.22  p99 361.00 ms
+
+RESULT,s08-naive-open650,150,2000,1,20,23.89,344.97,363.92,649.35,38961

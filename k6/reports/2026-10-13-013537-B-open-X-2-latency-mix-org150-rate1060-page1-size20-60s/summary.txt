@@ -1,0 +1,17 @@
+
+  name=B-open-X-2 org=150 rate=1060.00/s maxvus=3000 warmup=20s measured=60s model=open fast=org150:page1 slow=org1:page10000 every=50 timeout=60s
+  measured requests : 62383
+  errors            : 2960 (4.74%)
+  p50 / p95 / p99   : 1951.65 / 2023.11 / 2399.18 ms
+  min / avg / max   : 265.80 / 1871.37 / 2736.44 ms
+  throughput        : 1039.72 req/s of 1060.00 offered
+  dropped           : 1218 iterations never started
+  (incl. warm-up)   : p50 1832.75  p95 2008.96  p99 2384.34 ms
+  slices            : fast 98.0% p50 1949.14 p99 2397.54 · slow 2.0% p50 2198.84 p99 2641.37 ms
+  mean vs p99       : mean 1871.37 · p99 2399.18 ms (p99 = 1.3× the mean)
+  p99 by population : successes only 2400.69 · every answer 2399.18 · time to success never ms
+  never answered    : 2960 failed + 1218 dropped of 63601 offered (6.57%)
+  p99 per 10s       : 1817.39 · 2065.67 · 2121.77 · 2254.65 · 2423.26 · 2241.28 ms
+  requests per 10s  : 10305 · 10194 · 10444 · 10467 · 10372 · 10600
+
+RESULT,B-open-X-2,150,3000,open,1,50,60s,1871.37,2400.69,never,2960,1218,1951.65,2023.11,2399.18,1039.72,62383
