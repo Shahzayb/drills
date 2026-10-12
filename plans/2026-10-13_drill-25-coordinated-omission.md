@@ -1,6 +1,6 @@
 # Drill 25 — Build a load test that lies, then fix it
 
-**Status:** in progress
+**Status:** shipped
 
 Card 25. Prereq 24. Branch `drill-25` (from `main` at `41b2c25`). Saved as
 `plans/2026-10-13_drill-25-coordinated-omission.md`.

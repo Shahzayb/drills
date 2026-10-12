@@ -24,17 +24,18 @@ orchestrated by Turborepo. Postgres and Redis run alongside under Docker Compose
 | 11 | Full-text search | A real search index handled far more traffic than a plain text match, once a config quirk stopped hiding it. |
 | 12 | Idempotent ingest | 10,000 duplicate deliveries still produced exactly 3,000 rows, held by a unique constraint. |
 | 13 | Lost updates | A counter read-and-written in code lost 89 of 100 increments; three fixes, one shipped. |
-| 14 | Optimistic locking | Fifty agents claimed one ticket and all fifty were told yes; a version check leaves exactly one winner, and the losing browser corrects itself without reloading. |
-| 15 | Streaming a 200MB import | The obvious version runs out of memory in under three seconds; streaming it keeps memory flat whether the file is 20MB or 400MB, and a failure half way through says exactly where it stopped. |
-| 16 | Zero-downtime schema change | The obvious migration locked the table for 75 seconds and failed 77% of writes; the same work, split across four transactions, failed none of them. |
-| 17 | Streaming the inbox with Suspense | A widget that reads 5GB per request made the whole page wait 1.3 seconds; one Suspense boundary put the list on screen in 35ms with the widget arriving later, and shipped no extra JavaScript. |
-| 18 | Next's cache layers | A status change that the page kept denying: the data cache answered the click that made it, with a request id from before the write. One tag per row and one per org's lists fix it; the "just disable caching" fix costs the whale a 5GB scan per view. |
-| 19 | Entitlement cache | A customer upgraded and kept getting 429s for 19 seconds, because nothing told the cache. Deleting the key after the write fixes the API path, a database trigger fixes edits made straight in Postgres, and the TTL stays the only worst-case bound. |
-| 20 | Cache stampede | One expired hot key made 13 requests run the same query at once; on a heavier tenant 104 copies reached Postgres and 98 failed. A Redis lock makes it one query every time, and TTL jitter stops a hundred keys from expiring in the same second. |
-| 21 | Rate limiting at the burst boundary | A limit of 600 a minute let 1,199 requests through in 2.5 seconds across a fixed window's edge, and the naive check-then-set version let 2,000 of 2,000 concurrent requests through. A token bucket in one Redis Lua script holds both attacks within 1%. |
-| 22 | Connection pool knee | The default pool of 10 made each request wait ~500 ms for a connection to do ~55 ms of work. Swept from 2 to 100: p99 is lowest at 32, Postgres's cores are pinned from 48, and 100 connections against the default `max_connections` failed 47.5% of requests. Through pgbouncer, an app pool of 100 behaves like 32. |
-| 23 | Graceful shutdown under load | A rolling restart of two replicas at 150 req/s dropped 211 requests when the process just exited and left a 300,000-row import stuck `running`. Readiness 503 first, a 3s delay, then closing with `Connection: close` dropped 0 in four restarts, and the import resumed to exactly 300,000. Nest's `enableShutdownHooks()` alone dropped 0 at 150 req/s and 132 at 250. Readiness that checked Postgres through the pool lost the last replica in 4 of 6 runs; answered from local state, 0 of 3. |
-| 24 | Three replicas, and what silently breaks | Three copies behind nginx: a timer job rolled usage up four times (three replicas and a forgotten dev server) with zero errors, and an in-memory rate limit let 1,821 requests through a limit of 600. A Redis lease plus a claim row written in the job's own transaction ran every slot exactly once through kills and pauses; 16 of 17 predictions hit, and every miss was about a half-alive neighbour. |
+| 14 | Optimistic locking | Fifty agents claimed one ticket and all were told yes; a version check leaves exactly one winner. |
+| 15 | Streaming a 200MB import | The buffered import ran out of memory in under three seconds; streaming keeps memory flat at any file size and resumes where it stopped. |
+| 16 | Zero-downtime schema change | The obvious migration locked the table for 75 seconds and failed 77% of writes; split into four steps, it failed none. |
+| 17 | Streaming the inbox with Suspense | One Suspense boundary put the list on screen in 35ms instead of 1.3 seconds behind a slow widget. |
+| 18 | Next's cache layers | Next's data cache kept showing a status from before the write; one cache tag per row and per org's lists fixes it. |
+| 19 | Entitlement cache | An upgraded customer kept getting 429s for 19 seconds; deleting the cache key after the write, plus a database trigger, fixes it. |
+| 20 | Cache stampede | One expired hot key sent up to 104 copies of a query to Postgres; a Redis lock makes it one. |
+| 21 | Rate limiting at the burst boundary | A fixed window let 1,199 requests through a limit of 600; a token bucket in one Redis Lua script holds within 1%. |
+| 22 | Connection pool knee | A sweep from 2 to 100 connections put the knee at 32. Drill 25 showed pool 10's ~500ms wait came from the test, not the pool. |
+| 23 | Graceful shutdown under load | A rolling restart at 150 req/s dropped 211 requests; draining first (readiness 503, a short delay, `Connection: close`) dropped none. |
+| 24 | Three replicas, and what silently breaks | Three replicas ran a timer job four times and let 1,821 requests through a limit of 600; a Redis lease plus a claim row runs each job exactly once. |
+| 25 | A load test that lies | Two tests with the same ~5ms average had p99s of 7ms and 178ms, and a test that waits for each answer hid a 2-second freeze. |
 
 Current state and what's open live in `memory-bank/progress.md`; every decision and
 number is one row in `memory-bank/history.md`, with the full reasoning in `plans/`.
@@ -56,6 +57,7 @@ pnpm docker:up          # start        (docker:down, docker:logs)
 pnpm db:reset           # migrate + seed from scratch (db:migrate, db:seed, db:psql)
 pnpm db:test            # backend e2e suite, inside the container
 pnpm load list          # k6 baseline run (load search, load <script> --help)
+pnpm load mix --model open --rate 100   # fast traffic + a 2% whale slice, p99 three ways
 pnpm trace:on           # spans + collector + Jaeger on :16686 (trace:off)
 pnpm logs:trace <id>    # one request across all services
 pnpm check:tenancy      # RLS coverage + the serving role cannot bypass it
