@@ -1,0 +1,17 @@
+
+  name=A-mixed-1 org=150 rate=100.00/s maxvus=1000 warmup=20s measured=60s model=open fast=org150:page1 slow=org1:page10000 every=50 timeout=60s
+  measured requests : 6000
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 2.25 / 3.38 / 178.90 ms
+  min / avg / max   : 1.37 / 5.84 / 197.88 ms
+  throughput        : 100.00 req/s of 100.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 2.26  p95 3.43  p99 179.45 ms
+  slices            : fast 98.0% p50 2.23 p99 4.03 · slow 2.0% p50 178.93 p99 194.51 ms
+  mean vs p99       : mean 5.84 · p99 178.90 ms (p99 = 30.6× the mean)
+  p99 by population : successes only 178.90 · every answer 178.90 · time to success 178.90 ms
+  never answered    : 0 failed + 0 dropped of 6000 offered (0.00%)
+  p99 per 10s       : 180.12 · 178.91 · 178.63 · 178.83 · 178.09 · 176.98 ms
+  requests per 10s  : 1000 · 1000 · 1000 · 1000 · 1000 · 1000
+
+RESULT,A-mixed-1,150,1000,open,1,50,60s,5.84,178.90,178.90,0,0,2.25,3.38,178.90,100.00,6000

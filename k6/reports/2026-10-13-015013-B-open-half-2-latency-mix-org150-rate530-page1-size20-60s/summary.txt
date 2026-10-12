@@ -1,0 +1,17 @@
+
+  name=B-open-half-2 org=150 rate=530.00/s maxvus=3000 warmup=20s measured=60s model=open fast=org150:page1 slow=org1:page10000 every=50 timeout=60s
+  measured requests : 31801
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 1.93 / 3.46 / 184.27 ms
+  min / avg / max   : 1.28 / 5.86 / 326.16 ms
+  throughput        : 530.02 req/s of 530.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 1.96  p95 3.90  p99 185.37 ms
+  slices            : fast 98.0% p50 1.92 p99 6.19 · slow 2.0% p50 184.27 p99 235.91 ms
+  mean vs p99       : mean 5.86 · p99 184.27 ms (p99 = 31.4× the mean)
+  p99 by population : successes only 184.27 · every answer 184.27 · time to success 184.27 ms
+  never answered    : 0 failed + 0 dropped of 31801 offered (0.00%)
+  p99 per 10s       : 186.81 · 187.71 · 186.62 · 185.77 · 181.92 · 182.19 ms
+  requests per 10s  : 5300 · 5300 · 5300 · 5300 · 5300 · 5300
+
+RESULT,B-open-half-2,150,3000,open,1,50,60s,5.86,184.27,184.27,0,0,1.93,3.46,184.27,530.02,31801

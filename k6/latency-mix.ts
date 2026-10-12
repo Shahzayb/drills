@@ -22,7 +22,8 @@ import {
  *   pnpm load mix --org 150                      # the same mix, closed at 10 VUs
  *   pnpm load mix --org 3 --slow-every 0         # uniform: no slow slice
  *
- * Every SLOW_EVERY-th iteration is the whale's deep offset page; the rest is --org's list. The pick
+ * Every SLOW_EVERY-th iteration is SLOW_PATH on SLOW_ORG (the whale's deep offset page); the rest is
+ * --org's list. The pick
  * is by iteration number, so the slice is the same share under both models. The summary prints p99
  * three ways: successes only, every answer, and time to success with a failure counted as never.
  * See plans/2026-10-13_drill-25-coordinated-omission.md.
@@ -30,7 +31,7 @@ import {
 
 const SLOW_EVERY = Number(__ENV.SLOW_EVERY || '50');
 const SLOW_ORG = __ENV.SLOW_ORG || '1';
-const SLOW_PAGE = Number(__ENV.SLOW_PAGE || '10000');
+const SLOW_PATH = __ENV.SLOW_PATH || '/conversations?page=10000&pageSize=20';
 const REQ_TIMEOUT = __ENV.REQ_TIMEOUT || '60s';
 
 // A request that never succeeded, as a duration. Printed as `never`; any mean that includes it is meaningless.
@@ -38,10 +39,8 @@ const NEVER = 1e9;
 const WINDOW_S = 10;
 const WINDOWS = Math.ceil(seconds(DURATION) / WINDOW_S);
 
-const list = (page: number) =>
-  `${BASE_URL}/conversations?page=${page}&pageSize=${PAGE_SIZE}`;
-const FAST_URL = list(PAGE);
-const SLOW_URL = list(SLOW_PAGE);
+const FAST_URL = `${BASE_URL}/conversations?page=${PAGE}&pageSize=${PAGE_SIZE}`;
+const SLOW_URL = `${BASE_URL}${SLOW_PATH}`;
 
 const timeToSuccess = new Trend('time_to_success', true);
 
@@ -99,6 +98,8 @@ export function handleSummary(data: SummaryData) {
   const all = values(measured());
   const ok = values(measured(',expected_response:true'));
   const tts = values(measured('', 'time_to_success'));
+  // At exactly 1% failed, k6 interpolates p99 between a real sample and NEVER. Above the real max is never.
+  if (tts['p(99)'] > (all.max ?? 0)) tts['p(99)'] = NEVER;
   const failed = values(measured('', 'http_req_failed')).passes ?? 0;
   const dropped = values('dropped_iterations{scenario:measure}').count ?? 0;
   const count = all.count ?? 0;
@@ -117,7 +118,7 @@ export function handleSummary(data: SummaryData) {
   return summary(data, {
     params:
       `model=${MODEL} fast=org${ORG_ID}:page${PAGE} ` +
-      `slow=org${SLOW_ORG}:page${SLOW_PAGE} every=${SLOW_EVERY} timeout=${REQ_TIMEOUT}`,
+      `slow=org${SLOW_ORG}:${SLOW_PATH} every=${SLOW_EVERY} timeout=${REQ_TIMEOUT}`,
     columns: [
       MODEL,
       PAGE,

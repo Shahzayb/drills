@@ -1,0 +1,16 @@
+
+  name=C-stall-closed-2 org=2 vus=2 warmup=20s measured=60s model=closed fast=org2:page1 slow=org1:page10000 every=0 timeout=60s
+  measured requests : 23239
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 4.80 / 5.96 / 6.90 ms
+  min / avg / max   : 4.12 / 5.11 / 2044.83 ms
+  throughput        : 387.32 req/s
+  (incl. warm-up)   : p50 4.94  p95 6.31  p99 7.27 ms
+  slices            : fast 100.0% p50 4.80 p99 6.90 ms
+  mean vs p99       : mean 5.11 · p99 6.90 ms (p99 = 1.4× the mean)
+  p99 by population : successes only 6.90 · every answer 6.90 · time to success 6.90 ms
+  never answered    : 0 failed + 0 dropped of 23239 offered (0.00%)
+  p99 per 10s       : 6.66 · 6.75 · 6.49 · 7.97 · 6.79 · 6.45 ms
+  requests per 10s  : 3993 · 4103 · 4205 · 2990 · 3867 · 4081
+
+RESULT,C-stall-closed-2,2,2,closed,1,0,60s,5.11,6.90,6.90,0,0,4.80,5.96,6.90,387.32,23239

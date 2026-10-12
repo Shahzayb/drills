@@ -1,0 +1,17 @@
+
+  name=D-fastfail-3 org=150 rate=400.00/s maxvus=1000 warmup=20s measured=60s model=open fast=org150:page1 slow=org1:/messages/search?q=export&limit=20 every=50 timeout=60s
+  measured requests : 24000
+  errors            : 240 (1.00%)
+  p50 / p95 / p99   : 2.24 / 3.16 / 33.43 ms
+  min / avg / max   : 1.33 / 6.69 / 430.68 ms
+  throughput        : 400.00 req/s of 400.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 2.26  p95 3.27  p99 39.83 ms
+  slices            : fast 98.0% p50 2.23 p99 3.61 · slow 2.0% p50 211.10 p99 427.18 ms
+  mean vs p99       : mean 6.69 · p99 33.43 ms (p99 = 5.0× the mean)
+  p99 by population : successes only 404.35 · every answer 33.43 · time to success 10000426.37 ms
+  never answered    : 240 failed + 0 dropped of 24000 offered (1.00%)
+  p99 per 10s       : 32.42 · 32.62 · 31.80 · 33.62 · 31.85 · 32.43 ms
+  requests per 10s  : 4000 · 4000 · 4000 · 4000 · 4000 · 4000
+
+RESULT,D-fastfail-3,150,1000,open,1,50,60s,6.69,404.35,10000426.37,240,0,2.24,3.16,33.43,400.00,24000

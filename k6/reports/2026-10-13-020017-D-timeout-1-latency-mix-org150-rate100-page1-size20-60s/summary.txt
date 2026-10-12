@@ -1,0 +1,17 @@
+
+  name=D-timeout-1 org=150 rate=100.00/s maxvus=1000 warmup=20s measured=60s model=open fast=org150:page1 slow=org1:/conversations?page=10000&pageSize=20 every=50 timeout=150ms
+  measured requests : 6000
+  errors            : 120 (2.00%)
+  p50 / p95 / p99   : 2.55 / 3.67 / 150.47 ms
+  min / avg / max   : 1.40 / 5.53 / 151.09 ms
+  throughput        : 100.00 req/s of 100.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 2.55  p95 3.74  p99 150.44 ms
+  slices            : fast 98.0% p50 2.54 p99 4.21 · slow 2.0% p50 150.48 p99 151.08 ms
+  mean vs p99       : mean 5.53 · p99 150.47 ms (p99 = 27.2× the mean)
+  p99 by population : successes only 4.21 · every answer 150.47 · time to success never ms
+  never answered    : 120 failed + 0 dropped of 6000 offered (2.00%)
+  p99 per 10s       : 150.55 · 150.44 · 150.48 · 150.53 · 150.37 · 150.46 ms
+  requests per 10s  : 1000 · 1000 · 1000 · 1000 · 1000 · 1000
+
+RESULT,D-timeout-1,150,1000,open,1,50,150ms,5.53,4.21,never,120,0,2.55,3.67,150.47,100.00,6000

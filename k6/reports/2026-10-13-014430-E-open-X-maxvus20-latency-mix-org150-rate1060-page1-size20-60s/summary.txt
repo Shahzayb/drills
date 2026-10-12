@@ -1,0 +1,17 @@
+
+  name=E-open-X-maxvus20 org=150 rate=1060.00/s maxvus=20 warmup=20s measured=60s model=open fast=org150:page1 slow=org1:page10000 every=50 timeout=60s
+  measured requests : 61247
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 5.20 / 17.09 / 259.65 ms
+  min / avg / max   : 1.56 / 11.95 / 474.37 ms
+  throughput        : 1020.78 req/s of 1060.00 offered
+  dropped           : 2354 iterations never started
+  (incl. warm-up)   : p50 4.89  p95 16.53  p99 255.73 ms
+  slices            : fast 98.0% p50 5.11 p99 20.95 · slow 2.0% p50 259.66 p99 380.16 ms
+  mean vs p99       : mean 11.95 · p99 259.65 ms (p99 = 21.7× the mean)
+  p99 by population : successes only 259.65 · every answer 259.65 · time to success 259.65 ms
+  never answered    : 0 failed + 2354 dropped of 63601 offered (3.70%)
+  p99 per 10s       : 237.50 · 274.34 · 248.64 · 264.15 · 237.22 · 269.50 ms
+  requests per 10s  : 10418 · 9978 · 10250 · 10163 · 10478 · 9958
+
+RESULT,E-open-X-maxvus20,150,20,open,1,50,60s,11.95,259.65,259.65,0,2354,5.20,17.09,259.65,1020.78,61247

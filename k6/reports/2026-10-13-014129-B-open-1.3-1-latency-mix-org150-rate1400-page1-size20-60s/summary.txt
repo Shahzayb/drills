@@ -1,0 +1,17 @@
+
+  name=B-open-1.3-1 org=150 rate=1400.00/s maxvus=3000 warmup=20s measured=60s model=open fast=org150:page1 slow=org1:page10000 every=50 timeout=60s
+  measured requests : 80795
+  errors            : 35682 (44.16%)
+  p50 / p95 / p99   : 2006.51 / 2246.41 / 2967.42 ms
+  min / avg / max   : 627.89 / 2040.53 / 3500.05 ms
+  throughput        : 1346.58 req/s of 1400.00 offered
+  dropped           : 3206 iterations never started
+  (incl. warm-up)   : p50 2005.68  p95 2661.81  p99 2989.89 ms
+  slices            : fast 98.0% p50 2006.42 p99 2964.72 · slow 2.0% p50 2218.08 p99 3167.64 ms
+  mean vs p99       : mean 2040.53 · p99 2967.42 ms (p99 = 1.5× the mean)
+  p99 by population : successes only 2968.07 · every answer 2967.42 · time to success never ms
+  never answered    : 35682 failed + 3206 dropped of 84001 offered (46.29%)
+  p99 per 10s       : 2221.28 · 2289.52 · 3159.96 · 2228.51 · 2218.09 · 2278.31 ms
+  requests per 10s  : 12477 · 13814 · 12868 · 13634 · 14001 · 14000
+
+RESULT,B-open-1.3-1,150,3000,open,1,50,60s,2040.53,2968.07,never,35682,3206,2006.51,2246.41,2967.42,1346.58,80795

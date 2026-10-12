@@ -1,0 +1,16 @@
+
+  name=calib-stall-vus2 org=2 vus=2 warmup=10s measured=20s model=closed fast=org2:page1 slow=org1:page10000 every=0 timeout=60s
+  measured requests : 7629
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 5.09 / 6.42 / 7.31 ms
+  min / avg / max   : 4.12 / 5.18 / 13.87 ms
+  throughput        : 381.45 req/s
+  (incl. warm-up)   : p50 4.89  p95 6.35  p99 7.46 ms
+  slices            : fast 100.0% p50 5.09 p99 7.31 ms
+  mean vs p99       : mean 5.18 · p99 7.31 ms (p99 = 1.4× the mean)
+  p99 by population : successes only 7.31 · every answer 7.31 · time to success 7.31 ms
+  never answered    : 0 failed + 0 dropped of 7629 offered (0.00%)
+  p99 per 10s       : 6.75 · 8.07 ms
+  requests per 10s  : 3956 · 3671
+
+RESULT,calib-stall-vus2,2,2,closed,1,0,60s,5.18,7.31,7.31,0,0,5.09,6.42,7.31,381.45,7629

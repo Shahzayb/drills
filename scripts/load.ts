@@ -209,10 +209,10 @@ const SCRIPTS: Record<string, Script> = {
         help: 'the slow slice: this org',
       },
       {
-        flag: 'slow-page',
-        env: 'SLOW_PAGE',
-        def: '10000',
-        help: '...at this page',
+        flag: 'slow-path',
+        env: 'SLOW_PATH',
+        def: '/conversations?page=10000&pageSize=20',
+        help: '...at this path',
       },
       {
         flag: 'slow-every',
