@@ -1,0 +1,13 @@
+
+  name=replicas-fenced org=2-10 rate=150.00/s maxvus=300 warmup=10s measured=90s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 13500
+  errors            : 0 (0.00%)
+  p50 / p95 / p99   : 6.82 / 58.74 / 63.99 ms
+  min / avg / max   : 1.23 / 15.97 / 194.35 ms
+  throughput        : 150.00 req/s of 150.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 6.84  p95 58.80  p99 63.98 ms
+  errors by endpoint: list 0 · search 0 · ingest 0
+  p99 by endpoint   : list 9.59 · search 69.60 · ingest 5.48 ms
+
+RESULT,replicas-fenced,2-10,300,150,0,0,0,6.82,58.74,63.99,150.00,13500

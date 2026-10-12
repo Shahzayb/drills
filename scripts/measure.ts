@@ -582,6 +582,47 @@ const INSTRUMENTS: Record<string, Instrument> = {
         def: '0',
         help: 'concurrent: 1 leaves the entitlement key cold (stretch)',
       },
+      {
+        flag: 'api',
+        env: 'API',
+        def: 'http://nest_server:3002',
+        help: 'where requests go; http://nginx:8080 for the replicas (drill 24)',
+      },
+      {
+        flag: 'replicas',
+        env: 'REPLICAS',
+        def: '',
+        help: 'a DNS name (api) whose every address is scraped and summed; empty reads /metrics at --api',
+      },
+    ],
+  },
+
+  jobs: {
+    file: 'db/jobs.mts',
+    blurb:
+      'whether each usage-rollup slot ran exactly once, against the ledger (drill 24)',
+    subcommands: {
+      report: 'one line per slot in the last SINCE minutes',
+    },
+    knobs: [
+      {
+        flag: 'since',
+        env: 'SINCE',
+        def: '10',
+        help: 'minutes of slots to report',
+      },
+      {
+        flag: 'slot-s',
+        env: 'SLOT_S',
+        def: "(the server's jobSlotS)",
+        help: 'slot length the ledger is bucketed by',
+      },
+      {
+        flag: 'api',
+        env: 'API',
+        def: 'http://nest_server:3002',
+        help: 'where the arms are read from',
+      },
     ],
   },
 

@@ -72,6 +72,8 @@ export default tseslint.config(
       'src/ingest/api-key.guard.ts',
       // Drill 19: organizations and plan_limits are the tenant registry and a catalog, no org_id.
       'src/entitlements/entitlements.service.ts',
+      // Drill 24: job_runs has no org_id; the rollup crosses tenants through a SECURITY DEFINER function.
+      'src/jobs/jobs.service.ts',
     ],
     rules: {
       'no-restricted-imports': [

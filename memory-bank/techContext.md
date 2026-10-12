@@ -20,6 +20,7 @@ pnpm workspace under Turborepo; `packages/` is empty.
 **Chokepoints.** `src/postgres` owns the `pg` Pool (`max: PG_POOL_MAX`, default 10; 2s connect
 timeout, which also fails a queued acquire); every statement goes through `query()` or
 `withClient()`, both via one timed `acquire()`, and `listen()` opens a dedicated LISTEN client.
+`acquire()` listens for `error` while a client is checked out (pg-pool covers idle clients only).
 Acquire wait and hold are always on `/metrics` (`pg_pool_acquire_wait_seconds`,
 `pg_pool_hold_seconds`, `pg_pool_acquire_errors_total`) and, in `QUERY_COUNTER=header` mode, on
 every response (`x-pool-wait-ms`, `x-pool-hold-ms`). Drill 22 measured the knee at 32–48 for one
@@ -101,7 +102,8 @@ trigger from migration `1790121900000` sends `pg_notify('entitlements', id)` on 
 a LISTEN client (`application_name = listen:entitlements`, reconnect after 1s, no flush on
 reconnect) deletes the key. `PUT /entitlements/plan` commits, then deletes. Only API-key traffic
 is rate-limited (`plan_limits.ingest_per_minute` = L; pro is NULL = unlimited).
-`RATE_LIMIT=fixed|fixed-rmw|bucket-rmw|bucket` (drill 21, default `bucket`): a token bucket with
+`RATE_LIMIT=fixed|fixed-rmw|bucket-rmw|bucket|memory` (drill 21; `memory`, drill 24's red arm, is
+a per-instance Map: exact on one replica, N× on N; default `bucket`): a token bucket with
 burst L and refill L/60 per second in one Lua script (`RedisService.takeToken`) on Redis `TIME`.
 Keys `rl:v2:ingest:<arm>:org:<id>`. Headers: IETF draft-11 `RateLimit-Policy`/`RateLimit`, and
 `Retry-After` on a 429. The read runs with `{ counted: false }`, so `@QueryBudget` does
@@ -129,6 +131,16 @@ count and event-loop lag (`EVENT_LOOP_LOG_MS` logs each window). Both hooks need
 report is `GET /health/deps`, which nothing routes on. `deps` is the control arm: under overload its
 check times out in the saturated pool and the LB can lose its last server.
 
+**Jobs (drill 24).** `JobsService` rolls `usage_events` into `usage_rollups` per wall-clock slot
+(`JOB_SLOT_S` 60, due `JOB_GRACE_S` 5 later) under `SCHEDULER=off|all|lease|fenced` (default
+`fenced`). A Redis lease (`lease:v1:job:usage-rollup`: `SET NX PX` + `INCR` term in one Lua script,
+compare-and-renew every TTL/3, released on shutdown) picks the runner. Correctness is the
+`job_runs (job, slot_start)` claim, inserted `ON CONFLICT DO NOTHING` in the rollup's
+transaction (`lock_timeout` 5s, `idle_in_transaction_session_timeout` 30s); catch-up runs unclaimed
+slots in the last 10. `app_rollup_usage()` is SECURITY DEFINER (cross-tenant).
+`usage_rollups` has no unique key on purpose. Every process joins the election, dev server
+included; `test:e2e` sets `SCHEDULER_TICK_MS=0`.
+
 ## Instruments and commands
 
 - **No transpiler.** Node strips types and k6 2.1.0 transpiles its own. `scripts/*.ts` run on the
@@ -143,12 +155,14 @@ check times out in the saturated pool and the LB can lose its last server.
   switch cannot reach its reader; `pnpm arms` asks the running API what it resolved.
 - **Instruments.** `db:explain`, `db:paging`, `db:search`, `db:storm`, `db:quota`, `db:claim`,
   `db:import`, `db:schema` (its `backfill` is a real operation between migrations 015 and 016),
-  `db:entitle`, `db:stampede`, `db:ratelimit`, `db:pool`, `db:bench`;
+  `db:entitle`, `db:stampede`, `db:ratelimit`, `db:pool`, `db:bench`, `db:jobs`; `pnpm replicas`;
   `pnpm load list|search|write|ingest|page|pool|drain`; `pnpm ui:paint`; `pnpm drain` (a rolling
   restart under k6 load). Each has `--help`; each plan documents its own.
 - **Drain rig.** `--profile drain` adds `api_a`/`api_b` (`extends: nest_server`, `node dist/main`
   under `init: true`, the dev server's `dist/`, a shared `/tmp/imports` volume) and HAProxy `lb`
   (`:8080`, stats `:8404`, check `GET /health` at `inter 1s fall 2 rise 2`, `retries 0`).
+- **Replica rig.** `--profile replicas`: `api` (`extends: api_a`, `deploy.replicas: 3`) behind
+  `nginx:1.30.5` (`:8088`, `server api:3002 resolve`, passive checks, read timeout 10s).
 - **Observability.** `db:stats:on|stats|stats:reset` (`pg_stat_statements`), `db:log:on|off|status`,
   `db:activity`, `logs:trace <rid>`, `trace:on|off` (collector + Jaeger under the `trace` profile).
 - **Stack.** `pnpm docker:up`; `docker:rebuild` after a dependency change (`/app/node_modules` is an
@@ -304,6 +318,15 @@ check times out in the saturated pool and the LB can lose its last server.
 - `monitorEventLoopDelay` values include the timer resolution (~10ms idle). This API's overload is
   I/O queueing; in-flight count and pool wait show it, and lag does not.
 - `docker events` keeps a short history that health-check execs overflow in ~90s; stream it.
+- nginx OSS never reads readiness and a hung replica fails nothing; only `proxy_read_timeout`
+  benches it. A sent POST is never retried (`proxy_next_upstream`).
+- The proxy MUST close idle upstream sockets first: `KEEP_ALIVE_TIMEOUT_MS` (65s) outlasts nginx's
+  60s upstream `keepalive_timeout`; otherwise Node resets requests already written. Without `resolve`, an upstream name is resolved
+  once at startup.
+- `/metrics` is per process; through an LB each scrape is one replica. Sum per replica
+  (`db:ratelimit --replicas api`).
+- Every container's Node is PID 7: never a fleet-unique id. `docker kill` is a manual stop;
+  `restart: always` leaves it down.
 
 **Nest, Next and logging**
 

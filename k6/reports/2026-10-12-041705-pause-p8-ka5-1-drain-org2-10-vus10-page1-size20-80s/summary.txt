@@ -1,0 +1,13 @@
+
+  name=pause-p8-ka5-1 org=2-10 rate=100.00/s maxvus=300 warmup=5s measured=80s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 7837
+  errors            : 3 (0.04%)
+  p50 / p95 / p99   : 6.55 / 59.83 / 5873.66 ms
+  min / avg / max   : 1.68 / 145.42 / 8226.95 ms
+  throughput        : 97.96 req/s of 100.00 offered
+  dropped           : 164 iterations never started
+  (incl. warm-up)   : p50 6.58  p95 59.79  p99 5701.18 ms
+  errors by endpoint: list 0 · search 0 · ingest 3
+  p99 by endpoint   : list 5713.04 · search 5890.54 · ingest 6197.44 ms
+
+RESULT,pause-p8-ka5-1,2-10,300,100,0,0,3,6.55,59.83,5873.66,97.96,7837

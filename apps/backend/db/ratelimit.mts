@@ -17,6 +17,7 @@ import {
   serverArms,
 } from './lib/run.mts';
 import { createHash } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
 
 const subcommand = process.argv[2];
 const SUBCOMMANDS = ['boundary', 'concurrent'];
@@ -26,7 +27,12 @@ if (!SUBCOMMANDS.includes(subcommand)) {
   process.exit(1);
 }
 
-const API = process.env.BACKEND_INTERNAL_URL || 'http://nest_server:3002';
+const API = knob(
+  'API',
+  process.env.BACKEND_INTERNAL_URL || 'http://nest_server:3002',
+);
+// Drill 24: /metrics is per process. Behind a load balancer each scrape is one replica's counters.
+const REPLICAS = knob('REPLICAS', '');
 const PLAN = knob('PLAN', 'basic');
 const ROUNDS = knobNumber('ROUNDS', subcommand === 'boundary' ? 1 : 3);
 const BURST = knobNumber('BURST', 0);
@@ -38,7 +44,7 @@ const COLD = knob('COLD', '0') === '1';
 const WINDOW_S = 60;
 const entKey = (org: string) => `ent:v1:org:${org}`;
 const rlKeys = (org: string) =>
-  ['fixed', 'fixed-rmw', 'bucket-rmw', 'bucket'].map(
+  ['fixed', 'fixed-rmw', 'bucket-rmw', 'bucket', 'memory'].map(
     (arm) => `rl:v2:ingest:${arm}:org:${org}`,
   );
 
@@ -130,10 +136,23 @@ const burst = (org: string, key: string, n: number) =>
     Array.from({ length: n }, () => shoot(key, `rl-${org}-${shotId++}`)),
   );
 
+/** Summed over every address REPLICAS resolves to, or read once at API when it is empty. */
 async function decisions(): Promise<{ allowed: number; limited: number }> {
-  const text = await (await fetch(`${API}/metrics`)).text();
+  const urls = REPLICAS
+    ? (await lookup(REPLICAS, { all: true, family: 4 })).map(
+        ({ address }) => `http://${address}:3002`,
+      )
+    : [API];
+  const texts = await Promise.all(
+    urls.map(async (url) => (await fetch(`${url}/metrics`)).text()),
+  );
   const read = (name: string) =>
-    Number(new RegExp(`^${name} (\\d+)$`, 'm').exec(text)?.[1] ?? NaN);
+    texts.reduce(
+      (sum, text) =>
+        sum +
+        Number(new RegExp(`^${name} (\\d+)$`, 'm').exec(text)?.[1] ?? NaN),
+      0,
+    );
   return {
     allowed: read('ingest_rate_limit_allowed_total'),
     limited: read('ingest_rate_limited_total'),

@@ -1,0 +1,25 @@
+ratelimit concurrent  api http://nginx:8080
+  API                  http://nginx:8080            (env)
+  REPLICAS             api                          (env)
+  PLAN                 basic                        (default)
+  ROUNDS               3                            (env)
+  BURST                0                            (default)
+  GAP_MS               1000                         (default)
+  REQUESTS             2000                         (default)
+  COLD                 0                            (default)
+
+  server arm  rateLimit=bucket
+
+  round 1  org 2223  limit 600  admitted 609/2000 in 1.11s  contract 611.1  error -0.34%
+    statuses {"201":609,"429":1391}  x-entitlement {"hit":2000}  unmetered 0  /metrics allowed 609 limited 1391
+    stored after: {"tokens":"0.3399999999981302","ts":"1791758114112"}
+
+  round 2  org 2224  limit 600  admitted 606/2000 in 0.79s  contract 607.9  error -0.31%
+    statuses {"201":606,"429":1394}  x-entitlement {"hit":2000}  unmetered 0  /metrics allowed 606 limited 1394
+    stored after: {"tokens":"0.5499999999992948","ts":"1791758114916"}
+
+  round 3  org 2225  limit 600  admitted 606/2000 in 0.73s  contract 607.3  error -0.21%
+    statuses {"201":606,"429":1394}  x-entitlement {"hit":2000}  unmetered 0  /metrics allowed 606 limited 1394
+    stored after: {"tokens":"0.079999999999051","ts":"1791758115657"}
+
+  bucket concurrent: admitted median 606  error median -0.31%  min -0.34%  max -0.21%

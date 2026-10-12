@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -214,7 +215,8 @@ export class ImportsService implements BeforeApplicationShutdown {
   ): Promise<ImportJob> {
     await mkdir(SPOOL_DIR, { recursive: true });
 
-    const staging = join(SPOOL_DIR, `upload-${Date.now()}-${process.pid}.csv`);
+    // Not the PID: every replica's Node is PID 7, and the spool volume is shared. Drill 24.
+    const staging = join(SPOOL_DIR, `upload-${randomUUID()}.csv`);
 
     await pipeline(body, createWriteStream(staging));
 

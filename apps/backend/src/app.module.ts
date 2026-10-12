@@ -8,6 +8,7 @@ import { HealthModule } from './health/health.module';
 import { ImportsModule } from './imports/imports.module';
 import { InfoModule } from './info/info.module';
 import { IngestModule } from './ingest/ingest.module';
+import { JobsModule } from './jobs/jobs.module';
 import { loggerOptions } from './observability/logger.options';
 import { LoggingInterceptor } from './observability/logging.interceptor';
 import { requestContextMiddleware } from './observability/request-context.middleware';
@@ -30,6 +31,7 @@ import { SearchModule } from './search/search.module';
     IngestModule,
     ImportsModule,
     EntitlementsModule,
+    JobsModule,
   ],
   providers: [
     {

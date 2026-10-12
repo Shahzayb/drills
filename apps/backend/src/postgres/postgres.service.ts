@@ -195,10 +195,17 @@ export class PostgresService implements OnApplicationShutdown {
     const acquiredAt = performance.now();
     recordPoolWait(acquiredAt - askedAt);
 
+    // pg-pool listens for errors on idle clients only. A server-side kill of a checked-out one
+    // (pg_terminate_backend, idle_in_transaction_session_timeout) is otherwise an uncaught exception.
+    const onError = (error: Error) =>
+      this.logger.warn({ err: error.message }, 'pool_client_error');
+    client.on('error', onError);
+
     return {
       client,
       release: (error) => {
         recordPoolHold(performance.now() - acquiredAt);
+        client.removeListener('error', onError);
         client.release(error instanceof Error ? error : undefined);
       },
     };

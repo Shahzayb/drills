@@ -42,6 +42,11 @@ export type ReadinessMode = 'local' | 'deps';
 export const READINESS: ReadinessMode =
   process.env.READINESS === 'deps' ? 'deps' : 'local';
 
+/** Idle keep-alive. Above nginx's 60s upstream `keepalive_timeout`, so the proxy closes first. Node: 5s. */
+export const KEEP_ALIVE_TIMEOUT_MS = Number(
+  process.env.KEEP_ALIVE_TIMEOUT_MS || 65_000,
+);
+
 /** Logs an `event_loop` line per window when > 0. The window is 1s otherwise. */
 export const EVENT_LOOP_LOG_MS = Number(process.env.EVENT_LOOP_LOG_MS || 0);
 
@@ -173,6 +178,11 @@ export class HealthService
   onApplicationBootstrap(): void {
     this.server = this.adapterHost.httpAdapter?.getHttpServer() as
       Server | undefined;
+    if (this.server) {
+      this.server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
+      // Must outlast keepAliveTimeout, or a slow first request on a reused socket is cut off.
+      this.server.headersTimeout = KEEP_ALIVE_TIMEOUT_MS + 1000;
+    }
     this.server?.prependListener('request', (_request, response) => {
       this.open.add(response);
       if (this.phase === 'closing') response.setHeader('connection', 'close');

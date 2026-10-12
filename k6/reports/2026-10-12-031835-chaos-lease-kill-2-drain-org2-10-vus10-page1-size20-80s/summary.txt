@@ -1,0 +1,13 @@
+
+  name=chaos-lease-kill-2 org=2-10 rate=100.00/s maxvus=300 warmup=5s measured=80s mix=list:search:ingest 6:2:2 q=export pageSize=20
+  measured requests : 8001
+  errors            : 1 (0.01%)
+  p50 / p95 / p99   : 6.06 / 58.33 / 67.77 ms
+  min / avg / max   : 1.77 / 15.28 / 142.86 ms
+  throughput        : 100.01 req/s of 100.00 offered
+  dropped           : 0 iterations never started
+  (incl. warm-up)   : p50 6.08  p95 58.21  p99 67.61 ms
+  errors by endpoint: list 0 · search 0 · ingest 1
+  p99 by endpoint   : list 9.55 · search 80.16 · ingest 7.20 ms
+
+RESULT,chaos-lease-kill-2,2-10,300,100,0,0,1,6.06,58.33,67.77,100.01,8001
