@@ -39,6 +39,13 @@ export const VUS = Number(__ENV.VUS || '10');
 // independent of how long any of them takes. VUS still bounds how many can be
 // in flight; a script using this one declares its own preAllocatedVUs/maxVUs.
 export const RATE = Number(__ENV.RATE || '50');
+// Drill 25. Which load model the default shape is: `closed` (constant-vus, every recorded run) or
+// `open` (constant-arrival-rate at RATE). MAX_VUS caps an open run's VUs; past it k6 drops.
+export const MODEL = __ENV.MODEL || 'closed';
+export const MAX_VUS = Number(__ENV.MAX_VUS || '1000');
+if (MODEL !== 'closed' && MODEL !== 'open') {
+  throw new Error(`MODEL '${MODEL}' is not closed or open`);
+}
 export const WARMUP = __ENV.WARMUP || '20s';
 export const DURATION = __ENV.DURATION || '60s';
 export const PAGE = Number(__ENV.PAGE || '1');
@@ -131,13 +138,26 @@ type MeasureScenario = Scenario & {
   preAllocatedVUs?: number;
 };
 
-/** The default shape: flat concurrency for a fixed window. */
+/**
+ * The default shape: flat concurrency for a fixed window, or with MODEL=open a flat arrival rate.
+ * Open starts each request on schedule whatever the last one is doing. See
+ * plans/2026-10-13_drill-25-coordinated-omission.md.
+ */
 const flat = (): MeasureScenario =>
-  ({
-    executor: 'constant-vus',
-    vus: VUS,
-    duration: DURATION,
-  }) as MeasureScenario;
+  (MODEL === 'open'
+    ? {
+        executor: 'constant-arrival-rate',
+        rate: RATE,
+        timeUnit: '1s',
+        duration: DURATION,
+        preAllocatedVUs: VUS,
+        maxVUs: MAX_VUS,
+      }
+    : {
+        executor: 'constant-vus',
+        vus: VUS,
+        duration: DURATION,
+      }) as MeasureScenario;
 
 /**
  * What the run will actually do, read off the script's own measured stage
