@@ -205,8 +205,9 @@ by four 20s calibration runs (orgs 2, 3, 10, 15: means 5.39, 5.07, 5.23, 2.99ms)
 
 - Little's law holds for the closed runs: 10 ÷ 1,059.30 = 9.44ms (measured mean 9.35); 50 ÷ 1,058.23
   = 47.25ms (47.17). Five times the VUs bought the same throughput and five times the latency.
-- At its own X (1,060 req/s) the open model's p50 is **485–490×** the closed run's (1,931–1,952 against
-  3.98ms). The p99 per 10s window grew within a run (1,817 → 2,423ms), and Postgres ran at ~980% CPU.
+- At its own X (1,060 req/s) the open model's p50 is **456–490×** the closed runs' (1,931–1,952 against
+  3.98–4.23ms). In run 2 the p99 per 10s window rose from 1,817 to 2,423ms over five windows. Postgres
+  ran at ~980% CPU during run 1.
 - At 1,400 offered, served req/s (1,337–1,347) counts failures. Successful requests per second were
   752–810, **below** the closed model's 1,059: the pool spends its time on requests that then fail.
 - Capacity sits between 850 and 1,060. At 850 one run held (p95 17ms) and one queued (p95 322ms).
@@ -233,7 +234,7 @@ stall as 2 slow samples (one per VU) and ~800–1,100 requests it never sent.
 | 4% whale search, 400/s, 2 | fast 500s | 721 (3.00%) | 466.30 | 62.30 | never |
 | B open at 1,400, 1 | 2s pool acquire | 35,682 (44.16%) + 3,206 dropped | 2,968.07 | 2,967.42 | never |
 
-- Slow failures: dropping them cut p99 from 150ms to 4ms (**36×**) and removed every whale request.
+- Slow failures: dropping them cut p99 from 150ms to 4ms (**36–37×**) and removed every whale request.
 - Fast failures: dropping them raised p99 from 62–77ms to 466ms (**6.1–7.5×**). Counting them in
   made p99 look better.
 - At 2s acquire failures, both views agree on p99 and both hide that 46% of offered requests never
@@ -309,7 +310,7 @@ whale p99 (49.77ms) is the p99 at 10 requests in flight: at half that throughput
 |---|---|---|---|
 | 1 | means ±25%, p99 ≥ 10×, mixed p50/p95 lower | means +11–15%, p99 23.2–25.1×, p50 2.25 vs 4.88–5.09 | hit |
 | 2 | closed 10 VUs: 0 errors, fast p99 near unloaded | 0 errors; fast-slice p99 8.79–9.75ms (4.03–4.08 unloaded) | hit, fast p99 doubled from Node's queue |
-| 3 | open at X: p50 ≥ 10×, errors or drops | p50 485–490×, 4.4–4.7% errors, 1,218–2,102 dropped | hit |
+| 3 | open at X: p50 ≥ 10×, errors or drops | p50 456–490×, 4.4–4.7% errors, 1,218–2,102 dropped | hit |
 | 4 | stall: closed p99 < 2× move, open ≥ 1s | closed 6.45–6.90ms, open 1,785–1,827ms | hit |
 | 5 | dropping timeouts flatters p99 | 150ms → 4ms; time to success `never` | hit; the fast-failure direction was not predicted |
 | 6 | too few VUs: drops and better-looking percentiles | 20 VUs: p50 5.20ms, 2,354 dropped | hit |
@@ -338,5 +339,5 @@ of offered requests that succeeded within the target (98.0% within 150ms) and th
 beside it. Two rules make it honest:
 - The denominator is offered requests: sent + failed + timed out + dropped by the generator.
 - A latency number is never printed without its success rate.
-Dropping errors moves p99 either way: down 36× when failures are timeouts, up 6–7.5× when they are
+Dropping errors moves p99 either way: down 36–37× when failures are timeouts, up 6–7.5× when they are
 fast 500s. Either way, it describes a population nobody asked about.
